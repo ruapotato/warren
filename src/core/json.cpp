@@ -215,6 +215,106 @@ struct JsonParser {
     }
 };
 
+namespace {
+
+void escape_into(const std::string &s, std::string *out) {
+    out->push_back('"');
+    for (char c : s) {
+        switch (c) {
+            case '"': out->append("\\\""); break;
+            case '\\': out->append("\\\\"); break;
+            case '\n': out->append("\\n"); break;
+            case '\r': out->append("\\r"); break;
+            case '\t': out->append("\\t"); break;
+            default:
+                // Control characters have to be escaped or the
+                // result is not JSON, and a node named with a stray
+                // byte should not break a reply.
+                if (uint8_t(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", uint8_t(c));
+                    out->append(buf);
+                } else {
+                    out->push_back(c);
+                }
+        }
+    }
+    out->push_back('"');
+}
+
+void number_into(double v, std::string *out) {
+    // An integer prints as an integer. A reply full of "3.0" where
+    // the reader wanted 3 is a reply that invites a bug at the far
+    // end, and a schema is much easier to read without them.
+    if (std::isfinite(v) && v == std::floor(v) && std::fabs(v) < 1e15) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%lld", (long long)v);
+        out->append(buf);
+        return;
+    }
+    if (!std::isfinite(v)) {
+        // JSON has no infinity. Null is the honest answer and is at
+        // least parseable, which NaN is not.
+        out->append("null");
+        return;
+    }
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%.9g", v);
+    out->append(buf);
+}
+
+void write_into(const Json &j, std::string *out, int indent, int depth) {
+    const std::string pad = indent > 0 ? std::string(size_t(indent * (depth + 1)), ' ') : std::string();
+    const std::string close_pad = indent > 0 ? std::string(size_t(indent * depth), ' ') : std::string();
+    const char *nl = indent > 0 ? "\n" : "";
+    switch (j.type()) {
+        case Json::Type::Null: out->append("null"); break;
+        case Json::Type::Bool: out->append(j.boolean() ? "true" : "false"); break;
+        case Json::Type::Number: number_into(j.number(), out); break;
+        case Json::Type::String: escape_into(j.string(), out); break;
+        case Json::Type::Array: {
+            if (j.size() == 0) { out->append("[]"); break; }
+            out->append("[");
+            out->append(nl);
+            for (size_t i = 0; i < j.size(); i++) {
+                out->append(pad);
+                write_into(j[i], out, indent, depth + 1);
+                if (i + 1 < j.size()) out->append(",");
+                out->append(nl);
+            }
+            out->append(close_pad);
+            out->append("]");
+            break;
+        }
+        case Json::Type::Object: {
+            const auto &fields = j.fields();
+            if (fields.empty()) { out->append("{}"); break; }
+            out->append("{");
+            out->append(nl);
+            size_t i = 0;
+            for (const auto &kv : fields) {
+                out->append(pad);
+                escape_into(kv.first, out);
+                out->append(indent > 0 ? ": " : ":");
+                write_into(kv.second, out, indent, depth + 1);
+                if (++i < fields.size()) out->append(",");
+                out->append(nl);
+            }
+            out->append(close_pad);
+            out->append("}");
+            break;
+        }
+    }
+}
+
+}  // namespace
+
+std::string Json::to_string(int indent) const {
+    std::string out;
+    write_into(*this, &out, indent, 0);
+    return out;
+}
+
 Json Json::parse(const char *text, size_t length, std::string *error) {
     Json root;
     if (!text || !length) {

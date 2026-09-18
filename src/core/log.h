@@ -28,6 +28,9 @@ const std::string &log_tail();
 // trailing newline, while the log's own mutex is held -- so it must
 // not log, and must not block.
 using LogSink = void (*)(LogLevel, const char *);
+// Hand stdout over to something that is not the log -- the agent
+// protocol -- and send every message to stderr instead.
+void log_reserve_stdout();
 void log_add_sink(LogSink sink);
 void log_remove_sink(LogSink sink);
 

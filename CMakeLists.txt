@@ -71,7 +71,7 @@ add_custom_target(warren_codegen DEPENDS ${GL_GEN} ${VK_GEN} ${SHADER_GEN})
 
 set(WARREN_DIRS core core/math platform audio net ui editor render
                   render/shaders/generated scene physics script plugin
-                  resource app)
+                  resource agent app)
 set(WARREN_SRC "")
 foreach(d ${WARREN_DIRS})
   file(GLOB s CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/${d}/*.cpp)

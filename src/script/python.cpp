@@ -289,6 +289,45 @@ bool Python::init(Engine *engine, const std::vector<std::string> &search_paths) 
     }
     g_running = true;
 
+    // PRINT GOES TO THE ENGINE LOG, NOT TO THE PROCESS'S STDOUT.
+    //
+    // Two reasons, and either alone would be enough. A script's
+    // print() should appear in the editor console, where the person
+    // running it is looking, and until now it did not. And when the
+    // engine is being driven over stdout by a program -- the agent
+    // interface -- a bare print() in a script is not output, it is a
+    // corrupted reply and a dead session.
+    //
+    // Buffered to the newline because print() writes the text and the
+    // newline as two calls, and a log line per call would break every
+    // message in half. stderr goes to warn rather than error so that
+    // a script writing to it does not make error_count(), which the
+    // demos and tests use as a pass/fail, report a failure.
+    static const char *kRedirect =
+        "import sys, warren\n"
+        "class _WarrenOut:\n"
+        "    def __init__(self, sink):\n"
+        "        self._sink = sink\n"
+        "        self._buf = ''\n"
+        "    def write(self, text):\n"
+        "        self._buf += text\n"
+        "        while '\\n' in self._buf:\n"
+        "            line, self._buf = self._buf.split('\\n', 1)\n"
+        "            self._sink(line)\n"
+        "        return len(text)\n"
+        "    def flush(self):\n"
+        "        if self._buf:\n"
+        "            self._sink(self._buf)\n"
+        "            self._buf = ''\n"
+        "    def isatty(self):\n"
+        "        return False\n"
+        "sys.stdout = _WarrenOut(warren.log)\n"
+        "sys.stderr = _WarrenOut(warren.warn)\n";
+    if (PyRun_SimpleString(kRedirect) != 0) {
+        PyErr_Clear();
+        WR_WARN("python: could not redirect print() to the log");
+    }
+
     for (const std::string &p : search_paths) add_search_path(p);
     WR_INFO("python: %s, %zu classes exposed", version().c_str(),
             ClassDB::all().size());
@@ -444,7 +483,8 @@ bool Python::attach_script(Node *node, const std::string &module_or_path) {
     return true;
 }
 
-std::string Python::eval_repr(const std::string &expression) {
+std::string Python::eval_repr(const std::string &expression, bool *ok) {
+    if (ok) *ok = false;
     if (!g_running) return "<python is not running>";
     PyObject *main = PyImport_AddModule("__main__");
     PyObject *globals = PyModule_GetDict(main);
@@ -465,6 +505,7 @@ std::string Python::eval_repr(const std::string &expression) {
     std::string out = repr ? PyUnicode_AsUTF8(repr) : "?";
     Py_XDECREF(repr);
     Py_DECREF(result);
+    if (ok) *ok = true;
     return out;
 }
 

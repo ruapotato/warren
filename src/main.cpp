@@ -6,6 +6,7 @@
 #include <cstring>
 #include <string>
 
+#include "agent/agent.h"
 #include "app/engine.h"
 #if WARREN_PYTHON
 #include "script/python.h"
@@ -627,6 +628,8 @@ int main(int argc, char **argv) {
     cfg.window.backend = rhi::Backend::Vulkan;
     std::string demo = "portals";
     std::string stub_path;
+    std::string schema_path;
+    bool agent_mode = false;
     std::string shadow_dump;
     std::string save_scene_path, load_scene_path, data_directory;
     bool bench = false;
@@ -711,6 +714,17 @@ int main(int argc, char **argv) {
             shadow_dump = next("shadows.png");
         } else if (a == "--stubs") {
             stub_path = next("warren.pyi");
+        } else if (a == "--schema") {
+            schema_path = next("-");
+        } else if (a == "--agent") {
+            agent_mode = true;
+            // An agent drives the frames itself, and a window that
+            // steals focus while a script is running is a nuisance;
+            // but a screenshot needs a real surface, so the window
+            // stays -- just out of the way, and never vsynced, since
+            // vsync would cap a batch of steps at 60 a second.
+            cfg.window.vsync = false;
+            if (!cfg.fixed_delta) cfg.fixed_delta = 1.0f / 60.0f;
         } else if (a == "--no-python") {
             cfg.python = false;
         } else if (a == "--plugins") {
@@ -744,6 +758,8 @@ int main(int argc, char **argv) {
                 "  --script-path DIR     add a directory to sys.path\n"
                 "  --no-python           do not start the interpreter\n"
                 "  --stubs FILE          write warren.pyi and exit\n"
+                "  --schema [FILE]       write the API as JSON and exit (- for stdout)\n"
+                "  --agent               JSON commands on stdin, replies on stdout\n"
                 "  --no-sky              flat clear instead of the sky\n"
                 "  --clear RRGGBB        the clear colour, for spotting holes\n"
                 "  --bench               time 600 frames and print percentiles\n"
@@ -776,6 +792,40 @@ int main(int argc, char **argv) {
     // window, no device, no frame loop -- just registration, plugins
     // (which tolerate a context with nothing in it, and register
     // their own classes), and the file.
+    // The schema is the stubs' twin: the same table, written for a
+    // program instead of for an editor's autocomplete, and like the
+    // stubs it needs no device and no window.
+    if (!schema_path.empty()) {
+        // Before anything registers, because registration logs.
+        if (schema_path == "-") log_reserve_stdout();
+        ClassDB::register_all();
+        PluginHost host;
+        if (cfg.plugin_directory != "-") {
+            PluginContext ctx;
+            const std::string dir = PluginHost::resolve_directory(cfg.plugin_directory);
+            ctx.directory = dir.c_str();
+            host.load_directory(dir, ctx);
+            ClassDB::register_all();
+        }
+        const std::string text = agent_schema("", false).to_string(2);
+        bool wrote = true;
+        if (schema_path == "-") {
+            std::fwrite(text.data(), 1, text.size(), stdout);
+            std::fputc('\n', stdout);
+        } else if (FILE *f = std::fopen(schema_path.c_str(), "wb")) {
+            std::fwrite(text.data(), 1, text.size(), f);
+            std::fputc('\n', f);
+            std::fclose(f);
+            WR_INFO("schema: %s (%zu classes, %zu bytes)", schema_path.c_str(),
+                    ClassDB::all().size(), text.size());
+        } else {
+            WR_ERROR("could not write %s", schema_path.c_str());
+            wrote = false;
+        }
+        host.unload_all();
+        return wrote ? 0 : 1;
+    }
+
     if (!stub_path.empty()) {
         ClassDB::register_all();
         PluginHost host;
@@ -814,12 +864,19 @@ int main(int argc, char **argv) {
             e.window()->set_title("Warren -- " + e.status_line() + extra);
         }
     };
-    engine.record_timings(bench);
+    // An agent that asks for stats wants numbers in them; the cost
+    // is a ring buffer of doubles.
+    engine.record_timings(bench || agent_mode);
     if (!engine.init(cfg)) return 1;
     if (!data_directory.empty())
         ResourceLoader::set_base_directory(data_directory);
     if (!load_scene_path.empty()) engine.editor()->load_scene(load_scene_path);
     if (!save_scene_path.empty()) engine.editor()->save_scene(save_scene_path);
+    if (agent_mode) {
+        const int rc = agent_serve(&engine);
+        engine.shutdown();
+        return rc;
+    }
     int rc = engine.run();
     if (bench) {
         // The first thirty frames are pipeline warm-up, the first

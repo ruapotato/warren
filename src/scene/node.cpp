@@ -424,7 +424,13 @@ static void register_node_classes() {
         .prop("basis", &Node3D::basis, &Node3D::set_basis)
         .prop("rotation", &Node3D::rotation, &Node3D::set_rotation)
         .transient()
-        .prop("euler", &Node3D::euler, &Node3D::set_euler)
+        // NOT a rotation about x, y and z: to_euler_yxz packs the
+        // three angles in the order it applies them, so .x is yaw,
+        // a turn about Y. The hint says so because this is the one
+        // place every reader of the reflection -- the inspector, the
+        // stubs, the schema -- will see it.
+        .prop("euler", &Node3D::euler, &Node3D::set_euler,
+              "radians, packed as (yaw, pitch, roll)")
         .transient()
         .prop("scale", &Node3D::scale, &Node3D::set_scale)
         .transient()

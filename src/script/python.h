@@ -58,8 +58,11 @@ public:
     // This is the Godot-shaped path: one file, one class, attached.
     static bool attach_script(Node *node, const std::string &module_or_path);
 
-    // For a console.
-    static std::string eval_repr(const std::string &expression);
+    // For a console. `ok`, where given, says whether the string is a
+    // repr or an exception message -- a console can print both the
+    // same way, but a caller that has to act on the answer cannot
+    // tell them apart by looking.
+    static std::string eval_repr(const std::string &expression, bool *ok = nullptr);
 
     // Where scripts are looked for. Added to sys.path.
     static void add_search_path(const std::string &path);

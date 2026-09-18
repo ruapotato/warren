@@ -63,6 +63,52 @@ public:
     const std::vector<Json> &items() const { return array_; }
     const std::map<std::string, Json> &fields() const { return object_; }
 
+    // --- building ---------------------------------------------------
+    //
+    // The engine answers questions in JSON as well as reading it, so
+    // the type has to work in both directions. An agent driving this
+    // thing needs structured replies rather than log lines it has to
+    // guess the shape of.
+    static Json object() {
+        Json j;
+        j.type_ = Type::Object;
+        return j;
+    }
+    static Json array() {
+        Json j;
+        j.type_ = Type::Array;
+        return j;
+    }
+    Json &set(const std::string &key, Json value) {
+        type_ = Type::Object;
+        object_[key] = std::move(value);
+        return *this;
+    }
+    Json &set(const std::string &key, const char *value) {
+        return set(key, Json(std::string(value)));
+    }
+    Json &set(const std::string &key, const std::string &value) {
+        return set(key, Json(value));
+    }
+    Json &set(const std::string &key, double value) {
+        return set(key, Json(value));
+    }
+    Json &set(const std::string &key, int value) {
+        return set(key, Json(double(value)));
+    }
+    Json &set(const std::string &key, bool value) {
+        return set(key, Json(value));
+    }
+    Json &push(Json value) {
+        type_ = Type::Array;
+        array_.push_back(std::move(value));
+        return *this;
+    }
+
+    // `indent` of zero is one line, which is what a protocol wants;
+    // anything else is for a person reading a schema dump.
+    std::string to_string(int indent = 0) const;
+
     // Null on a parse error, with `error` saying where.
     static Json parse(const char *text, size_t length,
                       std::string *error = nullptr);

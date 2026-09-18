@@ -7,6 +7,9 @@
 
 namespace wr {
 namespace {
+bool g_stdout_is_protocol = false;
+}
+namespace {
 
 LogLevel g_level = LogLevel::Info;
 std::string g_tail;
@@ -59,8 +62,16 @@ void log_write(LogLevel l, const char *file, int line, const char *fmt, ...) {
 
     std::lock_guard<std::mutex> lock(g_mutex);
     if (l >= LogLevel::Error) g_errors++;
-    std::fputs(line_buf, l >= LogLevel::Warn ? stderr : stdout);
-    if (l >= LogLevel::Warn) std::fflush(stderr);
+    // EVERYTHING TO STDERR WHEN STDOUT IS A PROTOCOL.
+    //
+    // The agent interface answers on stdout, one JSON object per
+    // line. A stray info line in the middle of that is not a log
+    // message the reader can ignore -- it is a parse error, and the
+    // session is over. So when the engine is being driven rather than
+    // watched, the log goes where it cannot break anything.
+    FILE *out = g_stdout_is_protocol || l >= LogLevel::Warn ? stderr : stdout;
+    std::fputs(line_buf, out);
+    if (out == stderr) std::fflush(stderr);
     g_tail += line_buf;
     // The sinks get the body without the level prefix or the newline:
     // a console has its own idea of how to show a warning, and
@@ -73,6 +84,8 @@ void log_write(LogLevel l, const char *file, int line, const char *fmt, ...) {
 }
 
 const std::string &log_tail() { return g_tail; }
+
+void log_reserve_stdout() { g_stdout_is_protocol = true; }
 
 void log_add_sink(LogSink sink) {
     if (!sink) return;
