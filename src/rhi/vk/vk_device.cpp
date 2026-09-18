@@ -317,6 +317,7 @@ public:
                       uint64_t offset) override;
     TextureH create_texture(const TextureDesc &d, const void *initial) override;
     void destroy(TextureH h) override;
+    void generate_mips(TextureH h) override;
     void write_texture(TextureH h, const void *data, uint64_t size, uint32_t mip,
                        uint32_t layer) override;
     TextureDesc texture_desc(TextureH h) const override;
@@ -370,6 +371,7 @@ private:
     bool create_swapchain(uint32_t w, uint32_t h);
     void destroy_swapchain();
     void flush_uploads(VkCommandBuffer cb);
+    void record_mips(VkCommandBuffer cb, VkTextureRes &t);
 
     // STAGED WRITES THAT HAVE NOT BEEN RECORDED YET.
     //
@@ -399,6 +401,10 @@ private:
     // Record one staged copy straight into the open command buffer.
     void record_copy(VkCommandBuffer cb, uint64_t src_offset, const Pending &p);
     std::vector<Pending> pending_uploads_;
+    // Textures whose chain has to be filled in once their level
+    // zero has actually been copied, which on this backend is not
+    // until a command buffer is open.
+    std::vector<TextureH> pending_mips_;
     bool inside_render_pass_ = false;
 
     struct Frame {
@@ -1152,6 +1158,9 @@ TextureH VkDeviceImpl::create_texture(const TextureDesc &d, const void *initial)
     if (initial) {
         uint64_t bytes = uint64_t(d.width) * d.height * format_block_size(d.format);
         write_texture(h, initial, bytes, 0, 0);
+        // Given its pixels and asked for a chain: fill the rest in,
+        // because nothing else is going to.
+        if (mips > 1) generate_mips(h);
     }
     return h;
 }
@@ -1908,6 +1917,46 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
         }
         record_copy(cb, uint64_t(at), p);
     }
+    // After the copies, in the same buffer: a chain built from a
+    // level zero that has not landed yet would be a chain of
+    // whatever was there before.
+    std::vector<TextureH> mips;
+    mips.swap(pending_mips_);
+    for (TextureH h : mips)
+        if (VkTextureRes *t = textures.get(h)) record_mips(cb, *t);
+}
+
+void VkDeviceImpl::generate_mips(TextureH h) {
+    const VkTextureRes *t = textures.get(h);
+    if (!t || t->desc.mips <= 1) return;
+    pending_mips_.push_back(h);
+}
+
+// The blit chain, shared by the device-level call above and the
+// command-list one a renderer uses on a texture it has just drawn to.
+void VkDeviceImpl::record_mips(VkCommandBuffer cb, VkTextureRes &t) {
+    if (t.desc.mips <= 1) return;
+    int32_t w = int32_t(t.desc.width), ht = int32_t(t.desc.height);
+    transition(cb, t, VK_IMAGE_LAYOUT_GENERAL);
+    for (uint32_t m = 1; m < t.desc.mips; m++) {
+        VkImageBlit2 b{VK_STRUCTURE_TYPE_IMAGE_BLIT_2};
+        b.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m - 1, 0, 1};
+        b.srcOffsets[1] = {w, ht, 1};
+        w = std::max(1, w / 2);
+        ht = std::max(1, ht / 2);
+        b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m, 0, 1};
+        b.dstOffsets[1] = {w, ht, 1};
+        VkBlitImageInfo2 bi{VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2};
+        bi.srcImage = t.image;
+        bi.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        bi.dstImage = t.image;
+        bi.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        bi.regionCount = 1;
+        bi.pRegions = &b;
+        bi.filter = VK_FILTER_LINEAR;
+        vkCmdBlitImage2(cb, &bi);
+    }
+    transition(cb, t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 // ------------------------------------------------------------- the frame
@@ -2276,29 +2325,7 @@ void VkCommandListImpl::copy_buffer_to_texture(BufferH s, uint64_t so, TextureH 
 }
 
 void VkCommandListImpl::generate_mips(TextureH h) {
-    VkTextureRes *t = dev_->textures.get(h);
-    if (!t || t->desc.mips <= 1) return;
-    int32_t w = int32_t(t->desc.width), ht = int32_t(t->desc.height);
-    dev_->transition(cb, *t, VK_IMAGE_LAYOUT_GENERAL);
-    for (uint32_t m = 1; m < t->desc.mips; m++) {
-        VkImageBlit2 b{VK_STRUCTURE_TYPE_IMAGE_BLIT_2};
-        b.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m - 1, 0, 1};
-        b.srcOffsets[1] = {w, ht, 1};
-        w = std::max(1, w / 2);
-        ht = std::max(1, ht / 2);
-        b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, m, 0, 1};
-        b.dstOffsets[1] = {w, ht, 1};
-        VkBlitImageInfo2 bi{VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2};
-        bi.srcImage = t->image;
-        bi.srcImageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        bi.dstImage = t->image;
-        bi.dstImageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        bi.regionCount = 1;
-        bi.pRegions = &b;
-        bi.filter = VK_FILTER_LINEAR;
-        vkCmdBlitImage2(cb, &bi);
-    }
-    dev_->transition(cb, *t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (VkTextureRes *t = dev_->textures.get(h)) dev_->record_mips(cb, *t);
 }
 
 void VkCommandListImpl::texture_barrier(TextureH h, TextureUsage from,

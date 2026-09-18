@@ -1,8 +1,82 @@
 #include "procgen/noise.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace wr::gen {
+
+namespace {
+
+// Positive modulo: -1 % 8 must be 7, not -1, or the lattice does not
+// join up at the origin and the seam is visible down one edge.
+inline int32_t wrap(int32_t v, int period) {
+    if (period <= 0) return v;
+    const int32_t m = v % period;
+    return m < 0 ? m + period : m;
+}
+
+}  // namespace
+
+float perlin_tiled(const Vec3 &p, uint32_t seed, int period) {
+    const int32_t xi = int32_t(std::floor(p.x));
+    const int32_t yi = int32_t(std::floor(p.y));
+    const int32_t zi = int32_t(std::floor(p.z));
+    const float xf = p.x - float(xi);
+    const float yf = p.y - float(yi);
+    const float zf = p.z - float(zi);
+    const float u = fade(xf), v = fade(yf), w = fade(zf);
+
+    float n[8];
+    for (int i = 0; i < 8; i++) {
+        const int ox = i & 1, oy = (i >> 1) & 1, oz = (i >> 2) & 1;
+        const Vec3 g = gradient(hash3(wrap(xi + ox, period), wrap(yi + oy, period),
+                                      wrap(zi + oz, period), seed));
+        n[i] = g.x * (xf - float(ox)) + g.y * (yf - float(oy)) +
+               g.z * (zf - float(oz));
+    }
+    const float nx00 = lerp(n[0], n[1], u);
+    const float nx10 = lerp(n[2], n[3], u);
+    const float nx01 = lerp(n[4], n[5], u);
+    const float nx11 = lerp(n[6], n[7], u);
+    return lerp(lerp(nx00, nx10, v), lerp(nx01, nx11, v), w);
+}
+
+float fbm_tiled(const Vec3 &p, uint32_t seed, int octaves, int period,
+                float lacunarity, float gain) {
+    float sum = 0.0f, amplitude = 1.0f, total = 0.0f;
+    Vec3 q = p;
+    int octave_period = period;
+    for (int i = 0; i < octaves; i++) {
+        sum += perlin_tiled(q, seed + uint32_t(i) * 9781u, octave_period) * amplitude;
+        total += amplitude;
+        // The period scales with the frequency, so every octave has
+        // the same physical wavelength of repeat and the sum is
+        // periodic too.
+        q = q * lacunarity;
+        octave_period = int(float(octave_period) * lacunarity + 0.5f);
+        amplitude *= gain;
+    }
+    return total > 0.0f ? sum / total : 0.0f;
+}
+
+float worley_tiled(const Vec3 &p, uint32_t seed, int period) {
+    const int32_t xi = int32_t(std::floor(p.x));
+    const int32_t yi = int32_t(std::floor(p.y));
+    const int32_t zi = int32_t(std::floor(p.z));
+    float nearest = 3.0f;
+    for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                const int32_t cx = xi + dx, cy = yi + dy, cz = zi + dz;
+                const uint32_t h = hash3(wrap(cx, period), wrap(cy, period),
+                                         wrap(cz, period), seed);
+                const Vec3 feature(float(cx) + float(h & 0x3FF) / 1023.0f,
+                                   float(cy) + float((h >> 10) & 0x3FF) / 1023.0f,
+                                   float(cz) + float((h >> 20) & 0x3FF) / 1023.0f);
+                nearest = std::min(nearest, (feature - p).length());
+            }
+    return nearest;
+}
 
 float perlin(const Vec3 &p, uint32_t seed, Vec3 *out_gradient) {
     const int32_t xi = int32_t(std::floor(p.x));

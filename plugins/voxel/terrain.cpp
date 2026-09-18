@@ -139,6 +139,7 @@ void VoxelTerrain3D::queue_chunk(const ChunkCoord &c) {
     chunks_[c] = std::move(chunk);
 
     ContourRequest req;
+    req.palette = &gen::Palette::instance();
     req.field = edited_.get();
     req.origin = chunk_origin(c);
     // THE ONLY LINE LEVEL OF DETAIL NEEDS IN THE MESHER. The same

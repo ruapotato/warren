@@ -31,6 +31,7 @@
 #include "core/json.h"
 #include "core/log.h"
 #include "procgen/sdf.h"
+#include "procgen/texture.h"
 #include "render/mesh.h"
 
 using namespace wr;
@@ -460,6 +461,176 @@ int main() {
                        &error);
         check(error.find("child 1") != std::string::npos,
               "and a bad child says which child it was");
+    }
+
+    // ================================================== surfaces
+    //
+    // The same idea one dimension down: a description in, an image
+    // out. Three things have to hold or the textures are useless.
+
+    // ------------------------------------- IT HAS TO TILE
+    //
+    // A texture with a seam cannot go on a wall, and a seam is
+    // invisible in a thumbnail and obvious on a building.
+    //
+    // Checked on the FUNCTION, not on the picture. An earlier
+    // version compared the pixels down one edge against the average
+    // step inside the image, and accused the checkerboard of a seam
+    // because a checkerboard's steps are all 255 -- measuring the
+    // pattern's contrast rather than its periodicity. What tiling
+    // actually means is that the field is the same one unit along,
+    // so that is what this asks.
+    {
+        struct Case { const char *name; const char *spec; };
+        const std::vector<Case> cases = {
+            {"noise", R"({"pattern":"noise","scale":5,"octaves":5})"},
+            {"ridged", R"({"pattern":"ridged","scale":4,"octaves":4})"},
+            {"cells", R"({"pattern":"cells","scale":6})"},
+            {"bricks", R"({"pattern":"bricks","rows":8,"columns":4,"variation":0.4})"},
+            {"bricks, odd", R"({"pattern":"bricks","rows":5,"columns":3})"},
+            {"checker", R"({"pattern":"checker","size":8})"},
+            {"stripes", R"({"pattern":"stripes","count":6})"},
+            {"dots", R"({"pattern":"dots","count":6})"},
+            {"wave", R"({"pattern":"wave","count":4})"},
+            {"warped", R"({"pattern":"wave","count":10,"warp":{"pattern":"noise",)"
+                       R"("scale":3},"warp_amount":0.4})"},
+            {"blended", R"({"op":"blend","mode":"overlay","of":[)"
+                        R"({"pattern":"noise","scale":6},{"pattern":"cells","scale":9}]})"},
+        };
+        size_t seams = 0;
+        for (const Case &c : cases) {
+            std::string error;
+            const Json spec = Json::parse(c.spec, &error);
+            float worst = 0.0f;
+            for (int i = 0; i < 3000; i++) {
+                const float u = uniform(0.0f, 1.0f), v = uniform(0.0f, 1.0f);
+                const float here = sample_pattern(spec, u, v, &error);
+                // One tile along in each direction, and diagonally,
+                // which catches a pattern that wraps on one axis and
+                // not the other.
+                worst = std::max(worst, std::fabs(here - sample_pattern(spec, u + 1, v, &error)));
+                worst = std::max(worst, std::fabs(here - sample_pattern(spec, u, v + 1, &error)));
+                worst = std::max(worst, std::fabs(here - sample_pattern(spec, u - 1, v + 1, &error)));
+            }
+            if (!error.empty()) {
+                std::printf("  FAIL  %s did not render: %s\n", c.name, error.c_str());
+                seams++;
+                continue;
+            }
+            // A whole level of eight-bit quantisation is 1/255.
+            if (worst > 1.0f / 255.0f) {
+                std::printf("  FAIL  %s does not tile: differs by %.3f one unit along\n",
+                            c.name, double(worst));
+                seams++;
+            }
+        }
+        check(seams == 0, "every pattern is exactly periodic over the unit square");
+
+        // A gradient is the exception and is meant to be: it runs
+        // from one end to the other, so it cannot join up with
+        // itself. Worth pinning down so that nobody "fixes" it.
+        std::string error;
+        const Json ramp = Json::parse(R"({"pattern":"gradient","axis":"x"})", &error);
+        check(std::fabs(sample_pattern(ramp, 0.99f, 0.5f, &error) -
+                        sample_pattern(ramp, 0.01f, 0.5f, &error)) > 0.9f,
+              "a gradient deliberately does not tile; it is a mask, not a surface");
+    }
+
+    // ------------------------------------- the same spec twice
+    {
+        std::string error;
+        const Json spec = Json::parse(
+            R"({"op":"blend","mode":"multiply","of":[{"pattern":"noise","scale":7,)"
+            R"("octaves":5,"seed":9},{"pattern":"cells","scale":5,"seed":3}]})",
+            &error);
+        const Image a = render_height(spec, 64, &error);
+        const Image b = render_height(spec, 64, &error);
+        check(a.pixels == b.pixels, "the same description gives the same pixels");
+        // And a different seed gives a different image, or the seed
+        // is not doing anything.
+        const Json other = Json::parse(
+            R"({"pattern":"noise","scale":7,"octaves":5,"seed":10})", &error);
+        check(render_height(other, 64, &error).pixels !=
+                  render_height(Json::parse(R"({"pattern":"noise","scale":7,)"
+                                            R"("octaves":5,"seed":11})", &error),
+                                64, &error)
+                      .pixels,
+              "and a different seed gives a different one");
+    }
+
+    // ------------------------------------- what comes out
+    {
+        std::string error;
+        // A flat field has no slope, so its normal map must be
+        // exactly the neutral one. Anything else and every flat
+        // surface in the game gets a faint tilt.
+        const Image flat = render_height(
+            Json::parse(R"({"pattern":"constant","value":0.5})", &error), 32, &error);
+        const Image normal = normal_from_height(flat, 1.0f);
+        bool neutral = true;
+        for (uint32_t y = 0; y < 32; y++)
+            for (uint32_t x = 0; x < 32; x++) {
+                const uint8_t *p = normal.at(x, y);
+                if (p[0] != 128 || p[1] != 128 || p[2] != 255) neutral = false;
+            }
+        check(neutral, "a flat height field gives an exactly neutral normal map");
+
+        // The ramp: black end and white end of the field must come
+        // out as the first and last colour.
+        const SurfaceImages s = render_surface(
+            Json::parse(R"({"pattern":"gradient","axis":"x","colours":["#000000",)"
+                        R"("#ffffff"]})",
+                        &error),
+            64, &error);
+        check(error.empty() && !s.albedo.empty(), "a surface renders");
+        check(s.albedo.at(0, 32)[0] < 40, "the low end of the field takes the first colour");
+        check(s.albedo.at(63, 32)[0] > 215, "and the high end takes the last");
+        // Dark is rougher by default, because mortar, rust and wear
+        // all are.
+        check(s.orm.at(0, 32)[1] > s.orm.at(63, 32)[1],
+              "and roughness follows the field, dark being rougher");
+
+        const SurfaceImages fixed = render_surface(
+            Json::parse(R"({"pattern":"gradient","roughness":0.25,"metallic":1})",
+                        &error),
+            32, &error);
+        check(std::abs(int(fixed.orm.at(0, 0)[1]) - 64) < 3,
+              "a single roughness number is used as given");
+        check(fixed.orm.at(0, 0)[2] == 255, "and metallic goes in the blue channel");
+    }
+
+    // ------------------------------------- a wrong surface
+    {
+        std::string error;
+        render_height(Json::parse(R"({"pattern":"nose"})", &error), 16, &error);
+        check(error.find("noise") != std::string::npos,
+              "a misspelled pattern is suggested");
+        render_height(Json::parse(R"({"op":"blend","mode":"multipy","of":[)"
+                                  R"({"pattern":"noise"}]})", &error),
+                      16, &error);
+        check(error.find("multiply") != std::string::npos,
+              "and a misspelled blend mode is too");
+        render_height(Json::parse(R"({"scale":4})", &error), 16, &error);
+        check(error.find("pattern") != std::string::npos,
+              "an object with no pattern says what it needs");
+
+        // Every name the grammar advertises has to be a name the
+        // parser accepts, or the engine is lying to whatever read it.
+        const Json grammar = texture_grammar();
+        size_t unparseable = 0;
+        for (size_t i = 0; i < grammar["patterns"].size(); i++) {
+            const std::string name = grammar["patterns"][i]["name"].string();
+            std::string err;
+            Json spec = Json::object();
+            spec.set("pattern", name);
+            sample_pattern(spec, 0.3f, 0.7f, &err);
+            if (!err.empty()) {
+                std::printf("  FAIL  the grammar lists \"%s\", which does not parse\n",
+                            name.c_str());
+                unparseable++;
+            }
+        }
+        check(unparseable == 0, "every pattern the grammar lists actually exists");
     }
 
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");

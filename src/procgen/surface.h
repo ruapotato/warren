@@ -23,6 +23,8 @@
 
 namespace wr::gen {
 
+struct Palette;
+
 struct ContourRequest {
     const Field *field = nullptr;
     // World position of the chunk's corner (0, 0, 0).
@@ -40,6 +42,15 @@ struct ContourRequest {
     // Blend normals across a cell rather than taking the field's, so
     // a coarse chunk does not look faceted.
     bool smooth_normals = true;
+    // WHAT TO PAINT THE VERTICES, or nothing.
+    //
+    // The terrain colours its vertices by material id, because a
+    // voxel world has no textures and the palette is all it has. A
+    // shape contoured from a formula is going to be given a real
+    // material, and a vertex colour multiplies into it -- so a
+    // procedural crate inherited the terrain's grass green and came
+    // out looking mouldy. Null means white: no tint.
+    const Palette *palette = nullptr;
 };
 
 struct ContourResult {

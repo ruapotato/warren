@@ -24,8 +24,9 @@ struct MaterialUniforms {
     Vec4 params{0, 1, 1, 1};         // metallic, roughness, normal scale, occlusion
     Vec4 uv_transform{1, 1, 0, 0};   // scale.xy, offset.xy
     Vec4 flags{0, 0, 0, 0};          // alpha cutoff, has normal, has orm, unlit
+    Vec4 extra{0, 4, 0, 0};          // triplanar scale (0 = off), sharpness
 };
-static_assert(sizeof(MaterialUniforms) == 80, "must match MaterialData");
+static_assert(sizeof(MaterialUniforms) == 96, "must match MaterialData");
 
 class Material : public Resource {
     WR_CLASS(Material, Resource)
@@ -44,6 +45,16 @@ public:
     float occlusion_strength = 1.0f;
     Vec2 uv_scale{1, 1};
     Vec2 uv_offset{0, 0};
+
+    // PROJECT THE TEXTURE FROM THREE DIRECTIONS instead of using the
+    // mesh's UVs. For geometry that nobody unwrapped -- a voxel
+    // chunk, a shape contoured from a formula -- there are no UVs
+    // worth having, and this needs none. The number is the world
+    // scale in texture repeats per metre; zero uses the UVs.
+    float triplanar = 0.0f;
+    // How sharply the three projections give way to each other.
+    // Higher is crisper on flat faces and harsher on the diagonals.
+    float triplanar_sharpness = 4.0f;
 
     Ref<Texture> albedo_map;
     Ref<Texture> normal_map;

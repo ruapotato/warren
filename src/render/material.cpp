@@ -1,5 +1,7 @@
 #include "material.h"
 
+#include <algorithm>
+
 #include "core/log.h"
 
 namespace wr {
@@ -24,6 +26,7 @@ MaterialUniforms Material::uniforms() const {
     u.flags = Vec4(pass == MaterialPass::AlphaCutout ? alpha_cutoff : 0.0f,
                    normal_map ? 1.0f : 0.0f, orm_map ? 1.0f : 0.0f,
                    unlit ? 1.0f : 0.0f);
+    u.extra = Vec4(triplanar, std::max(triplanar_sharpness, 0.1f), 0.0f, 0.0f);
     return u;
 }
 

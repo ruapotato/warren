@@ -303,13 +303,14 @@ void contour_field(const ContourRequest &req, ContourResult *out) {
                         best_mat = mats[ci];
                     }
                 }
-                const Palette &pal = Palette::instance();
-                Color c = pal.colours[best_mat];
-                vert.colour[0] = uint8_t(clampf(c.r, 0, 1) * 255.0f + 0.5f);
-                vert.colour[1] = uint8_t(clampf(c.g, 0, 1) * 255.0f + 0.5f);
-                vert.colour[2] = uint8_t(clampf(c.b, 0, 1) * 255.0f + 0.5f);
-                vert.colour[3] = uint8_t(clampf(pal.roughness[best_mat], 0, 1) *
-                                             255.0f + 0.5f);
+                if (req.palette) {
+                    const Color c = req.palette->colours[best_mat];
+                    vert.colour[0] = uint8_t(clampf(c.r, 0, 1) * 255.0f + 0.5f);
+                    vert.colour[1] = uint8_t(clampf(c.g, 0, 1) * 255.0f + 0.5f);
+                    vert.colour[2] = uint8_t(clampf(c.b, 0, 1) * 255.0f + 0.5f);
+                    vert.colour[3] = uint8_t(
+                        clampf(req.palette->roughness[best_mat], 0, 1) * 255.0f + 0.5f);
+                }
 
                 cell_vertex[cell_index(x, y, z)] = int32_t(out->vertices.size());
                 out->vertices.push_back(vert);

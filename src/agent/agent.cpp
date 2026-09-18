@@ -11,6 +11,8 @@
 #include "core/log.h"
 #include "core/suggest.h"
 #include "procgen/sdf.h"
+#include "procgen/texture.h"
+#include "render/material.h"
 #include "render/mesh.h"
 #include "resource/packed_scene.h"
 #include "resource/resource.h"
@@ -835,6 +837,107 @@ Json cmd_make_mesh(const AgentContext &ctx, const Json &c) {
     return j;
 }
 
+Json cmd_surfaces(const AgentContext &, const Json &) {
+    Json j = ok();
+    const Json g = gen::texture_grammar();
+    for (const auto &kv : g.fields()) j.set(kv.first, kv.second);
+    return j;
+}
+
+Json cmd_make_material(const AgentContext &ctx, const Json &c) {
+    if (!c.has("surface"))
+        return fail("missing_arg",
+                    "make_material needs \"surface\": the surface to build. Send "
+                    "the \"surfaces\" command for the grammar.");
+    const Json &spec = c["surface"];
+    const uint32_t size =
+        uint32_t(std::clamp(c.has("size") ? int(c["size"].number()) : 256, 16, 2048));
+    std::string error;
+    Json written = Json::array();
+
+    // A PICTURE OF IT, whether or not there is a device.
+    //
+    // Saving the maps as PNGs is how an agent looks at what it made
+    // without putting it in the world first, and it works headless,
+    // which a GPU upload does not.
+    if (c.has("save")) {
+        const gen::SurfaceImages images = gen::render_surface(spec, size, &error);
+        if (!error.empty()) {
+            Json j = fail("bad_surface", error);
+            j.set("see", "the surfaces command");
+            return j;
+        }
+        const std::string stem = c["save"].string();
+        struct { const char *suffix; const gen::Image *image; } maps[] = {
+            {"_albedo.png", &images.albedo},
+            {"_normal.png", &images.normal},
+            {"_orm.png", &images.orm},
+            {"_height.png", &images.height},
+        };
+        for (const auto &m : maps) {
+            const std::string path = stem + m.suffix;
+            if (!m.image->write_png(path))
+                return fail("save_failed", "could not write " + path);
+            written.push(Json(path));
+        }
+        if (!ctx.engine) {
+            // No device to upload to, but the maps exist and that is
+            // the whole job when the caller only wanted files.
+            Json j = ok();
+            j.set("saved", written);
+            j.set("size", int(size));
+            return j;
+        }
+    }
+
+    if (!ctx.engine)
+        return fail("no_engine",
+                    "uploading a material needs a running engine; pass \"save\" to "
+                    "write the maps as PNGs instead");
+
+    Ref<Material> material =
+        gen::make_material(ctx.engine->device(), spec, size, &error);
+    if (!material) {
+        Json j = fail("bad_surface", error);
+        j.set("see", "the surfaces command");
+        return j;
+    }
+    if (c.has("as")) {
+        if (!ResourceSaver::save(material.get(), c["as"].string()))
+            return fail("save_failed", "could not write " + c["as"].string());
+    }
+
+    Json j = ok();
+    j.set("size", int(size));
+    if (written.size()) j.set("saved", written);
+    // Straight onto something, because that is what it is for.
+    if (c.has("on")) {
+        Json err;
+        Node *n = resolve(ctx, c["on"].string(), &err);
+        if (!n) return err;
+        MeshInstance3D *mi = n->cast_to<MeshInstance3D>();
+        if (!mi)
+            return fail("not_a_mesh", c["on"].string() + " is a " +
+                                          n->get_class_name() +
+                                          ", which has no material to set");
+        // A slot per submesh; naming one replaces just that one, and
+        // naming none replaces them all, which is what somebody
+        // texturing a whole prop means.
+        const int slot = c.has("slot") ? int(c["slot"].number()) : -1;
+        if (slot >= 0) {
+            if (slot >= int(mi->materials.size()))
+                mi->materials.resize(size_t(slot) + 1);
+            mi->materials[size_t(slot)] = material;
+        } else if (mi->materials.empty()) {
+            mi->materials.push_back(material);
+        } else {
+            for (Ref<Material> &m : mi->materials) m = material;
+        }
+        j.set("applied_to", mi->path());
+    }
+    return j;
+}
+
 Json cmd_stats(const AgentContext &ctx, const Json &) {
     Engine *e = ctx.engine;
     Engine::FrameTimes ft = e->frame_times(0);
@@ -882,6 +985,12 @@ const Command kCommands[] = {
     {"make_mesh", "build a mesh from a shape and, optionally, put it in the world",
      "shape:object, parent:string?, name:string?, at:vec3?, cell_size:float?, "
      "detail:int?, smooth:bool?, save:string?", cmd_make_mesh},
+    {"surfaces", "the procedural surface language: patterns, blends and what a "
+     "material is made of", "", cmd_surfaces},
+    {"make_material", "build albedo, normal and roughness maps from one surface "
+     "description",
+     "surface:object, on:string?, slot:int?, size:int?, save:string?, as:string?",
+     cmd_make_material},
     {"stats", "frame times and what the engine is doing", "", cmd_stats, true},
 };
 

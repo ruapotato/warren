@@ -288,6 +288,7 @@ public:
 
     TextureH create_texture(const TextureDesc &d, const void *initial) override;
     void destroy(TextureH h) override;
+    void generate_mips(TextureH h) override;
     void write_texture(TextureH h, const void *data, uint64_t size, uint32_t mip,
                        uint32_t layer) override;
     TextureDesc texture_desc(TextureH h) const override;
@@ -583,8 +584,18 @@ TextureH GlDevice::create_texture(const TextureDesc &d, const void *initial) {
         glTextureParameteri(t->id, GL_TEXTURE_MAX_LEVEL, GLint(mips - 1));
     }
     if (d.name && glObjectLabel) glObjectLabel(GL_TEXTURE, t->id, -1, d.name);
-    if (initial) write_texture(h, initial, 0, 0, 0);
+    if (initial) {
+        write_texture(h, initial, 0, 0, 0);
+        // A texture given its pixels up front and asked for mips
+        // wants the chain filled; nothing else is going to do it.
+        if (mips > 1) generate_mips(h);
+    }
     return h;
+}
+
+void GlDevice::generate_mips(TextureH h) {
+    const GlTexture *t = textures.get(h);
+    if (t && t->id && t->desc.mips > 1) glGenerateTextureMipmap(t->id);
 }
 
 void GlDevice::destroy(TextureH h) {

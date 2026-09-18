@@ -115,6 +115,7 @@ struct Rendered {
     std::vector<uint8_t> pixels;  // RGBA8, kWidth * kHeight * 4
     bool ok = false;
     std::string device;
+    bool mip_level_1_filled = false;
 };
 
 VertexLayout parity_layout() {
@@ -175,6 +176,52 @@ Rendered render_with(Backend backend, bool validation) {
         return out;
     }
     out.device = dev->caps().device_name;
+
+    // --- THE MIP CHAIN, which nothing used to fill in
+    //
+    // A texture created with pixels and asked for mips allocates the
+    // whole chain and, for a long time, uploaded only the top of it.
+    // Every minified sample then read whatever the driver left
+    // behind, which is black -- so a texture looked right up close
+    // and went dark at a distance. It hid for as long as it did
+    // because nothing in the demos had detail in it: a flat colour
+    // has the same mips whether they were generated or not.
+    //
+    // Checked on both backends because they fill the chain by
+    // different means: one does it on the spot, the other records it
+    // at the start of the next frame.
+    {
+        const uint32_t n = 16;
+        std::vector<uint8_t> pixels(size_t(n) * n * 4, 0);
+        for (uint32_t y = 0; y < n; y++)
+            for (uint32_t x = 0; x < n; x++) {
+                uint8_t *px = &pixels[(size_t(y) * n + x) * 4];
+                // A checkerboard, so that a correct half-size mip is
+                // mid-grey and an ungenerated one is black.
+                const uint8_t v = ((x + y) & 1) ? 255 : 0;
+                px[0] = px[1] = px[2] = v;
+                px[3] = 255;
+            }
+        TextureDesc md;
+        md.width = md.height = n;
+        md.format = Format::RGBA8;
+        md.mips = 0;  // all the way down
+        md.usage = TextureUsage::Sampled | TextureUsage::TransferDst |
+                   TextureUsage::TransferSrc;
+        md.name = "mip chain";
+        TextureH mipped = dev->create_texture(md, pixels.data());
+        // A frame, because one backend records the chain into the
+        // next command buffer rather than building it immediately.
+        if (dev->begin_frame()) dev->end_frame();
+        std::vector<uint8_t> level1(size_t(n / 2) * (n / 2) * 4, 0);
+        const size_t got =
+            dev->read_texture(mipped, level1.data(), level1.size(), 1, 0);
+        int lit = 0;
+        for (size_t i = 0; got && i < level1.size(); i += 4)
+            if (level1[i] > 32) lit++;
+        out.mip_level_1_filled = lit > 0;
+        dev->destroy(mipped);
+    }
 
     // --- targets. Offscreen, so this works with no display.
     TextureDesc cd;
@@ -619,15 +666,27 @@ int main(int argc, char **argv) {
     int failures = 0;
     int ran = 0;
     if (gl.ok) {
-        std::printf("  OpenGL  %s\n", gl.device.c_str());
+        std::printf("  OpenGL  %s  (mip 1 %s)\n", gl.device.c_str(),
+                    gl.mip_level_1_filled ? "filled" : "BLACK");
         write_ppm("parity_opengl.ppm", gl.pixels, kWidth, kHeight);
         failures += check_conventions(gl, "OpenGL");
+        if (!gl.mip_level_1_filled) {
+            std::printf("  FAIL  OpenGL left mip 1 unfilled; textures go black "
+                        "when minified\n");
+            failures++;
+        }
         ran++;
     }
     if (vk.ok) {
-        std::printf("  Vulkan  %s\n", vk.device.c_str());
+        std::printf("  Vulkan  %s  (mip 1 %s)\n", vk.device.c_str(),
+                    vk.mip_level_1_filled ? "filled" : "BLACK");
         write_ppm("parity_vulkan.ppm", vk.pixels, kWidth, kHeight);
         failures += check_conventions(vk, "Vulkan");
+        if (!vk.mip_level_1_filled) {
+            std::printf("  FAIL  Vulkan left mip 1 unfilled; textures go black "
+                        "when minified\n");
+            failures++;
+        }
         ran++;
     }
 

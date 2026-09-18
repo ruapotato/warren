@@ -587,6 +587,20 @@ public:
     virtual TextureH create_texture(const TextureDesc &d,
                                     const void *initial = nullptr) = 0;
     virtual void destroy(TextureH h) = 0;
+    // FILL IN THE MIP CHAIN of a texture that was created with one
+    // and written at level zero.
+    //
+    // Creating a texture with mips allocates the whole chain and
+    // uploads only the top of it; the rest is whatever the driver
+    // left there, which is black. Every minified sample then reads
+    // black, so a texture looks right on screen at full size and
+    // goes dark at a distance -- a bug that hides completely until
+    // something in the scene has detail in it.
+    //
+    // On the immediate backend this happens at once. On Vulkan it is
+    // recorded at the start of the next frame, after the uploads it
+    // depends on and before anything that could sample it.
+    virtual void generate_mips(TextureH h) = 0;
     virtual void write_texture(TextureH h, const void *data, uint64_t size,
                                uint32_t mip = 0, uint32_t layer = 0) = 0;
     virtual TextureDesc texture_desc(TextureH h) const = 0;

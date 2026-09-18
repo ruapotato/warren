@@ -14,6 +14,7 @@ layout(set = SET_MATERIAL, binding = B_MATERIAL(0), std140) uniform MaterialData
     vec4 params;            // metallic, roughness, normal_scale, occlusion
     vec4 uv_transform;      // scale.xy, offset.xy
     vec4 flags;             // alpha_cutoff, has_normal_map, has_orm, unlit
+    vec4 extra;             // triplanar scale (0 = off), sharpness, -, -
 } material;
 
 layout(set = SET_MATERIAL, binding = B_MATERIAL(1)) uniform sampler2D tex_albedo;
@@ -221,19 +222,76 @@ vec3 punctual(vec3 world, vec3 n, vec3 v, vec3 albedo, float metallic,
     return sum;
 }
 
+// ------------------------------------------------------- triplanar
+//
+// WHY A SURFACE SHADER NEEDS THIS.
+//
+// A texture needs UVs, and UVs need someone to unwrap the mesh. A
+// voxel chunk has no unwrapper and neither does a shape contoured
+// from a formula -- they are geometry that appeared without an
+// artist, which is the entire point of both. Projecting the texture
+// from three directions and blending by the normal needs no UVs at
+// all: the price is three samples instead of one, and a slight
+// swim on surfaces at forty-five degrees.
+//
+// Blended by the normal raised to a power, so a face that clearly
+// points one way takes that projection alone and only the corners
+// mix.
+vec3 triplanar_weights(vec3 n) {
+    vec3 w = pow(abs(n), vec3(material.extra.y));
+    return w / max(w.x + w.y + w.z, 1e-5);
+}
+
+vec4 triplanar_sample(sampler2D tex, vec3 world, vec3 w, float scale) {
+    // Each plane is mirrored on the side facing away, which keeps
+    // the projection from running backwards across a shape.
+    return texture(tex, world.zy * scale) * w.x +
+           texture(tex, world.xz * scale) * w.y +
+           texture(tex, world.xy * scale) * w.z;
+}
+
+// The normal map has to be reoriented, not just blended: a tangent
+// normal read off the XZ plane means something different from the
+// same bytes read off the XY plane. Whiteout blending -- add the
+// plane's own axis into the sampled normal's z and swizzle into
+// world space -- is the cheap version that does not need a tangent
+// frame, which contoured geometry does not reliably have.
+vec3 triplanar_normal(vec3 world, vec3 n, vec3 w, float scale, float strength) {
+    vec3 nx = texture(tex_normal, world.zy * scale).xyz * 2.0 - 1.0;
+    vec3 ny = texture(tex_normal, world.xz * scale).xyz * 2.0 - 1.0;
+    vec3 nz = texture(tex_normal, world.xy * scale).xyz * 2.0 - 1.0;
+    nx.xy *= strength;
+    ny.xy *= strength;
+    nz.xy *= strength;
+    vec3 an = abs(n);
+    nx = vec3(nx.z * sign(n.x), nx.y, nx.x);
+    ny = vec3(ny.x, ny.z * sign(n.y), ny.y);
+    nz = vec3(nz.x, nz.y, nz.z * sign(n.z));
+    return normalize(nx * w.x + ny * w.y + nz * w.z + n * 0.001);
+}
+
 // ---------------------------------------------------------------- main
 
 void main() {
-    vec4 base = texture(tex_albedo, v_uv) * material.albedo * v_colour;
+    float tri = material.extra.x;
+    vec3 tri_w = tri > 0.0 ? triplanar_weights(normalize(v_normal)) : vec3(0.0);
+
+    vec4 base = (tri > 0.0 ? triplanar_sample(tex_albedo, v_world, tri_w, tri)
+                           : texture(tex_albedo, v_uv)) *
+                material.albedo * v_colour;
     if (material.flags.x > 0.0 && base.a < material.flags.x) discard;
 
     vec3 n = normalize(v_normal);
     if (material.flags.y > 0.5) {
-        vec3 t = normalize(v_tangent.xyz - n * dot(n, v_tangent.xyz));
-        vec3 b = cross(n, t) * v_tangent.w;
-        vec3 tn = texture(tex_normal, v_uv).xyz * 2.0 - 1.0;
-        tn.xy *= material.params.z;
-        n = normalize(mat3(t, b, n) * tn);
+        if (tri > 0.0) {
+            n = triplanar_normal(v_world, n, tri_w, tri, material.params.z);
+        } else {
+            vec3 t = normalize(v_tangent.xyz - n * dot(n, v_tangent.xyz));
+            vec3 b = cross(n, t) * v_tangent.w;
+            vec3 tn = texture(tex_normal, v_uv).xyz * 2.0 - 1.0;
+            tn.xy *= material.params.z;
+            n = normalize(mat3(t, b, n) * tn);
+        }
     }
     // A back face lit as though it faced forward is black; flipping the
     // normal makes single-sided geometry survive being seen from
@@ -244,15 +302,18 @@ void main() {
     float rough = material.params.y;
     float ao = 1.0;
     if (material.flags.z > 0.5) {
-        vec3 orm = texture(tex_orm, v_uv).rgb;
+        vec3 orm = (tri > 0.0 ? triplanar_sample(tex_orm, v_world, tri_w, tri)
+                              : texture(tex_orm, v_uv)).rgb;
         ao = mix(1.0, orm.r, material.params.w);
         rough *= orm.g;
         metallic *= orm.b;
     }
     rough = clamp(rough, 0.03, 1.0);
 
-    vec3 emissive = texture(tex_emissive, v_uv).rgb * material.emissive.rgb *
-                    material.emissive.a;
+    vec3 emissive = (tri > 0.0 ? triplanar_sample(tex_emissive, v_world, tri_w, tri)
+                               : texture(tex_emissive, v_uv))
+                        .rgb *
+                    material.emissive.rgb * material.emissive.a;
 
     if (material.flags.w > 0.5) {
         out_colour = vec4(base.rgb + emissive, base.a);

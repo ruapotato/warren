@@ -9,6 +9,8 @@
 #include "core/log.h"
 #include "core/variant_json.h"
 #include "procgen/sdf.h"
+#include "procgen/texture.h"
+#include "render/material.h"
 #include "render/mesh.h"
 #include "platform/input.h"
 #include "pyvalue.h"
@@ -137,6 +139,62 @@ PyObject *py_shape(PyObject *, PyObject *args, PyObject *kwargs) {
     return object_to_python(mesh.get());
 }
 
+// A SURFACE, FROM A DICT -- the companion to shape().
+//
+//     warren.surface({"pattern": "bricks", "rows": 8,
+//                     "colours": ["#3a3632", "#c08a63"]})
+//
+// Returns a Material with albedo, normal and roughness maps already
+// uploaded. Without a device -- a headless tool -- it writes the
+// four maps as PNGs instead, which is the only useful thing left to
+// do and better than an exception.
+PyObject *py_surface(PyObject *, PyObject *args, PyObject *kwargs) {
+    static const char *keywords[] = {"spec", "size", "save", nullptr};
+    PyObject *spec = nullptr;
+    int size = 256;
+    const char *save = nullptr;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|is",
+                                     const_cast<char **>(keywords), &spec, &size,
+                                     &save))
+        return nullptr;
+    Variant v;
+    if (!from_python(spec, &v)) {
+        PyErr_SetString(PyExc_TypeError, "surface() takes a dict");
+        return nullptr;
+    }
+    const Json json = json_from_variant(v);
+    const uint32_t n = uint32_t(std::clamp(size, 16, 2048));
+    std::string error;
+
+    if (save) {
+        const gen::SurfaceImages images = gen::render_surface(json, n, &error);
+        if (!error.empty()) {
+            PyErr_SetString(PyExc_ValueError, error.c_str());
+            return nullptr;
+        }
+        const std::string stem = save;
+        images.albedo.write_png(stem + "_albedo.png");
+        images.normal.write_png(stem + "_normal.png");
+        images.orm.write_png(stem + "_orm.png");
+        images.height.write_png(stem + "_height.png");
+    }
+
+    rhi::Device *device = g_engine ? g_engine->device() : resource_device();
+    if (!device) {
+        if (save) Py_RETURN_NONE;
+        PyErr_SetString(PyExc_RuntimeError,
+                        "no render device; pass save=\"name\" to write the maps "
+                        "as PNGs instead");
+        return nullptr;
+    }
+    Ref<Material> material = gen::make_material(device, json, n, &error);
+    if (!material) {
+        PyErr_SetString(PyExc_ValueError, error.c_str());
+        return nullptr;
+    }
+    return object_to_python(material.get());
+}
+
 PyObject *py_classes(PyObject *, PyObject *) {
     std::vector<ClassInfo *> all = ClassDB::all();
     PyObject *list = PyList_New(Py_ssize_t(all.size()));
@@ -213,6 +271,8 @@ PyMethodDef k_module_methods[] = {
     {"classes", py_classes, METH_NOARGS, "Every registered class name."},
     {"shape", (PyCFunction)py_shape, METH_VARARGS | METH_KEYWORDS,
      "Build a Mesh from a procedural shape description."},
+    {"surface", (PyCFunction)py_surface, METH_VARARGS | METH_KEYWORDS,
+     "Build a Material from a procedural surface description."},
     {"group", py_group, METH_VARARGS, "Every node in a group."},
     {"key_down", py_key_down, METH_VARARGS, "Is a key held?"},
     {"action_down", py_action_down, METH_VARARGS, "Is an action held?"},

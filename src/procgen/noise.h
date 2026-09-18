@@ -86,4 +86,22 @@ float ridged(const Vec3 &p, uint32_t seed, int octaves, float lacunarity = 2.0f,
 // point. For caves and for rock.
 float worley(const Vec3 &p, uint32_t seed);
 
+// TILEABLE VERSIONS, for textures.
+//
+// A texture that does not tile is a texture nobody can use on a
+// wall, and Perlin noise on an unbounded lattice does not tile. The
+// fix is to wrap the LATTICE rather than the sample point: corner
+// (period, y, z) hashes to the same gradient as corner (0, y, z), so
+// the field is exactly periodic with no blending and no loss of
+// quality. `period` must be a whole number of cells, which is why it
+// is an int.
+//
+// Terrain does not want this -- a planet that repeats every 64
+// metres is a worse planet -- so it is a separate entry point rather
+// than a parameter everything has to pass zero for.
+float perlin_tiled(const Vec3 &p, uint32_t seed, int period);
+float fbm_tiled(const Vec3 &p, uint32_t seed, int octaves, int period,
+                float lacunarity = 2.0f, float gain = 0.5f);
+float worley_tiled(const Vec3 &p, uint32_t seed, int period);
+
 }  // namespace wr::gen
