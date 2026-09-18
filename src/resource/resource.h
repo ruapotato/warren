@@ -68,18 +68,26 @@ private:
 // Loading, with a cache and a table of loaders by extension.
 class ResourceLoader {
 public:
-    // Returns null if nothing can read it. `type_hint` lets a caller
-    // say what it expects when an extension is ambiguous.
+    // Returns null if nothing can read it.
+    //
+    // `type_hint` says what the caller wants out of a file whose
+    // extension does not settle it. The one that matters today is
+    // "linear" (or "data") on an image: a PNG is sRGB unless it is
+    // not a picture, and a normal map or a roughness map decoded
+    // through the sRGB curve is silently wrong in a way that reads
+    // as a lighting bug. A hinted load is cached SEPARATELY from an
+    // unhinted one, because they are different resources.
     static Ref<Resource> load(const std::string &path,
                               const std::string &type_hint = "");
     // Already loaded, or null. Never touches the disk.
     static Ref<Resource> cached(const std::string &path);
     static bool exists(const std::string &path);
 
-    // A loader takes a path and returns a resource, or null if it
-    // cannot read that particular file even though it claimed the
-    // extension.
-    using Loader = std::function<Ref<Resource>(const std::string &)>;
+    // A loader takes a path and the caller's hint, and returns a
+    // resource, or null if it cannot read that particular file even
+    // though it claimed the extension. Most loaders ignore the hint.
+    using Loader =
+        std::function<Ref<Resource>(const std::string &, const std::string &)>;
     // Extensions without the dot, lower case.
     static void register_loader(const std::vector<std::string> &extensions,
                                 Loader loader);

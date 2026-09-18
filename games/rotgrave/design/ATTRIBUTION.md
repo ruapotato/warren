@@ -101,8 +101,10 @@ Two sets, both generated, nothing authored as a binary:
 
 No texture in this game is a photograph or a painted asset.
 
-- `tools/gen_world_tex.py` — the town's 26 materials, each an albedo, a
-  derived normal map and a roughness map, all tileable.
+- `tools/gen_world_tex.py` — the town's 27 materials, each a tileable
+  albedo, a normal map derived from the same heightfield that shaped it,
+  and an ORM (occlusion/roughness/metalness). The nine the town actually
+  lays are committed under `assets/world`; `--all` makes the rest.
 - `tools/gen_textures.py` — the bodies' skin, eyes, hair, brows and cloth.
   The upstream figure pipeline's textures are build output and were never
   committed, so these are synthesised to match each surface's recorded

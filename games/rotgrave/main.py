@@ -57,41 +57,50 @@ class Game(wr.Node3D):
         self.player.arm(self.design)
 
         # NOVEMBER, FOUR IN THE AFTERNOON. The mode is a dead town
-        # and the light has to say so before anything else does.
-        # Fog at this density puts the far side of the crossroads in
-        # haze and hides the edge of the map, which is worth as much
-        # as the mood: a player who can see the perimeter wall knows
-        # how small the town is.
-        # NOVEMBER, FOUR IN THE AFTERNOON. The mode is a dead town
         # and the light has to say so before anything else does. Fog
         # at this density puts the far side of the crossroads in haze
         # and hides the edge of the map, which is worth as much as
         # the mood: a player who can see the perimeter wall knows how
         # small the town is.
         #
-        # Exposure is left alone deliberately -- see
-        # docs/known-issues.md, where anything above 1.0 empties the
-        # frame in this scene. The brightness is set with the sun and
-        # the ambient instead, which is where it belongs anyway.
+        # ONE SUN. The renderer takes its sun from the first
+        # DirectionalLight3D in the tree if there is one and from the
+        # environment otherwise, so setting both means the light node
+        # silently wins and every sun field on the environment is
+        # dead. This scene had them disagreeing about direction and
+        # about energy, which is most of why it read flat. The node
+        # is the one that stays, because that is what a scene author
+        # reaches for and what the editor shows.
         env = wr.environment()
         if env:
-            env.fog_colour = wr.Color(0.44, 0.46, 0.49, 1.0)
-            env.fog_density = 0.0065
-            env.ambient = wr.Color(0.32, 0.36, 0.42, 1.0)
-            env.ambient_energy = 0.55
-            env.env_intensity = 0.6
-            env.sun_colour = wr.Color(1.0, 0.94, 0.84, 1.0)
-            env.sun_energy = 2.4
-            env.sun_direction = wr.Vec3(-0.42, -0.72, -0.55)
+            env.fog_colour = wr.Color(0.40, 0.43, 0.47, 1.0)
+            env.fog_density = 0.0048
+            # AMBIENT IS WHAT FLATTENS A PICTURE. It lands on every
+            # surface at the same strength whichever way the surface
+            # faces, so raising it to brighten the scene erases the
+            # shading instead. The brightness belongs in the sun and
+            # in the exposure; the ambient's job is only to keep the
+            # shadowed side from going to black, and it is cold on
+            # purpose -- shadow under an overcast sky is sky-coloured.
+            env.ambient = wr.Color(0.26, 0.31, 0.40, 1.0)
+            env.ambient_energy = 0.30
+            env.env_intensity = 0.38
+            # Exposure is doing real work again: sharing a vertex
+            # shader with the portal depth-clear pass used to make
+            # anything above 1.0 an empty frame. See the "Fixed"
+            # section of docs/known-issues.md.
+            env.exposure = 1.25
             env.shadow_distance = 90.0
 
         sun = wr.DirectionalLight3D()
         sun.name = "Sun"
-        # Overcast, low and cold. A dead town at four in the
-        # afternoon in November, which is the light the whole mode
-        # is written for -- bright sun would make it a holiday.
-        sun.energy = 1.5
-        sun.euler = wr.Vec3(0.7, -0.62, 0.0)
+        # Low and warm against a cold ambient, which is what gives a
+        # wall a lit side and a shadowed side instead of one tone.
+        # Bright sun would make it a holiday; no sun at all made it a
+        # grey card.
+        sun.colour = wr.Color(1.0, 0.92, 0.79, 1.0)
+        sun.energy = 3.1
+        sun.euler = wr.Vec3(0.58, -0.62, 0.0)
         self.add_child(sun)
 
         polys = self.town.bake()

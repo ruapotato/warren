@@ -59,6 +59,35 @@ _PAINT = {
     GRASS:    (0x36422a, 0.97, 0.0),
 }
 
+# ------------------------------------------------------ the surfaces
+#
+# A procedurally assembled town is a great many quads, and quads with
+# a flat colour on them read as a DIAGRAM of a town rather than a
+# town -- which is what this looked like until the textures came
+# across. They are generated, not painted: `tools/gen_world_tex.py`
+# makes every one as a tileable albedo, a normal map derived from the
+# same heightfield that shaped it, and an ORM.
+#
+# HOW BIG ONE TILE IS, IN METRES. MeshBuilder writes its UVs in
+# metres, so a material that does not say otherwise repeats once per
+# metre -- brick courses an inch tall, asphalt the texture of sand.
+# The second number is the real-world size of one tile of the image,
+# and everything else follows from it.
+_SURFACE = {
+    ROAD:     ("asphalt",      3.0),
+    KERB:     ("sidewalk",     2.0),
+    BRICK:    ("brick_red",    1.2),
+    PLASTER:  ("plaster",      3.0),
+    TIMBER:   ("plank",        2.0),
+    CONCRETE: ("concrete",     2.5),
+    ROOF:     ("shingle_grey", 1.6),
+    METAL:    ("metal_rust",   2.0),
+    GRASS:    ("grass",        3.0),
+}
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORLD = os.path.join(HERE, "assets", "world")
+
 
 def _colour(hexrgb):
     return wr.Color(((hexrgb >> 16) & 255) / 255.0,
@@ -67,7 +96,23 @@ def _colour(hexrgb):
 
 
 def materials():
-    """One Material per slot, in slot order."""
+    """One Material per slot, in slot order.
+
+    Textured if the files are there, flat colour if they are not.
+    The flat colours stay in `_PAINT` and are not dead: they are the
+    fallback, they are what the navmesh debug view and the overhead
+    map draw with, and they are the mean colour each texture was
+    aimed at, so a scene that loses its textures is dull rather than
+    unrecognisable.
+
+    THE PAINT COLOUR STAYS, AND IS THE POINT. These albedo maps are
+    DETAIL maps: the generator normalises every one to the same mean
+    luminance, keeping its variation and its hue relationships and
+    throwing away its absolute level, precisely so that the material
+    can say what colour the thing is. Replacing the tint with white
+    hands that decision to whatever the noise happened to average
+    out at, which came out as a road brighter than the sky.
+    """
     out = []
     for slot in range(len(_PAINT)):
         rgb, rough, metal = _PAINT[slot]
@@ -75,8 +120,47 @@ def materials():
         m.albedo = _colour(rgb)
         m.roughness = rough
         m.metallic = metal
+        name, metres = _SURFACE.get(slot, (None, 1.0))
+        albedo = _texture(name, "c")
+        if albedo is not None:
+            m.albedo_map = albedo
+            m.normal_map = _texture(name, "n", data=True)
+            orm = _texture(name, "orm", data=True)
+            if orm is not None:
+                m.orm_map = orm
+                # The map is the whole story; the scalars multiply it.
+                m.roughness = 1.0
+                m.metallic = 1.0
+            m.uv_scale = wr.Vec2(1.0 / metres, 1.0 / metres)
         out.append(m)
     return out
+
+
+_TEXTURES = {}
+
+
+def _texture(name, kind, data=False):
+    """One texture, loaded at most once. None if it is not there.
+
+    `data` is not decoration. A PNG is sRGB unless the loader is
+    told otherwise, and the normal map and the ORM are not pictures
+    -- running them through the sRGB curve makes every surface far
+    smoother than it was authored and every normal far weaker, which
+    looks like a lighting problem and is a file-reading one.
+    """
+    if name is None:
+        return None
+    key = (name, kind)
+    if key in _TEXTURES:
+        return _TEXTURES[key]
+    path = os.path.join(WORLD, f"{name}_{kind}.png")
+    tex = (wr.load(path, "linear" if data else "")
+           if os.path.exists(path) else None)
+    if tex is None and kind == "c":
+        wr.log(f"town: no {path} -- flat colour instead "
+               f"(run tools/gen_world_tex.py)")
+    _TEXTURES[key] = tex
+    return tex
 
 
 # ------------------------------------------------------- area bits

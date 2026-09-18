@@ -31,24 +31,35 @@ constexpr uint32_t kMaterialVersion = 1;
 // would rather see at start-up than as a black surface.
 rhi::Device *g_device = nullptr;
 
-Ref<Resource> load_scene(const std::string &path) {
+Ref<Resource> load_scene(const std::string &path,
+                            const std::string &hint) {
     Ref<PackedScene> s = PackedScene::load(path);
     if (!s || !s->valid()) return {};
     return Ref<Resource>(s.get());
 }
 
-Ref<Resource> load_wav(const std::string &path) {
+Ref<Resource> load_wav(const std::string &path,
+                          const std::string &hint) {
     Ref<AudioClip> c = AudioClip::load_wav(path);
     return Ref<Resource>(c.get());
 }
 
-Ref<Resource> load_image(const std::string &path) {
+Ref<Resource> load_image(const std::string &path,
+                            const std::string &hint) {
     if (!g_device) {
         WR_ERROR("resource: '%s' needs a graphics device, and none is set",
                  path.c_str());
         return {};
     }
-    Ref<Texture> t = Texture::load(g_device, path);
+    // A PNG IS A PICTURE UNLESS TOLD OTHERWISE. Colour is authored
+    // in sRGB and has to be decoded on the way in; a normal map, a
+    // roughness map, a height field and a mask are DATA, and running
+    // them through the same curve bends every value without
+    // producing an error anywhere. The result reads as a lighting
+    // problem -- surfaces too smooth, normals too weak -- which is a
+    // long way from the file that caused it.
+    const bool srgb = hint != "linear" && hint != "data";
+    Ref<Texture> t = Texture::load(g_device, path, srgb);
     return Ref<Resource>(t.get());
 }
 
@@ -58,7 +69,8 @@ Ref<Resource> load_image(const std::string &path) {
 // point: a mesh file that has to be parsed is a mesh file that costs
 // a second to open. glTF is the interchange format; this is the one
 // a build writes and a game reads.
-Ref<Resource> load_mesh(const std::string &path) {
+Ref<Resource> load_mesh(const std::string &path,
+                           const std::string &hint) {
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f) return {};
     std::fseek(f, 0, SEEK_END);
@@ -134,7 +146,8 @@ bool save_mesh(Resource *res, const std::string &path) {
 // and read back by name. A field added tomorrow reads as its default
 // out of a file written today, which is the behaviour a project
 // wants from its own asset format.
-Ref<Resource> load_material(const std::string &path) {
+Ref<Resource> load_material(const std::string &path,
+                               const std::string &hint) {
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f) return {};
     std::fseek(f, 0, SEEK_END);

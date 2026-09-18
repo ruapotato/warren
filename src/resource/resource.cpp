@@ -91,9 +91,14 @@ bool ResourceLoader::exists(const std::string &path) {
 
 Ref<Resource> ResourceLoader::load(const std::string &path,
                                    const std::string &type_hint) {
-    (void)type_hint;
     if (path.empty()) return {};
-    if (Ref<Resource> hit = cached(path)) return hit;
+    // THE HINT IS PART OF THE IDENTITY. The same PNG loaded as
+    // colour and as data are two different textures -- different
+    // formats on the GPU -- so they cannot share a cache entry, and
+    // whichever was asked for first must not win the second ask.
+    const std::string key =
+        type_hint.empty() ? path : path + "|" + type_hint;
+    if (Ref<Resource> hit = cached(key)) return hit;
 
     const std::string ext = extension_of(path);
     Loader chosen;
@@ -116,19 +121,22 @@ Ref<Resource> ResourceLoader::load(const std::string &path,
     // pulls in meshes, a material pulls in textures -- and holding
     // the registry's lock through that is a deadlock waiting for
     // the first nested reference.
-    Ref<Resource> r = chosen(resolve(path));
+    Ref<Resource> r = chosen(resolve(path), type_hint);
     if (!r) return {};
+    // The path it records is the REAL one, not the cache key: it is
+    // what a material writes out and what a hot reload watches, and
+    // neither of those can do anything with "x.png|linear".
     r->set_resource_path(path);
     {
         std::lock_guard<std::mutex> g(registry().lock);
         // Someone else may have finished first; theirs wins, so
         // that "the same path is the same object" survives a race.
-        auto it = registry().cache.find(path);
+        auto it = registry().cache.find(key);
         if (it != registry().cache.end() && it->second) {
             Resource *existing = it->second->cast_to<Resource>();
             if (existing) return Ref<Resource>(existing);
         }
-        registry().cache[path] = r.get();
+        registry().cache[key] = r.get();
     }
     return r;
 }
@@ -146,7 +154,16 @@ void ResourceLoader::_forget_object(Object *o) {
 
 void ResourceLoader::forget(const std::string &path) {
     std::lock_guard<std::mutex> g(registry().lock);
-    registry().cache.erase(path);
+    // Every hinted variant of this path goes too. A hot reload is
+    // about the FILE, and leaving "x.png|linear" behind after
+    // dropping "x.png" would reload half of it.
+    const std::string prefix = path + "|";
+    for (auto it = registry().cache.begin(); it != registry().cache.end();) {
+        if (it->first == path || it->first.compare(0, prefix.size(), prefix) == 0)
+            it = registry().cache.erase(it);
+        else
+            ++it;
+    }
 }
 
 void ResourceLoader::forget_all() {

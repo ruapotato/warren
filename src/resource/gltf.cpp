@@ -778,7 +778,7 @@ Node3D *build_node(const Gltf &g, int index,
     return node;
 }
 
-Ref<Resource> load_gltf(const std::string &path) {
+Ref<Resource> load_gltf(const std::string &path, const std::string &) {
     Gltf g;
     g.base = std::filesystem::path(path).parent_path();
     g.name = std::filesystem::path(path).stem().string();

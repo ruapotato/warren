@@ -385,10 +385,31 @@ def convert(stems, out_path, texture_dir, scale=1.0):
         w_view = blob.add(struct.pack("<%df" % len(w), *w), ARRAY_BUFFER)
         a_w = accessor(w_view, nv, F32, "VEC4")
 
-        i_view = blob.add(struct.pack("<%dI" % ni, *[max(0, v)
-                                                     for v in s["index"]]),
+        # THE WINDING IS REVERSED ON THE WAY OUT.
+        #
+        # RHFIG was written for Godot, whose ArrayMesh treats a
+        # clockwise triangle as front-facing. glTF says the opposite:
+        # counter-clockwise is the front, and every renderer that
+        # reads the spec agrees. Copying the indices across unchanged
+        # produced figures whose fronts were culled and whose backs
+        # were not -- from in front of the survivor you saw through
+        # her to the inside of her own back, with the braid hanging
+        # down over her chest. It reads as a hole in the model rather
+        # than as the whole model being inside out, which is why it
+        # survived a dozen screenshots taken from behind.
+        #
+        # Two-sided surfaces hid it further: the hair is two-sided in
+        # the manifest, so the braid drew in both views and made the
+        # picture look almost right.
+        flipped = []
+        src_index = s["index"]
+        for t in range(0, ni - 2, 3):
+            flipped.append(max(0, src_index[t]))
+            flipped.append(max(0, src_index[t + 2]))
+            flipped.append(max(0, src_index[t + 1]))
+        i_view = blob.add(struct.pack("<%dI" % len(flipped), *flipped),
                           ELEMENT_ARRAY_BUFFER)
-        a_i = accessor(i_view, ni, U32, "SCALAR")
+        a_i = accessor(i_view, len(flipped), U32, "SCALAR")
 
         spec = s["spec"]
         mat = {"name": spec.get("name", "surface"),
