@@ -23,6 +23,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <vector>
 
 #include "render/material.h"
 #include "render/mesh.h"
@@ -93,6 +94,18 @@ struct RenderSettings {
     bool punctual_lights = true;
     int max_clustered_views = 16;
     int max_lights = 256;
+    // SHADOWS FOR PUNCTUAL LIGHTS, in one atlas of square tiles. A
+    // spot takes one tile and an omni six, so the default 4x4 grid
+    // is two omnis and four spots, or one omni and ten spots. Lights
+    // are given tiles nearest-first; the rest still light, they just
+    // do not cast.
+    bool punctual_shadows = true;
+    uint32_t shadow_atlas_size = 2048;
+    uint32_t shadow_tile_size = 512;
+    // Nearer than this to the light's own centre, nothing casts. Too
+    // small and the depth range is wasted; too large and a lamp
+    // inside a fitting shadows itself away.
+    float punctual_shadow_near = 0.12f;
 
     int msaa = 4;
     float exposure = 1.0f;
@@ -111,6 +124,9 @@ struct RenderStats {
     uint32_t shadow_draws = 0;
     uint32_t cascades = 0;
     uint32_t lights = 0;            // punctual, after culling
+    uint32_t shadow_casting_lights = 0;
+    uint32_t punctual_shadow_draws = 0;
+    bool punctual_shadows_reused = false;
     uint32_t light_assignments = 0; // light-froxel pairs binned
     uint32_t clustered_views = 0;
     // Counts up over the session, not per frame: an environment that
@@ -154,6 +170,10 @@ public:
     // bug is otherwise diagnosed by staring at the lit result and
     // guessing which of the fit, the pass and the lookup is wrong.
     bool dump_shadow_map(const std::string &path) const;
+    // The punctual atlas as raw depth, for a test that wants to
+    // compare it between backends rather than look at a picture of
+    // it. Returns the side length, or 0.
+    uint32_t read_shadow_atlas(std::vector<float> *out) const;
 
     rhi::Device *device() const { return device_; }
     Material *default_material() const { return default_material_.get(); }
@@ -207,6 +227,15 @@ private:
     void bake_environment(rhi::CommandList *cmd);
     bool environment_is_stale() const;
     void shadow_pass(rhi::CommandList *cmd);
+    // Hands out atlas tiles to the nearest shadow-casting lights and
+    // fills in each light's shadow fields. Returns how many tiles
+    // were used.
+    int allocate_punctual_shadows(const Vec3 &eye);
+    void punctual_shadow_pass(rhi::CommandList *cmd);
+    // What the atlas's contents depend on: every shadow-casting
+    // light, and every caster's mesh and place in the world. Equal
+    // hashes mean the atlas already holds the right answer.
+    uint64_t shadow_hash() const;
 
     bool create_targets(uint32_t w, uint32_t h);
     void destroy_targets();
@@ -253,6 +282,10 @@ private:
     rhi::BindGroupH frame_group_no_shadow_;
     rhi::BufferH light_buffer_, cluster_buffer_, light_index_buffer_;
     rhi::TextureH env_cube_, env_irradiance_, env_specular_;
+    rhi::TextureH shadow_atlas_, shadow_atlas_dummy_;
+    uint32_t atlas_tiles_per_row_ = 0;
+    uint64_t atlas_hash_ = 0;
+    bool atlas_valid_ = false;
     rhi::BindGroupLayoutH env_layout_;
     rhi::BindGroupH env_group_, env_specular_group_;
     uint32_t env_mips_ = 0;
@@ -279,6 +312,7 @@ private:
         rhi::PipelineH portal_rim;
         rhi::PipelineH tonemap;
         rhi::PipelineH shadow, shadow_ds;
+        rhi::PipelineH punctual, punctual_ds;
         rhi::PipelineH skycube, irradiance, prefilter;
     } pipe_;
 
@@ -288,8 +322,20 @@ private:
         Vec4 colour_energy;
         Vec4 direction_cone;
         Vec4 params;
+        Vec4 shadow;
+        // One per cube face; a spot uses only the first.
+        Projection shadow_view_proj[6];
+    };
+    static_assert(sizeof(LightGpu) == 464, "must match Light in common.glsl");
+
+    // One entry per atlas tile that has to be rendered this frame.
+    struct ShadowTile {
+        uint32_t tile = 0;
+        Transform3D camera;
+        Projection projection;
     };
     std::vector<LightGpu> lights_;
+    std::vector<ShadowTile> shadow_tiles_;
     // Mirrors of the GPU buffers, filled on the CPU and uploaded once.
     std::vector<uint32_t> cluster_counts_;
     std::vector<uint32_t> cluster_indices_;

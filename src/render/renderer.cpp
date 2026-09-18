@@ -122,6 +122,7 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     // The baked environment: irradiance, then prefiltered specular.
     fl.entries.push_back({5, BindingType::SampledTexture, false, true, false, 1});
     fl.entries.push_back({6, BindingType::SampledTexture, false, true, false, 1});
+    fl.entries.push_back({7, BindingType::SampledTexture, false, true, false, 1});
     frame_layout_ = dev->create_bind_group_layout(fl);
 
     // The bake's own set: one cubemap in, one face out. It borrows
@@ -215,6 +216,24 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         env_irradiance_ = dev->create_texture(ec);
     }
 
+    {
+        // ONE ATLAS FOR EVERY PUNCTUAL SHADOW. Six separate cubemaps
+        // would be six textures to bind and a cube array is a
+        // dimension the RHI does not carry; a 2D atlas of square
+        // tiles is one texture, one pass and one clear, and an omni
+        // is simply six consecutive tiles in it.
+        const uint32_t as = std::clamp(settings_.shadow_atlas_size, 256u, 8192u);
+        const uint32_t ts = std::clamp(settings_.shadow_tile_size, 64u, as);
+        atlas_tiles_per_row_ = std::max(1u, as / ts);
+        TextureDesc ad;
+        ad.width = ad.height = atlas_tiles_per_row_ * ts;
+        ad.format = Format::D32F;
+        ad.usage = TextureUsage::Sampled | TextureUsage::DepthTarget |
+                   TextureUsage::TransferSrc;
+        ad.name = "punctual shadow atlas";
+        shadow_atlas_ = dev->create_texture(ad);
+    }
+
     // THE SHADOW MAP IS ONE ARRAY, ONE LAYER PER CASCADE. An atlas in
     // a single 2D texture would work too, but then every filter tap
     // has to be clamped inside its tile by hand or a cascade bleeds
@@ -239,6 +258,13 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     dd.width = dd.height = 1;
     dd.name = "shadow map (stand-in)";
     shadow_dummy_ = dev->create_texture(dd);
+
+    TextureDesc ad2;
+    ad2.width = ad2.height = 1;
+    ad2.format = Format::D32F;
+    ad2.usage = TextureUsage::Sampled | TextureUsage::DepthTarget;
+    ad2.name = "shadow atlas (stand-in)";
+    shadow_atlas_dummy_ = dev->create_texture(ad2);
 
     BindGroupDesc fg;
     fg.layout = frame_layout_;
@@ -271,12 +297,20 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         env.binding = 6;
         env.texture = env_specular_;
         fg.entries.push_back(env);
+        BindGroupEntry at;
+        at.binding = 7;
+        at.texture = shadow_atlas_;
+        at.sampler = SamplerCache::shadow(dev);
+        fg.entries.push_back(at);
     }
     frame_group_ = dev->create_bind_group(fg);
 
     // The same frame data with the stand-in in place of the real map,
     // for the pass that renders the real map.
     fg.entries[1].texture = shadow_dummy_;
+    // And the atlas, for the pass that renders the atlas.
+    for (BindGroupEntry &e : fg.entries)
+        if (e.binding == 7) e.texture = shadow_atlas_dummy_;
     fg.name = "frame (shadow pass)";
     frame_group_no_shadow_ = dev->create_bind_group(fg);
 
@@ -343,6 +377,9 @@ void Renderer::shutdown() {
         if (b->valid()) device_->destroy(*b);
     if (shadow_map_.valid()) device_->destroy(shadow_map_);
     if (shadow_dummy_.valid()) device_->destroy(shadow_dummy_);
+    atlas_valid_ = false;
+    if (shadow_atlas_.valid()) device_->destroy(shadow_atlas_);
+    if (shadow_atlas_dummy_.valid()) device_->destroy(shadow_atlas_dummy_);
     if (light_buffer_.valid()) device_->destroy(light_buffer_);
     if (cluster_buffer_.valid()) device_->destroy(cluster_buffer_);
     if (light_index_buffer_.valid()) device_->destroy(light_index_buffer_);
@@ -528,6 +565,30 @@ bool Renderer::create_pipelines() {
         sp.raster.cull = CullMode::None;
         sp.name = "shadow (two sided)";
         pipe_.shadow_ds = device_->create_pipeline(sp);
+
+        // THE PUNCTUAL ATLAS GETS NO POLYGON OFFSET.
+        //
+        // A slope-scaled depth bias is defined against "the smallest
+        // resolvable difference", which for a float depth buffer is
+        // a per-primitive quantity on Vulkan and an implementation's
+        // own business on OpenGL. Under an orthographic cascade the
+        // two land close enough; under the perspective frusta of a
+        // cube face they do not, and coplanar surfaces -- which a
+        // room built out of boxes has at every corner -- resolved
+        // differently on the two backends. 22% of the atlas's texels
+        // differed, and none of them had to.
+        //
+        // The punctual lookup biases along the surface normal in the
+        // shader instead, which is not the driver's business at all.
+        sp.depth_stencil.depth_bias_enable = false;
+        sp.depth_stencil.depth_bias_constant = 0.0f;
+        sp.depth_stencil.depth_bias_slope = 0.0f;
+        sp.raster.cull = CullMode::Back;
+        sp.name = "punctual shadow";
+        pipe_.punctual = device_->create_pipeline(sp);
+        sp.raster.cull = CullMode::None;
+        sp.name = "punctual shadow (two sided)";
+        pipe_.punctual_ds = device_->create_pipeline(sp);
     }
 
     // ------------------------------------------- the environment bake
@@ -1110,6 +1171,227 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
 
 
 
+
+// ------------------------------------------ shadows for punctual lights
+
+int Renderer::allocate_punctual_shadows(const Vec3 &eye) {
+    shadow_tiles_.clear();
+    for (LightGpu &l : lights_) {
+        l.shadow = Vec4(0, 0, 0, 0);
+        for (Projection &m : l.shadow_view_proj) m = Projection::identity();
+        l.params.w = 0.0f;  // no tile: the shader reads this as "no shadow"
+    }
+    if (!settings_.punctual_shadows || !shadow_atlas_.valid()) return 0;
+
+    const int total_tiles = int(atlas_tiles_per_row_ * atlas_tiles_per_row_);
+    if (total_tiles <= 0) return 0;
+
+    // NEAREST FIRST. There are always more lights than tiles in a
+    // scene worth lighting, so the question is not whether to choose
+    // but what to choose by -- and the light whose shadow the player
+    // is standing in is the one closest to them.
+    std::vector<uint32_t> order(lights_.size());
+    for (uint32_t i = 0; i < order.size(); i++) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+        return (lights_[a].position_range.xyz() - eye).length_sq() <
+               (lights_[b].position_range.xyz() - eye).length_sq();
+    });
+
+    const float near = std::max(settings_.punctual_shadow_near, 1e-3f);
+    const float tile_uv = 1.0f / float(atlas_tiles_per_row_);
+    int next = 0;
+
+    for (uint32_t li : order) {
+        LightGpu &L = lights_[li];
+        const bool spot = int(L.params.z) == 1;
+        const int need = spot ? 1 : 6;
+        if (next + need > total_tiles) continue;
+        const Vec3 pos = L.position_range.xyz();
+        const float far = std::max(L.position_range.w, near * 2.0f);
+
+        L.shadow = Vec4(float(next), float(atlas_tiles_per_row_), tile_uv, 0.0f);
+        L.params.w = near;
+
+        if (spot) {
+            // The cone, with a little margin so the penumbra at the
+            // edge has something recorded to read.
+            const float outer = std::acos(std::clamp(L.direction_cone.w,
+                                                     -0.999f, 0.999f));
+            const float fov = std::min(outer * 2.0f * 1.1f, deg2rad(179.0f));
+            Vec3 dir = L.direction_cone.xyz().normalized();
+            Vec3 up = std::fabs(dir.y) > 0.95f ? Vec3(0, 0, 1) : Vec3(0, 1, 0);
+            Transform3D xf(Basis::looking_at(dir, up), pos);
+            Projection proj = Projection::perspective(fov, 1.0f, near, far);
+            L.shadow_view_proj[0] = proj * to_projection(xf.inverse_orthonormal());
+            shadow_tiles_.push_back({uint32_t(next), xf, proj});
+        } else {
+            // SIX FACES. The order is the only thing the shader has
+            // to agree with -- cube_face_of picks an index from the
+            // dominant axis and then reads the matrix this loop
+            // uploaded, so the bases below can be whatever an
+            // ordinary right-handed camera wants and no convention
+            // has to be matched.
+            static const Vec3 kForward[6] = {
+                {1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            static const Vec3 kUp[6] = {
+                {0, 1, 0}, {0, 1, 0}, {0, 0, -1},
+                {0, 0, 1}, {0, 1, 0}, {0, 1, 0}};
+            Projection proj =
+                Projection::perspective(deg2rad(90.0f), 1.0f, near, far);
+            for (int f = 0; f < 6; f++) {
+                Transform3D xf(Basis::looking_at(kForward[f], kUp[f]), pos);
+                L.shadow_view_proj[f] =
+                    proj * to_projection(xf.inverse_orthonormal());
+                shadow_tiles_.push_back({uint32_t(next + f), xf, proj});
+            }
+        }
+        if (getenv("MF_TRACE_TILES"))
+            MF_INFO("tile: light %u %s at (%.2f %.2f %.2f) range %.1f -> tiles "
+                    "%d..%d", li, spot ? "spot" : "omni", double(pos.x),
+                    double(pos.y), double(pos.z), double(L.position_range.w),
+                    next, next + need - 1);
+        next += need;
+        stats_.shadow_casting_lights++;
+    }
+    return next;
+}
+
+uint64_t Renderer::shadow_hash() const {
+    // FNV-1a over the bytes that decide what the atlas should hold.
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](const void *p, size_t n) {
+        const uint8_t *b = (const uint8_t *)p;
+        for (size_t i = 0; i < n; i++) {
+            h ^= b[i];
+            h *= 1099511628211ull;
+        }
+    };
+    for (const LightGpu &l : lights_) {
+        if (l.params.w <= 0.0f) continue;   // casts nothing
+        mix(&l.position_range, sizeof(Vec4));
+        mix(&l.direction_cone, sizeof(Vec4));
+        mix(&l.params, sizeof(Vec4));
+        mix(&l.shadow, sizeof(Vec4));
+    }
+    for (const Renderable &r : renderables_) {
+        if (!r.material->cast_shadows) continue;
+        if (r.material->pass == MaterialPass::Transparent) continue;
+        const void *mesh = r.mesh;
+        mix(&mesh, sizeof(mesh));
+        mix(&r.sub->first_index, sizeof(uint32_t));
+        mix(&r.sub->index_count, sizeof(uint32_t));
+        mix(&r.model, sizeof(Transform3D));
+    }
+    return h;
+}
+
+void Renderer::punctual_shadow_pass(rhi::CommandList *cmd) {
+    if (shadow_tiles_.empty() || !pipe_.punctual.valid()) {
+        atlas_valid_ = false;
+        return;
+    }
+
+    // THE ATLAS IS NOT A PER-FRAME THING. A lamp bolted to a wall in
+    // a room made of walls produces the same six depth images every
+    // frame for ever, and re-rendering the scene thirteen times to
+    // arrive at them again cost this engine 177 fps down to 49. The
+    // hash covers every caster's mesh and transform and every
+    // shadow-casting light's position and shape; equal means the
+    // texture already holds the answer.
+    //
+    // A moving caster or a moving light changes it and the whole
+    // atlas is redrawn, which is the same cost as before -- so this
+    // is a saving on static scenes and never a loss on dynamic ones.
+    const uint64_t hash = shadow_hash();
+    if (getenv("MF_TRACE_ATLAS") && atlas_valid_ && hash != atlas_hash_)
+        MF_INFO("atlas: rebaking (%zu lights, %zu casters)", lights_.size(),
+                renderables_.size());
+    if (atlas_valid_ && hash == atlas_hash_) {
+        stats_.punctual_shadows_reused = true;
+        return;
+    }
+    atlas_hash_ = hash;
+    atlas_valid_ = true;
+
+    MF_GPU_SCOPE(cmd, "punctual shadows");
+
+    const uint32_t size = device_->texture_desc(shadow_atlas_).width;
+    const uint32_t tile = size / std::max(1u, atlas_tiles_per_row_);
+
+    // ONE PASS, MANY VIEWPORTS. Every tile shares the atlas, so the
+    // clear happens once and each tile is a scissor rather than a
+    // render pass of its own -- which on a tiled GPU is the whole
+    // difference between this being affordable and not.
+    RenderingInfo ri;
+    ri.has_depth = true;
+    ri.depth.texture = shadow_atlas_;
+    ri.depth.depth_load = LoadOp::Clear;
+    ri.depth.clear_depth = 0.0f;  // reverse-Z
+    ri.depth.stencil_load = LoadOp::DontCare;
+    ri.width = size;
+    ri.height = size;
+    ri.name = "punctual shadows";
+    cmd->begin_rendering(ri);
+
+    for (const ShadowTile &st : shadow_tiles_) {
+        const uint32_t tx = st.tile % atlas_tiles_per_row_;
+        const uint32_t ty = st.tile / atlas_tiles_per_row_;
+        Viewport vp;
+        vp.x = float(tx * tile);
+        vp.y = float(ty * tile);
+        vp.width = float(tile);
+        vp.height = float(tile);
+        cmd->set_viewport(vp);
+        cmd->set_scissor({int(tx * tile), int(ty * tile), tile, tile});
+
+        View lv;
+        lv.camera = st.camera;
+        lv.projection = st.projection;
+        lv.clustered = false;
+        const uint32_t offset = upload_view(lv);
+
+        Plane frustum[6];
+        st.projection.frustum_planes(st.camera, frustum);
+
+        cmd->bind_pipeline(pipe_.punctual);
+        cmd->bind_group(0, frame_group_no_shadow_);
+        cmd->bind_group(1, view_group_, &offset, 1);
+
+        PipelineH last = pipe_.punctual;
+        BindGroupH last_group;
+        for (const Renderable &r : renderables_) {
+            if (!r.material->cast_shadows) continue;
+            if (r.material->pass == MaterialPass::Transparent) continue;
+            if (!visible_in(frustum, r.bounds)) continue;
+            PipelineH pipeline =
+                r.material->double_sided ? pipe_.punctual_ds : pipe_.punctual;
+            if (pipeline != last) {
+                cmd->bind_pipeline(pipeline);
+                last = pipeline;
+                last_group = {};
+            }
+            BindGroupH mg = r.material->bind_group();
+            if (mg != last_group) {
+                cmd->bind_group(2, mg);
+                last_group = mg;
+            }
+            PushUniforms pu{};
+            pu.model = to_projection(r.model);
+            pu.tint = Vec4(1, 1, 1, 1);
+            cmd->push_constants(&pu, sizeof(pu));
+            cmd->bind_vertex_buffer(0, r.mesh->vertex_buffer());
+            cmd->bind_index_buffer(r.mesh->index_buffer(), IndexType::U32);
+            cmd->draw_indexed(r.sub->index_count, 1, r.sub->first_index);
+            stats_.punctual_shadow_draws++;
+            stats_.triangles += r.sub->index_count / 3;
+        }
+    }
+    cmd->end_rendering();
+    cmd->texture_barrier(shadow_atlas_, TextureUsage::DepthTarget,
+                         TextureUsage::Sampled);
+}
+
 // ------------------------------------------------------ the environment
 
 bool Renderer::environment_is_stale() const {
@@ -1618,6 +1900,18 @@ void Renderer::shadow_pass(rhi::CommandList *cmd) {
                          TextureUsage::Sampled);
 }
 
+uint32_t Renderer::read_shadow_atlas(std::vector<float> *out) const {
+    if (!device_ || !shadow_atlas_.valid() || !out) return 0;
+    device_->wait_idle();
+    const uint32_t n = device_->texture_desc(shadow_atlas_).width;
+    out->assign(size_t(n) * n, 0.0f);
+    if (device_->read_texture(shadow_atlas_, out->data(),
+                              out->size() * sizeof(float)) !=
+        out->size() * sizeof(float))
+        return 0;
+    return n;
+}
+
 bool Renderer::dump_shadow_map(const std::string &path) const {
     if (!device_ || !shadow_map_.valid() || cascade_count_ <= 0) return false;
     device_->wait_idle();
@@ -1644,6 +1938,26 @@ bool Renderer::dump_shadow_map(const std::string &path) const {
         return false;
     }
     MF_INFO("shadow dump: %s (%u cascades at %u)", path.c_str(), n, shadow_size_);
+
+    // And the punctual atlas beside it, under the same stem.
+    if (shadow_atlas_.valid()) {
+        const uint32_t as = device_->texture_desc(shadow_atlas_).width;
+        std::vector<float> ad(size_t(as) * as);
+        if (device_->read_texture(shadow_atlas_, ad.data(),
+                                  ad.size() * sizeof(float)) ==
+            ad.size() * sizeof(float)) {
+            std::vector<uint8_t> ao(ad.size());
+            for (size_t i = 0; i < ad.size(); i++)
+                ao[i] = uint8_t(std::clamp(ad[i], 0.0f, 1.0f) * 255.0f);
+            std::string ap = path;
+            const size_t dot = ap.rfind('.');
+            ap.insert(dot == std::string::npos ? ap.size() : dot, "_atlas");
+            if (stbi_write_png(ap.c_str(), int(as), int(as), 1, ao.data(),
+                               int(as)))
+                MF_INFO("shadow dump: %s (atlas %ux%u, %zu tiles used)",
+                        ap.c_str(), as, as, shadow_tiles_.size());
+        }
+    }
     return true;
 }
 
@@ -1696,6 +2010,11 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     }
     upload_frame();
     if (cascade_count_ > 0) shadow_pass(cmd);
+    // THE TILES ARE HANDED OUT BEFORE ANY VIEW IS UPLOADED, because
+    // a view upload is what fills in a froxel grid and the grid
+    // indexes lights whose shadow fields have to be final by then.
+    allocate_punctual_shadows(root.camera.origin);
+    punctual_shadow_pass(cmd);
 
     // --- the scene, into the HDR target
     {

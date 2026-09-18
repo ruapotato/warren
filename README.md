@@ -97,6 +97,12 @@ second half of the split-sum is Lazarov's analytic fit rather than a
 lookup table: four multiply-adds, and one less texture to bind with
 the wrong filter.
 
+**Punctual lights cast.** Spots and omnis get shadows from one atlas
+of square tiles — a spot takes one, an omni six — and the atlas is
+**cached on a hash of every caster and every casting light**, because
+a lamp bolted to a wall in a room made of walls produces the same six
+depth images every frame for ever. A static scene bakes it once.
+
 **So do the light clusters.** Punctual lights are binned into a froxel
 grid, and the grid is built **per view**: a portal view is a different
 camera looking at different geometry through the same pixels, so it
@@ -244,8 +250,8 @@ plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
-                   lights, image-based lighting, the plugin ABI and
-                   terrain LOD, Python
+                   lights, image-based lighting, punctual shadows,
+                   the plugin ABI and terrain LOD, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -269,7 +275,6 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: shadows for punctual lights, audio, networking, and an
-editor.
+Not yet: audio, networking, and an editor.
 
 See `docs/conventions.md` before touching the renderer.

@@ -219,3 +219,41 @@ prefilter reads those mips, and the difference is largest on the
 shiniest surface in the frame: mean 0.03/255 and worst 3 on the test's
 sphere, mean 0.08 and worst 20 in the portals demo. It must stay a
 rounding difference — smooth, small and everywhere — never a shape.
+
+## Shadows from punctual lights
+
+One 2D atlas of square tiles, not a cubemap array: a spot takes one
+tile and an omni six consecutive ones, which may wrap onto the next
+row, so a light carries a tile *index* rather than a rectangle.
+
+**The CPU uploads the matrix it rendered each face with, and the
+shader projects with that.** Deriving a cube face's basis in the
+shader from a forward and an up vector looks like an easy saving and
+is not: the standard texel-to-direction mapping is left-handed with
+respect to a right-handed camera, so a face rendered by an ordinary
+view matrix is mirrored relative to a mapping that reads it back that
+way. The symptom is a hard seam where two faces meet, which reads as a
+bias problem. Since this is a plain 2D texture and not a hardware
+cubemap, there is no convention that has to be matched — the only
+thing the two sides share is the *order* of the six faces, which
+`cube_face_of` picks from the dominant axis.
+
+Six matrices per light is 384 bytes, and **the shader must not copy
+the struct to get at them**. `Light L = lights[k]` pulls all 464 bytes
+through the cache for every light touching every pixel, which cost the
+portals demo 177 fps down to 49; reading the fields it needs costs
+nothing. That is the single largest performance mistake made in this
+engine so far and it was invisible in every test.
+
+The atlas carries **no polygon offset**. A slope-scaled depth bias is
+defined against the smallest resolvable depth difference, which for a
+float buffer is a per-primitive quantity on Vulkan and the driver's
+own business on OpenGL; under the perspective frusta of a cube face
+the two diverge. The lookup biases along the surface normal instead.
+
+In a controlled scene the two backends write **bit-identical** depth
+into the atlas (mean |dz| 0.000000 over 2048², `tests/test_punctual_shadows`).
+The portals demo still differs by about 1% of pixels at shadow edges,
+and that is the demo's own geometry: its rooms are built from boxes
+whose volumes overlap, so coincident faces are resolved differently by
+two rasterisers. The engine path is deterministic; the scene is not.

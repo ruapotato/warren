@@ -110,6 +110,62 @@ float sample_shadow(vec3 world, vec3 n, vec3 l, float view_depth) {
     return sum / 9.0;
 }
 
+// ------------------------------------------ shadows for punctual lights
+
+// How much of light L reaches `world`. 1 when it casts no shadow.
+//
+// AN OMNI NEEDS NO MATRIX HERE, and that is the whole reason this is
+// short. Its six faces were rendered with 90-degree frusta sharing
+// one near and one far, so the depth stored for a texel is a function
+// of the distance along that face's dominant axis and nothing else --
+// which the fragment can work out for itself. Only a spot, whose
+// frustum is its own shape, carries a matrix.
+float shadow_punctual(uint li, vec3 world, vec3 n, vec3 l) {
+    float near = lights[li].params.w;
+    if (near <= 0.0) return 1.0;            // no tile was allocated
+
+    // Normal-offset again: the lookup moves along the surface rather
+    // than the stored depth moving away from it, for the same reason
+    // as the cascades.
+    float n_dot_l = clamp(dot(n, l), 0.0, 1.0);
+    vec3 p = world + n * (1.0 - n_dot_l) * 0.06 + n * 0.015;
+
+    // ONE PATH FOR BOTH. A spot is face 0 of a light that has one
+    // face; an omni picks the face its dominant axis lands in.
+    // Either way the matrix is the one the CPU rendered that tile
+    // with, so there is nothing here that can disagree with the pass
+    // -- which is not true of deriving a face's basis from a forward
+    // and an up vector, and the seam that produces reads as a bias
+    // problem rather than as the mirrored face it is.
+    int face = int(lights[li].params.z) == LIGHT_SPOT
+                   ? 0
+                   : cube_face_of(p - lights[li].position_range.xyz);
+    vec4 c = lights[li].shadow_view_proj[face] * vec4(p, 1.0);
+    if (c.w <= 0.0) return 1.0;
+    c /= c.w;
+    // Sampling a render target: v runs the other way. The same flip,
+    // for the same reason, as every other lookup into something the
+    // engine drew.
+    vec2 uv = vec2(c.x, -c.y) * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))))
+        return 1.0;
+    float ref = c.z;
+    if (ref <= 0.0 || ref >= 1.0) return 1.0;
+
+    // 2x2 PCF. Punctual shadows are small on screen and a wider
+    // kernel costs more than it shows.
+    vec2 texel = 1.0 / vec2(textureSize(shadow_atlas, 0));
+    float sum = 0.0;
+    for (int y = 0; y <= 1; y++)
+        for (int x = 0; x <= 1; x++) {
+            vec2 a = atlas_uv(lights[li].shadow.x, float(face),
+                              lights[li].shadow.y, lights[li].shadow.z, uv);
+            sum += texture(shadow_atlas,
+                           vec3(a + (vec2(x, y) - 0.5) * texel, ref));
+        }
+    return sum * 0.25;
+}
+
 // ------------------------------------------------------- punctual lights
 
 // Every light whose froxel this fragment lands in. The loop is over
@@ -122,31 +178,45 @@ vec3 punctual(vec3 world, vec3 n, vec3 v, vec3 albedo, float metallic,
     int c = cluster_of(gl_FragCoord.xy, view_depth);
     uint n_lights = min(cluster_count[c], uint(CLUSTER_MAX_LIGHTS));
     for (uint i = 0u; i < n_lights; i++) {
-        Light L = lights[light_index[uint(c) * uint(CLUSTER_MAX_LIGHTS) + i]];
+        // FIELD BY FIELD, NOT `Light L = lights[k]`.
+        //
+        // The struct carries six matrices for the cube faces, so a
+        // copy is 464 bytes pulled through the cache for every light
+        // touching every pixel -- which cost this scene 177 fps down
+        // to 49 the moment the matrices were added. Read what is
+        // needed and the shadow lookup reads the one matrix it wants.
+        uint k = light_index[uint(c) * uint(CLUSTER_MAX_LIGHTS) + i];
 
-        vec3 to_light = L.position_range.xyz - world;
+        vec4 pos_range = lights[k].position_range;
+        vec3 to_light = pos_range.xyz - world;
         float dist_sq = dot(to_light, to_light);
-        float range = L.position_range.w;
+        float range = pos_range.w;
         if (dist_sq > range * range) continue;
 
-        float atten = distance_attenuation(dist_sq, range, L.params.y);
+        vec4 params = lights[k].params;
+        float atten = distance_attenuation(dist_sq, range, params.y);
         if (atten <= 0.0) continue;
         vec3 l = to_light * inversesqrt(max(dist_sq, 1e-12));
 
         // A spot is an omni with the cone taken out of it. Smoothed
         // between the inner and outer angles, so the edge is a falloff
         // rather than a cut.
-        if (int(L.params.z) == LIGHT_SPOT) {
-            float cd = dot(-l, L.direction_cone.xyz);
-            float t = (cd - L.direction_cone.w) /
-                      max(L.params.x - L.direction_cone.w, 1e-4);
+        if (int(params.z) == LIGHT_SPOT) {
+            vec4 cone = lights[k].direction_cone;
+            float cd = dot(-l, cone.xyz);
+            float t = (cd - cone.w) / max(params.x - cone.w, 1e-4);
             t = clamp(t, 0.0, 1.0);
             atten *= t * t;
             if (atten <= 0.0) continue;
         }
 
-        sum += brdf(n, v, l, albedo, metallic, rough) * L.colour_energy.rgb *
-               L.colour_energy.a * atten;
+        if (params.w > 0.0) {
+            atten *= shadow_punctual(k, world, n, l);
+            if (atten <= 0.0) continue;
+        }
+
+        vec4 ce = lights[k].colour_energy;
+        sum += brdf(n, v, l, albedo, metallic, rough) * ce.rgb * ce.a * atten;
     }
     return sum;
 }

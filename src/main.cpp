@@ -582,6 +582,10 @@ int main(int argc, char **argv) {
             // engine each frame took exactly 1/60s measures nothing.
             cfg.fixed_delta = -1.0f;
             cfg.window.vsync = false;
+        } else if (a == "--no-ibl") {
+            cfg.render.image_based_lighting = false;
+        } else if (a == "--no-punctual-shadows") {
+            cfg.render.punctual_shadows = false;
         } else if (a == "--no-lights") {
             cfg.render.punctual_lights = false;
         } else if (a == "--clustered-views") {
@@ -635,6 +639,8 @@ int main(int argc, char **argv) {
                 "  --clear RRGGBB        the clear colour, for spotting holes\n"
                 "  --bench               time 600 frames and print percentiles\n"
                 "  --no-lights           no punctual lights, sun only\n"
+                "  --no-ibl              hemisphere ambient, no environment\n"
+                "  --no-punctual-shadows lights, but nothing blocks them\n"
                 "  --clustered-views N   how many views get a froxel grid\n"
                 "  --no-shadows          turn the shadow pass off\n"
                 "  --shadow-size N       shadow map resolution (default 2048)\n"
@@ -711,7 +717,8 @@ int main(int argc, char **argv) {
             "  last frame: %u draws, %u tris, %u views, %u portal levels,\n"
             "              %u cascades (%u shadow draws), %u lights in %u "
             "clustered views\n"
-            "  environment baked %llu time%s in the whole run\n",
+            "  environment baked %llu time%s in the whole run\n"
+            "  punctual shadow atlas: %u casting lights, %u draws, %s\n",
             rhi::backend_name(engine.device()->backend()), demo.c_str(),
             cfg.window.width, cfg.window.height, cfg.render.msaa, t.frames,
             t.mean_ms, t.mean_ms > 0 ? 1000.0 / t.mean_ms : 0.0, t.min_ms,
@@ -719,7 +726,10 @@ int main(int argc, char **argv) {
             r.triangles, r.views, r.max_depth_reached, r.cascades,
             r.shadow_draws, r.lights, r.clustered_views,
             (unsigned long long)r.environment_bakes,
-            r.environment_bakes == 1 ? "" : "s");
+            r.environment_bakes == 1 ? "" : "s", r.shadow_casting_lights,
+            r.punctual_shadow_draws,
+            r.punctual_shadows_reused ? "reused from an earlier frame"
+                                      : "rebuilt this frame");
     }
     if (!shadow_dump.empty()) engine.renderer()->dump_shadow_map(shadow_dump);
     {

@@ -70,7 +70,28 @@ struct Light {
     vec4 position_range;    // xyz world, w = range in metres
     vec4 colour_energy;     // rgb colour, a = energy in candela
     vec4 direction_cone;    // xyz the way it points, w = cos(outer angle)
-    vec4 params;            // cos(inner), source radius, type, unused
+    vec4 params;            // cos(inner), source radius, type, shadow near
+    // WHERE ITS SHADOW LIVES IN THE ATLAS, as a tile index rather
+    // than a rectangle: an omni takes six consecutive tiles and they
+    // may wrap onto the next row, so a rectangle could not describe
+    // it while an index always can.
+    vec4 shadow;            // base tile, tiles per row, tile uv size, unused
+    // ONE MATRIX PER FACE, UPLOADED RATHER THAN DERIVED.
+    //
+    // A spot uses [0]; an omni uses [face]. Deriving a cube face's
+    // basis in the shader from a forward and an up vector looked like
+    // an easy saving and is not: the standard texel-to-direction
+    // mapping is left-handed with respect to a right-handed camera,
+    // so a face rendered by an ordinary view matrix is mirrored
+    // relative to the mapping that reads it -- and the symptom is a
+    // hard seam where two faces meet, which reads as a bias problem.
+    //
+    // This atlas is a plain 2D texture, not a hardware cubemap, so
+    // there is no convention that has to be matched: the CPU picks
+    // the frustum, uploads exactly the matrix it rendered with, and
+    // the shader projects. 384 bytes a light that the scene will
+    // never notice.
+    mat4 shadow_view_proj[6];
 };
 
 layout(set = SET_FRAME, binding = B_FRAME(2), std430) readonly buffer Lights {
@@ -94,6 +115,10 @@ layout(set = SET_FRAME, binding = B_FRAME(4), std430) readonly buffer LightIndex
 // one; zero means there is no environment and the shader falls back.
 layout(set = SET_FRAME, binding = B_FRAME(5)) uniform samplerCube env_irradiance;
 layout(set = SET_FRAME, binding = B_FRAME(6)) uniform samplerCube env_specular;
+
+// One atlas for every punctual light that casts. A spot takes one
+// tile, an omni six.
+layout(set = SET_FRAME, binding = B_FRAME(7)) uniform sampler2DShadow shadow_atlas;
 
 // ----------------------------------------------------------------- view
 //
@@ -170,7 +195,22 @@ const float PI = 3.14159265359;
 float linear_depth(float depth_ndc, float near, float far) {
     // For an infinite far plane, far <= 0 is passed in.
     if (far <= 0.0) return near / max(depth_ndc, 1e-9);
-    return (near * far) / max(mix(near, far, 1.0 - depth_ndc), 1e-9);
+    // Straight from Projection::frustum, which puts
+    //   ndc = near * (far - z) / (z * (far - near))
+    // and inverts to this. The 1.0 - depth_ndc that used to be here
+    // was an extra reversal on top of a reverse-Z matrix, so it
+    // returned the far plane for the near one; nothing in the engine
+    // called it yet, which is the only reason it had not been seen.
+    return (near * far) / max(mix(near, far, depth_ndc), 1e-9);
+}
+
+// The other direction: a distance along the view axis, as the depth a
+// reverse-Z projection with these planes would have written. What a
+// cube shadow's lookup needs, since the face it reads recorded
+// exactly this.
+float depth_from_linear(float z, float near, float far) {
+    if (far <= 0.0) return near / max(z, 1e-9);
+    return (near * (far - z)) / max(z * (far - near), 1e-9);
 }
 
 vec3 world_from_depth(vec2 uv, float depth_ndc, mat4 inv_view_proj) {
@@ -201,6 +241,29 @@ float distance_attenuation(float dist_sq, float range, float radius) {
     float factor = dist_sq / max(range * range, 1e-6);
     float smooth_factor = clamp(1.0 - factor * factor, 0.0, 1.0);
     return (smooth_factor * smooth_factor) / d2;
+}
+
+// WHICH OF THE SIX FRUSTA A DIRECTION FALLS IN: the dominant axis,
+// and nothing subtler. The order matches the CPU's face table, and
+// that is the whole of the agreement between them -- where on the
+// face it lands comes from that face's own matrix.
+int cube_face_of(vec3 dir) {
+    vec3 a = abs(dir);
+    if (a.x >= a.y && a.x >= a.z) return dir.x > 0.0 ? 0 : 1;
+    if (a.y >= a.z) return dir.y > 0.0 ? 2 : 3;
+    return dir.z > 0.0 ? 4 : 5;
+}
+
+// The atlas uv for a tile index and a position within it, with the
+// sample pulled a texel inside the tile so a filter tap cannot read
+// its neighbour's shadow.
+vec2 atlas_uv(float base_tile, float face, float per_row, float tile_uv,
+              vec2 uv) {
+    float tile = base_tile + face;
+    vec2 cell = vec2(mod(tile, per_row), floor(tile / per_row));
+    vec2 inset = vec2(1.5 / max(textureSize(shadow_atlas, 0).x, 1));
+    uv = clamp(uv, inset / tile_uv, 1.0 - inset / tile_uv);
+    return (cell + uv) * tile_uv;
 }
 
 // Hash and noise, for dithering and for anything that wants a stable
