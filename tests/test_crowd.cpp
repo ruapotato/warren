@@ -486,6 +486,61 @@ int main() {
         Array through = region->find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6));
         check(through.size() >= 2, "and the route across it is shorter now");
 
+        // --- WHICH WAY THE BODY POINTS.
+        //
+        // An agent with a mesh on it has to face where it is going
+        // or it moonwalks, and "where it is going" is the velocity
+        // avoidance settled on, not the direction of the target: a
+        // body squeezing round an obstacle is travelling sideways
+        // and facing the target instead is a body walking crabwise.
+        // Off by default, because a game driving its own character
+        // owns the rotation.
+        NavAgent3D *turner = new NavAgent3D();
+        turner->set_name("Turner");
+        turner->radius = 0.35f;
+        turner->max_speed = 2.5f;
+        turner->turn_speed = 6.0f;
+        turner->set_position(Vec3(-5, 0, -6));
+        // Deliberately near a half turn. That is the Euler branch
+        // that used to come back as a pitch of pi -- a body lying on
+        // its back and walking -- so this is the case worth pinning.
+        turner->set_euler(Vec3(3.0f, 0, 0));
+        region->add_child(turner);
+        frame();
+        turner->set_target(Vec3(5, 0, -6));
+        for (int i = 0; i < 90; ++i) frame();
+
+        const Vec3 v = turner->velocity();
+        const float moving = std::sqrt(v.x * v.x + v.z * v.z);
+        check(moving > 0.2f, "a turning agent still walks");
+        // The node's forward is -Z, so this is the yaw that points
+        // along the velocity. Compared as an angle difference, so
+        // the wrap at pi does not read as a failure.
+        const float want = std::atan2(-v.x, -v.z);
+        // From the basis, not from euler(): see Node3D::euler.
+        const Vec3 face = turner->global_transform().basis * Vec3(0, 0, -1);
+        float off = std::atan2(-face.x, -face.z) - want;
+        while (off > 3.14159265f) off -= 6.28318531f;
+        while (off < -3.14159265f) off += 6.28318531f;
+        check(std::fabs(off) < 0.35f,
+              "and turns to face the way it is actually travelling");
+        const Vec3 up = turner->global_transform().basis * Vec3(0, 1, 0);
+        check(up.y > 0.99f, "and is still standing up while it does it");
+
+        NavAgent3D *fixed = new NavAgent3D();
+        fixed->set_name("Fixed");
+        fixed->radius = 0.35f;
+        fixed->max_speed = 2.5f;
+        fixed->set_position(Vec3(-5, 0, -5));
+        fixed->set_euler(Vec3(1.2f, 0, 0));
+        region->add_child(fixed);
+        frame();
+        fixed->set_target(Vec3(5, 0, -5));
+        for (int i = 0; i < 90; ++i) frame();
+        const Vec3 held = fixed->global_transform().basis * Vec3(0, 0, -1);
+        check(std::fabs(std::atan2(-held.x, -held.z) - 1.2f) < 1e-3f,
+              "while one with turn_speed zero is left pointing where it was");
+
         scene->queue_free();
     }
 

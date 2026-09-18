@@ -390,14 +390,30 @@ void NavAgent3D::on_physics(float dt) {
             // noise. Facing noise makes a standing body twitch.
             const float flat = std::sqrt(v.x * v.x + v.z * v.z);
             if (flat > 0.15f) {
+                // AN EULER HERE IS (YAW, PITCH, ROLL), NOT (X, Y, Z).
+                // set_euler feeds from_euler_yxz(e.x, e.y, e.z), so
+                // the yaw is the FIRST component. Writing it into .y
+                // sets a pitch instead, and the body walks along
+                // lying on its back.
+                //
+                // And the current yaw is taken from the forward
+                // vector rather than read back from euler(), because
+                // Euler angles are not unique: near a half turn the
+                // decomposition comes back as a pitch of pi, a small
+                // yaw and a roll of pi -- the same rotation, spelled
+                // differently -- and incrementing one component of
+                // that is not the turn it looks like. A forward
+                // vector has no branches.
+                const Vec3 f = global_transform().basis * Vec3(0, 0, -1);
+                const float now = std::atan2(-f.x, -f.z);
                 const float want = std::atan2(-v.x, -v.z);
-                Vec3 e = euler();
-                float d = want - e.y;
+                float d = want - now;
                 while (d > 3.14159265f) d -= 6.28318531f;
                 while (d < -3.14159265f) d += 6.28318531f;
                 const float step = turn_speed * dt;
-                e.y += std::clamp(d, -step, step);
-                set_euler(e);
+                // A PURE yaw: a body that walks has no business
+                // carrying a pitch or a roll.
+                set_euler(Vec3(now + std::clamp(d, -step, step), 0.0f, 0.0f));
             }
         }
     } else {

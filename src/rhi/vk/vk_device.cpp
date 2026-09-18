@@ -1905,7 +1905,10 @@ void VkDeviceImpl::record_copy(VkCommandBuffer cb, uint64_t src_offset,
 // and before anything else, so the copies land before the first draw
 // that could read them.
 void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
-    if (pending_uploads_.empty()) return;
+    // Mips can outlive the uploads that caused them -- see the end of
+    // this function -- so an empty upload queue is not a reason to
+    // leave without looking.
+    if (pending_uploads_.empty() && pending_mips_.empty()) return;
     std::vector<Pending> batch;
     batch.swap(pending_uploads_);
     // WHAT WILL NOT FIT WAITS, it is not thrown away.
@@ -1955,10 +1958,36 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
     // After the copies, in the same buffer: a chain built from a
     // level zero that has not landed yet would be a chain of
     // whatever was there before.
+    //
+    // AND THAT INCLUDES A LEVEL ZERO THAT WAS JUST DEFERRED. Holding
+    // the overflow back fixed textures coming out blank, and quietly
+    // introduced this: the copy waits a frame, the mip chain does
+    // not, and the chain is built from an image nothing has written.
+    // Level zero lands next frame and the mips are never rebuilt, so
+    // the texture is correct close up and garbage at any distance
+    // that samples a smaller level -- which reads as dirt on the
+    // model, not as a missing upload. It cost a long afternoon.
+    //
+    // The threshold is sharp and entirely about the ring: five
+    // 512-pixel textures on one mesh were fine and seven were not.
     std::vector<TextureH> mips;
     mips.swap(pending_mips_);
-    for (TextureH h : mips)
+    for (TextureH h : mips) {
+        bool waiting = false;
+        for (const Pending &p : pending_uploads_) {
+            if (p.dst_texture == h) {
+                waiting = true;
+                break;
+            }
+        }
+        if (waiting) {
+            // Back in the queue; it will be built the frame after
+            // its last copy lands.
+            pending_mips_.push_back(h);
+            continue;
+        }
         if (VkTextureRes *t = textures.get(h)) record_mips(cb, *t);
+    }
 }
 
 void VkDeviceImpl::generate_mips(TextureH h) {

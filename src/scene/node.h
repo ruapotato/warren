@@ -189,6 +189,20 @@ public:
     Quat rotation() const { return local_.basis.to_quat(); }
     void set_rotation(const Quat &q);
     // Yaw, pitch, roll in radians, in the camera's YXZ order.
+    // EULER ANGLES HERE ARE (YAW, PITCH, ROLL) -- not (x, y, z)
+    // meaning rotation about x, y, z. The order is yaw first,
+    // because that is the one almost everything sets and the
+    // rotation is applied Y then X then Z. Reading `.y` expecting
+    // the yaw gets a pitch, and a character that should have turned
+    // ends up lying on its back instead; that has now happened
+    // twice, hence this comment.
+    //
+    // And the decomposition is NOT unique. Near a half turn,
+    // to_euler_yxz returns (small yaw, pi, pi) for what was set as
+    // a pure yaw -- the same rotation, spelled differently. Code
+    // that reads an angle back, adjusts it and writes it again will
+    // eventually flip something over. Take a direction from the
+    // basis instead.
     Vec3 euler() const { return local_.basis.to_euler_yxz(); }
     void set_euler(const Vec3 &e);
 
