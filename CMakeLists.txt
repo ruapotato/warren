@@ -87,7 +87,23 @@ if(MANIFOLD_VULKAN)
   list(APPEND MANIFOLD_SRC ${s})
 endif()
 
-add_library(manifold STATIC ${MANIFOLD_SRC})
+# SHARED WHEN PLUGINS ARE ON, and that is not a packaging preference.
+#
+# A plugin registers classes into ClassDB, logs through the engine's
+# logger and allocates from its pools. Link the engine statically into
+# both the runtime and the plugin and there are TWO of each -- the
+# plugin's classes register into a registry nobody reads, and its log
+# lines go somewhere nobody prints. One shared library means one of
+# everything.
+if(MANIFOLD_PLUGINS)
+  add_library(manifold SHARED ${MANIFOLD_SRC})
+  set_target_properties(manifold PROPERTIES
+    ENABLE_EXPORTS ON
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
+else()
+  add_library(manifold STATIC ${MANIFOLD_SRC})
+endif()
 add_dependencies(manifold manifold_codegen)
 target_include_directories(manifold PUBLIC
   ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/third_party)
@@ -158,6 +174,21 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/src/main.cpp)
 endif()
 
 # ----------------------------------------------------------------- plugins
+#
+# Each lands in bin/plugins, which is where the runtime looks.
+set(MANIFOLD_PLUGIN_DIR ${CMAKE_BINARY_DIR}/bin/plugins)
+function(manifold_add_plugin name)
+  add_library(${name} MODULE ${ARGN})
+  target_link_libraries(${name} PRIVATE manifold)
+  set_target_properties(${name} PROPERTIES
+    PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY ${MANIFOLD_PLUGIN_DIR})
+  if(NOT MSVC)
+    target_compile_options(${name} PRIVATE -Wall -Wextra -Wno-unused-parameter
+                                           -Wno-missing-field-initializers)
+  endif()
+endfunction()
+
 if(MANIFOLD_PLUGINS AND EXISTS ${CMAKE_SOURCE_DIR}/plugins)
   file(GLOB plugin_dirs ${CMAKE_SOURCE_DIR}/plugins/*)
   foreach(p ${plugin_dirs})

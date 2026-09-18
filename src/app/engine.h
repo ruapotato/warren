@@ -7,6 +7,7 @@
 
 #include "platform/window.h"
 #include "physics/world.h"
+#include "plugin/host.h"
 #include "render/renderer.h"
 #include "scene/scene_tree.h"
 
@@ -24,6 +25,11 @@ struct EngineConfig {
     // deterministic. 0 runs physics at the frame rate, which is a
     // choice and not a default.
     float physics_hz = 60.0f;
+    // Where to look for plugins. Empty uses `plugins` beside the
+    // executable. "-" disables them.
+    std::string plugin_directory;
+    // Worker threads. 0 leaves one core for the main thread.
+    int worker_threads = 0;
     // Stop after this many frames. For tests and for screenshots.
     uint64_t max_frames = 0;
     // A FIXED FRAME TIME, so a capture is reproducible.
@@ -56,6 +62,7 @@ public:
     SceneTree *tree() { return tree_.get(); }
     Renderer *renderer() { return &renderer_; }
     PhysicsWorld *physics() { return physics_.get(); }
+    PluginHost *plugins() { return &plugins_; }
     const Clock &clock() const { return clock_; }
     uint64_t frames() const { return frames_; }
 
@@ -75,6 +82,7 @@ private:
     std::unique_ptr<SceneTree> tree_;
     Renderer renderer_;
     Ref<PhysicsWorld> physics_;
+    PluginHost plugins_;
     Clock clock_;
     double physics_accumulator_ = 0.0;
     uint64_t frames_ = 0;

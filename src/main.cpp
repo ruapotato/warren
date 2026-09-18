@@ -337,6 +337,123 @@ void build_portal_demo(Engine &e) {
     MF_INFO("%s", g_world->report().c_str());
 }
 
+// TERRAIN, BUILT ENTIRELY THROUGH REFLECTION.
+//
+// The voxel terrain is a plugin, so this file cannot include its
+// headers or name its types -- the class does not exist until a
+// shared library is loaded. Everything below goes through ClassDB by
+// name, which is exactly what a script would do, and is the honest
+// test of whether the plugin interface is any good.
+void build_terrain_demo(Engine &e) {
+    SceneTree *tree = e.tree();
+    g_world = e.physics();
+
+    Node *scene = new Node();
+    scene->set_name("TerrainDemo");
+    tree->set_scene(scene);
+
+    Object *obj = ClassDB::instantiate("VoxelTerrain3D");
+    if (!obj) {
+        MF_ERROR("the voxel plugin is not loaded; run with --plugins DIR");
+        return;
+    }
+    Node3D *terrain = static_cast<Node3D *>(obj);
+    terrain->set_name("Terrain");
+    terrain->set_member("cell_size", Variant(1.0));
+    terrain->set_member("chunk_resolution", Variant(int64_t(32)));
+    terrain->set_member("view_distance", Variant(176.0));
+    terrain->set_member("collision_distance", Variant(90.0));
+    terrain->set_member("queue_per_frame", Variant(int64_t(12)));
+    terrain->set_member("upload_per_frame", Variant(int64_t(6)));
+    scene->add_child(terrain);
+    Array seed{Variant(int64_t(20260918))};
+    terrain->callv("set_seed", seed);
+
+    // FIND SOMEWHERE FLAT TO STAND.
+    //
+    // Dropping the player at the origin drops them wherever the noise
+    // happened to put a mountainside, and they spend the demo sliding
+    // down it. A spiral outwards, sampling the ground at each step
+    // and at four points around it, finds a spot level enough to walk
+    // on -- which is what a real game does when it places a spawn.
+    auto height_at = [&](float x, float z) {
+        Array a{Variant(double(x)), Variant(double(z))};
+        return float(terrain->callv("height_at", a).to_float());
+    };
+    Vec2 spawn(0.0f, 0.0f);
+    float ground = height_at(0.0f, 0.0f);
+    float best_score = 1e30f;
+    for (int i = 0; i < 160; i++) {
+        const float angle = float(i) * 2.39996f;   // the golden angle
+        const float radius = 9.0f * std::sqrt(float(i));
+        const float x = std::cos(angle) * radius;
+        const float z = std::sin(angle) * radius;
+        const float h = height_at(x, z);
+        const float d = 2.0f;
+        const float slope = std::fabs(height_at(x + d, z) - h) +
+                            std::fabs(height_at(x - d, z) - h) +
+                            std::fabs(height_at(x, z + d) - h) +
+                            std::fabs(height_at(x, z - d) - h);
+        // Flat, and not up a mountain where everything is snow.
+        const float score = slope * 4.0f + std::fabs(h - 40.0f) * 0.05f;
+        if (score < best_score) {
+            best_score = score;
+            spawn = {x, z};
+            ground = h;
+        }
+        if (slope < 0.6f && h < 80.0f) break;
+    }
+    MF_INFO("terrain: spawning at (%.0f, %.1f, %.0f), flatness %.2f",
+            double(spawn.x), double(ground), double(spawn.y), double(best_score));
+
+    CharacterBody3D *player = new CharacterBody3D();
+    player->set_name("Player");
+    player->radius = 0.35f;
+    player->height = 1.1f;
+    player->step_height = 0.6f;
+    // Natural ground is steeper than a corridor's; 55 degrees is
+    // still a scramble but not a cliff.
+    player->max_slope = deg2rad(55.0f);
+    player->set_global_position({spawn.x, ground + 1.5f, spawn.y});
+    scene->add_child(player);
+
+    Camera3D *cam = new Camera3D();
+    cam->set_name("Camera");
+    cam->set_fov_degrees(78.0f);
+    cam->set_near(0.08f);
+    cam->set_mode(Camera3D::Mode::PerspectiveInfinite);
+    cam->set_position({0.0f, player->height + player->radius, 0.0f});
+    player->add_child(cam);
+    cam->make_current();
+    player->set_script(new PlayerController(player, cam, e.window(), g_world));
+
+    Array viewer{Variant(static_cast<Object *>(player))};
+    terrain->callv("set_viewer", viewer);
+
+    // Build the ground under the player's feet before the first
+    // frame, so they do not spend it falling through a world that
+    // has not arrived yet.
+    for (int i = 0; i < 6; i++) {
+        terrain->on_process(0.0f);
+        terrain->callv("wait_for_chunks", {});
+    }
+
+    DirectionalLight3D *sun = new DirectionalLight3D();
+    sun->set_name("Sun");
+    sun->set_rotation(Quat::from_euler_yxz(0.6f, -0.62f, 0.0f));
+    scene->add_child(sun);
+
+    Renderer *r = e.renderer();
+    r->sun_direction = sun->direction();
+    r->sun_colour = Color::hex(0xFFF2D9);
+    r->sun_energy = 3.4f;
+    r->ambient = Color::hex(0x8FA8C4);
+    r->ambient_energy = 0.75f;
+    r->fog_colour = Color::hex(0xAFC2D6);
+    r->fog_density = 0.0022f;
+    r->settings().max_portal_depth = 2;
+}
+
 // A spectator camera, for the screenshot harness and for looking at
 // the scene from outside it.
 void build_flythrough(Engine &e) {
@@ -394,6 +511,12 @@ int main(int argc, char **argv) {
             cfg.render.max_portal_depth = std::stoi(next("4"));
         } else if (a == "--no-scissor") {
             cfg.render.portal_scissor = false;
+        } else if (a == "--plugins") {
+            cfg.plugin_directory = next("plugins");
+        } else if (a == "--no-plugins") {
+            cfg.plugin_directory = "-";
+        } else if (a == "--threads") {
+            cfg.worker_threads = std::stoi(next("0"));
         } else if (a == "--fallback") {
             cfg.allow_fallback = true;
         } else if (a == "--quiet") {
@@ -415,6 +538,9 @@ int main(int argc, char **argv) {
                 "  --portal-depth N      recursion limit (default 4)\n"
                 "  --no-scissor          disable the portal scissor (slow)\n"
                 "  --no-vsync            uncapped\n"
+                "  --plugins DIR         where to look for plugins\n"
+                "  --no-plugins          do not load any\n"
+                "  --threads N           worker threads (0 = cores - 1)\n"
                 "  --fallback            try the other backend if this one fails\n"
                 "\nRight mouse captures the cursor, escape releases it.\n"
                 "WASD to move, QE or space/ctrl for up and down, shift to hurry.\n");
@@ -426,6 +552,7 @@ int main(int argc, char **argv) {
     engine.on_ready = [&](Engine &e) {
         if (demo == "portals") build_portal_demo(e);
         else if (demo == "fly") build_flythrough(e);
+        else if (demo == "terrain") build_terrain_demo(e);
         else MF_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;
@@ -447,6 +574,16 @@ int main(int argc, char **argv) {
     if (!engine.init(cfg)) return 1;
     int rc = engine.run();
     {
+        if (Node *t = engine.tree()->root()->find_by_class("VoxelTerrain3D")) {
+            MF_INFO("%s", t->callv("report", {}).to_string().c_str());
+            if (Node *n = engine.tree()->root()->find_by_class("CharacterBody3D")) {
+                Vec3 p = static_cast<Node3D *>(n)->global_position();
+                Array where{Variant(p)};
+                MF_INFO("field at the player: %.3f (negative is inside rock)",
+                        t->callv("distance_at", where).to_float());
+            }
+        }
+        MF_INFO("%s", engine.physics()->report().c_str());
         if (Node *n = engine.tree()->root()->find_by_class("CharacterBody3D")) {
             CharacterBody3D *b = static_cast<CharacterBody3D *>(n);
             Vec3 p = b->global_position();

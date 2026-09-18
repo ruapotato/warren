@@ -14,10 +14,16 @@ layout(location = 0) out vec3 v_direction;
 void main() {
     vec2 uv = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
     vec2 ndc = uv * 2.0 - 1.0;
-    // Unproject the far plane corner to get a world-space ray. Under
-    // reverse-Z the far plane is z = 0.
-    vec4 far_point = view.inv_proj * vec4(ndc, 0.0, 1.0);
-    v_direction = mat3(view.inv_view) * (far_point.xyz / far_point.w);
+    // THE NEAR PLANE, NOT THE FAR ONE.
+    //
+    // Unprojecting the far plane looks like the obvious way to get a
+    // view ray, and for an INFINITE far plane it is a division by
+    // zero: the far plane is at infinity, so its homogeneous w is
+    // zero and the result is a NaN that paints the whole sky black.
+    // The near plane is always finite, and a point on it is just as
+    // good a direction from the eye.
+    vec4 near_point = view.inv_proj * vec4(ndc, 1.0, 1.0);
+    v_direction = mat3(view.inv_view) * (near_point.xyz / near_point.w);
     // Exactly at the far plane, so the depth test keeps it behind
     // everything that was drawn.
     gl_Position = vec4(ndc, 0.0, 1.0);

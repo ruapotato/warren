@@ -6,6 +6,11 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+#include <SDL2/SDL.h>
+
+#include <filesystem>
+
+#include "core/jobs.h"
 #include "core/log.h"
 #include "scene/nodes.h"
 
@@ -54,7 +59,33 @@ bool Engine::init(const EngineConfig &cfg) {
     tree_ = std::make_unique<SceneTree>();
     if (cfg.physics_hz > 0.0f) tree_->set_physics_step(1.0f / cfg.physics_hz);
 
+    Jobs::init(cfg.worker_threads);
     ClassDB::register_all();
+
+    // PLUGINS BEFORE THE SCENE. A plugin registers node classes, and
+    // a scene built before it loaded could not name them.
+    if (cfg.plugin_directory != "-") {
+        std::string dir = cfg.plugin_directory;
+        if (dir.empty()) {
+            // BESIDE THE EXECUTABLE, not beside the shell. A game is
+            // launched from a shortcut, a debugger or a package
+            // manager, and none of them set the working directory to
+            // where the binary lives.
+            char *base = SDL_GetBasePath();
+            std::filesystem::path root = base ? base : ".";
+            if (base) SDL_free(base);
+            dir = (root / "plugins").string();
+        }
+        PluginContext pc;
+        pc.engine = this;
+        pc.device = device_;
+        pc.tree = tree_.get();
+        pc.renderer = &renderer_;
+        pc.physics = physics_.get();
+        int n = plugins_.load_directory(dir, pc);
+        if (n) MF_INFO("%s", plugins_.report().c_str());
+    }
+
     if (on_ready) on_ready(*this);
     running_ = true;
     clock_ = Clock();
@@ -68,6 +99,10 @@ bool Engine::init(const EngineConfig &cfg) {
 
 void Engine::shutdown() {
     if (device_) device_->wait_idle();
+    // Plugins first: one may hold GPU resources or nodes, and both
+    // must go before the things they came from.
+    plugins_.unload_all();
+    Jobs::shutdown();
     tree_.reset();
     physics_.reset();
     renderer_.shutdown();
@@ -92,6 +127,7 @@ bool Engine::step() {
         renderer_.resize(uint32_t(d.x), uint32_t(d.y));
     }
 
+    plugins_.frame(dt);
     if (on_frame) on_frame(*this, dt);
 
     // FIXED STEP PHYSICS, VARIABLE STEP EVERYTHING ELSE. Capped at
