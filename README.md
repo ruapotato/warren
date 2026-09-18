@@ -458,8 +458,8 @@ voxel terrain, Control-node UI, an editor whose inspector is derived
 from reflection, resources and scene instancing, glTF import,
 procedural shapes and surfaces, GPU skeletal animation with clip
 blending and retargeting, navmesh baking with A* and funnel
-string-pulling, off-mesh links, crowds with reciprocal avoidance, and
-Python scripting with generated type stubs.
+string-pulling, off-mesh links, reachability pruning, crowds with
+reciprocal avoidance, and Python scripting with generated type stubs.
 
 Not yet: animation state machines beyond two slots and a masked
 one-shot, scripts saved in scene files, transform gizmos, particles,

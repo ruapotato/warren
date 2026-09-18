@@ -91,6 +91,10 @@ bool NavMesh::bake_from(const CompactField &input, const BakeSettings &settings,
     for (const Vec3 &v : verts_) bounds_.expand(v);
     build_grid();
     resolve_links();
+    // Pruning comes after the links are resolved, because a link is
+    // an edge of the reachability graph -- a roof reached only by a
+    // ladder must not be pruned for want of a walk to it.
+    int pruned = prune_unreachable(settings.reachable_from);
 
     if (stats) {
         stats->spans = int(field.spans().size());
@@ -99,6 +103,7 @@ bool NavMesh::bake_from(const CompactField &input, const BakeSettings &settings,
         stats->polys = int(polys_.size());
         stats->verts = int(verts_.size());
         stats->merged_holes = contours.merged_holes;
+        stats->pruned = pruned;
         stats->seconds = std::chrono::duration<float>(
                              std::chrono::steady_clock::now() - t0)
                              .count();
@@ -309,6 +314,105 @@ void NavMesh::portal(uint16_t a, int e, Vec3 *left, Vec3 *right) const {
     // endpoint of the edge is then on the traveller's left.
     *left = verts_[p.verts[(e + 1) % p.count]];
     *right = verts_[p.verts[e]];
+}
+
+int NavMesh::prune_unreachable(const std::vector<Vec3> &seeds) {
+    if (seeds.empty() || polys_.empty()) return 0;
+
+    std::vector<bool> keep(polys_.size(), false);
+    std::vector<uint16_t> stack;
+    for (const Vec3 &s : seeds) {
+        uint16_t p = kNoPoly;
+        Vec3 unused;
+        if (!nearest_point(s, Vec3(4.0f, 4.0f, 4.0f), &unused, &p)) continue;
+        if (p == kNoPoly || keep[p]) continue;
+        keep[p] = true;
+        stack.push_back(p);
+    }
+    // Links are edges of this graph too: a roof reached only by a
+    // ladder is reachable, and pruning it would delete the ladder's
+    // far end along with it.
+    std::vector<std::vector<uint16_t>> via_link(polys_.size());
+    for (const NavLink &l : links_) {
+        if (l.from_poly == kNoPoly || l.to_poly == kNoPoly) continue;
+        via_link[l.from_poly].push_back(l.to_poly);
+        if (l.bidirectional) via_link[l.to_poly].push_back(l.from_poly);
+    }
+    while (!stack.empty()) {
+        uint16_t p = stack.back();
+        stack.pop_back();
+        for (int k = 0; k < polys_[p].count; ++k) {
+            uint16_t n = polys_[p].neis[k];
+            if (n == kNoPoly || keep[n]) continue;
+            keep[n] = true;
+            stack.push_back(n);
+        }
+        for (uint16_t n : via_link[p]) {
+            if (keep[n]) continue;
+            keep[n] = true;
+            stack.push_back(n);
+        }
+    }
+
+    int dropped = 0;
+    for (bool k : keep)
+        if (!k) ++dropped;
+    if (dropped == 0) return 0;
+
+    // A SEED IN THE WRONG PLACE DELETES THE LEVEL, quietly, and the
+    // result is a game where nothing can path anywhere. It is an
+    // easy mistake: the obvious point to name is the middle of the
+    // map, and the middle of the map is as likely as not to be a
+    // statue, a table, or the roof of whatever stands there -- a
+    // small island, correctly identified as all that is reachable
+    // from itself.
+    //
+    // There is no rule that says which answer is right, so this
+    // does not refuse. It says so, loudly, with the number that
+    // makes the mistake recognisable.
+    if (size_t(dropped) * 5 > polys_.size() * 4) {
+        WR_WARN("nav: pruning from %zu seed(s) keeps only %zu of %zu "
+                "polygons. If that is not what was meant, a seed is "
+                "probably standing on something small -- check it is on "
+                "the ground a body would start from.",
+                seeds.size(), polys_.size() - size_t(dropped), polys_.size());
+    }
+
+    // Compact the polygons, then the vertices they still use. Doing
+    // it in that order means the vertex pass can simply keep what is
+    // referenced.
+    std::vector<uint16_t> poly_map(polys_.size(), kNoPoly);
+    std::vector<NavPoly> kept;
+    kept.reserve(polys_.size() - size_t(dropped));
+    for (size_t i = 0; i < polys_.size(); ++i) {
+        if (!keep[i]) continue;
+        poly_map[i] = uint16_t(kept.size());
+        kept.push_back(polys_[i]);
+    }
+    for (NavPoly &p : kept)
+        for (int k = 0; k < p.count; ++k)
+            p.neis[k] = p.neis[k] == kNoPoly ? kNoPoly : poly_map[p.neis[k]];
+
+    std::vector<uint16_t> vert_map(verts_.size(), 0xffff);
+    std::vector<Vec3> verts;
+    for (NavPoly &p : kept) {
+        for (int k = 0; k < p.count; ++k) {
+            uint16_t v = p.verts[k];
+            if (vert_map[v] == 0xffff) {
+                vert_map[v] = uint16_t(verts.size());
+                verts.push_back(verts_[v]);
+            }
+            p.verts[k] = vert_map[v];
+        }
+    }
+    polys_.swap(kept);
+    verts_.swap(verts);
+
+    bounds_ = AABB();
+    for (const Vec3 &v : verts_) bounds_.expand(v);
+    build_grid();
+    resolve_links();
+    return dropped;
 }
 
 void NavMesh::add_link(const NavLink &link) {

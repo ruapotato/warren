@@ -10,6 +10,8 @@
 #include "anim/clip.h"
 #include "anim/skeleton.h"
 #include "scene/animated.h"
+#include "nav/debug.h"
+#include "scene/nav_nodes.h"
 #include "app/engine.h"
 #if WARREN_PYTHON
 #include "script/python.h"
@@ -115,7 +117,13 @@ private:
 // A free camera, for looking at the scene from outside it.
 class FlyCamera : public ScriptInstance {
 public:
-    explicit FlyCamera(Camera3D *cam, Window *win) : cam_(cam), win_(win) {}
+    // The initial angles are a parameter because this script
+    // overwrites the camera's rotation every frame: a transform set
+    // before attaching it survives exactly until the first tick, and
+    // a demo that framed its scene carefully then finds the camera
+    // staring at the horizon.
+    FlyCamera(Camera3D *cam, Window *win, float yaw = 0.0f, float pitch = 0.0f)
+        : cam_(cam), win_(win), yaw_(yaw), pitch_(pitch) {}
 
     const char *script_name() const override { return "FlyCamera"; }
 
@@ -505,6 +513,276 @@ void build_portal_demo(Engine &e) {
 // skinned by hand, with a clip that waves it. If the bones are
 // wrong it is a straight bar; if the weights are wrong it is a
 // fan of triangles; if the upload is wrong it is not there.
+// Moves the quarry round the level and keeps the pack pointed at it.
+// The point of the demo is that this is ALL the game has to do: set a
+// target. Where the route goes, which ladder it uses, and how thirty
+// bodies get through one gap without stacking are the engine's
+// business.
+class NavDemoDriver : public ScriptInstance {
+public:
+    NavDemoDriver(NavRegion3D *region, Node3D *quarry,
+                  std::vector<NavAgent3D *> pack)
+        : region_(region), quarry_(quarry), pack_(std::move(pack)) {}
+
+    const char *script_name() const override { return "NavDemoDriver"; }
+
+    void on_process(float dt) override {
+        t_ += dt;
+        // A circuit that goes round the buildings and up onto the
+        // walkway, so the pack has to use the ladder to follow.
+        // ROUND THE OUTSIDE, not through the blocks. The circuit
+        // has to stay on ground the pack can reach, and snapping to
+        // the nearest navmesh point is not enough to ensure that: a
+        // point over a building is nearest to that building's ROOF,
+        // which nothing can climb, and the demo then shows eighteen
+        // bodies milling about underneath a quarry they cannot get
+        // to. Correct, and not what it is here to show.
+        const float lap = 30.0f;
+        float u = std::fmod(t_, lap) / lap;
+        Vec3 want;
+        if (u < 0.6f) {
+            float a = u / 0.6f * TAU;
+            want = Vec3(std::cos(a) * 16.5f, 0.0f, std::sin(a) * 16.5f);
+        } else {
+            // Up onto the walkway and along it, so the pack has to
+            // find the ladder or the stair to follow.
+            float a = (u - 0.6f) / 0.4f;
+            want = Vec3(12.0f - a * 24.0f, 3.1f, 15.0f);
+        }
+        Vec3 on = want;
+        if (region_) region_->nearest_point(want, &on);
+        quarry_->set_position(on);
+
+        // Re-target a few per frame. Thirty paths a frame is a spike
+        // for no benefit: the quarry has not moved far enough in a
+        // sixtieth of a second to change anyone's route.
+        if (pack_.empty()) return;
+        for (int i = 0; i < 3; ++i) {
+            cursor_ = (cursor_ + 1) % pack_.size();
+            pack_[cursor_]->set_target(on);
+        }
+
+        // Say what the pack is doing, because a screenshot cannot.
+        // Bodies standing still at the edge of the frame look the
+        // same whether they are stuck, unable to find a route, or
+        // simply the far end of a queue.
+        report_ += dt;
+        if (report_ < 3.0f) return;
+        report_ = 0.0f;
+        int close = 0, climbing = 0, stuck = 0, no_route = 0;
+        for (NavAgent3D *a : pack_) {
+            Vec3 d = a->global_position() - on;
+            d.y = 0.0f;
+            if (d.length() < 4.0f) ++close;
+            if (a->on_link()) ++climbing;
+            if (a->path_partial()) ++no_route;
+            if (a->stuck_time() > 1.0f) ++stuck;
+        }
+        WR_INFO("nav demo: %zu chasing -- %d within 4 m, %d on a link, "
+                "%d with no route, %d wedged",
+                pack_.size(), close, climbing, no_route, stuck);
+    }
+
+private:
+    NavRegion3D *region_;
+    Node3D *quarry_;
+    std::vector<NavAgent3D *> pack_;
+    size_t cursor_ = 0;
+    float t_ = 0.0f, report_ = 0.0f;
+};
+
+// A town, a walkway, a ladder, and a pack that wants you.
+//
+// Everything a game would do here is three lines: put a NavRegion3D
+// over the level, put NavAgent3Ds in it, and call set_target. The
+// bake, the routes, the ladder and the shoving are the engine's.
+void build_nav_demo(Engine &e) {
+    Node3D *root = new Node3D();
+    root->set_name("NavDemo");
+    e.tree()->root()->add_child(root);
+
+    Camera3D *cam = new Camera3D();
+    cam->set_name("Camera");
+    cam->set_position(Vec3(-2.0f, 16.0f, 27.0f));
+    root->add_child(cam);
+    cam->make_current();
+    cam->set_script(new FlyCamera(cam, e.window(), 0.0f, -0.46f));
+
+    DirectionalLight3D *sun = new DirectionalLight3D();
+    sun->set_name("Sun");
+    sun->set_transform(Transform3D::looking_at(Vec3(8, 14, 6), Vec3::zero()));
+    sun->energy = 3.0f;
+    root->add_child(sun);
+    e.renderer()->fog_density = 0.0009f;
+
+    NavRegion3D *region = new NavRegion3D();
+    region->set_name("Nav");
+    region->settings.agent.radius = 0.4f;
+    region->settings.agent.height = 1.8f;
+    region->settings.agent.max_climb = 0.45f;
+    region->settings.cell_size = 0.2f;
+    // Keep only what can be walked to from the street. Without this
+    // the bake also covers the floor inside each sealed block --
+    // real walkable ground with a roof over it and no way in -- and
+    // anything that spawns there stands in a building for ever.
+    // On the street, not the middle of the square -- the middle of
+    // the square is the fountain, and the only thing reachable from
+    // the top of a fountain is the top of that fountain.
+    region->settings.reachable_from = {Vec3(16.5f, 0.0f, 0.0f)};
+    root->add_child(region);
+
+    Ref<Material> stone(new Material());
+    stone->albedo = Color::hex(0x4a4e55);
+    stone->roughness = 0.9f;
+    Ref<Material> ground_mat(new Material());
+    ground_mat->albedo = Color::hex(0x2e3135);
+    ground_mat->roughness = 0.95f;
+
+    auto slab = [&](const char *name, const Vec3 &centre, const Vec3 &size,
+                    const Ref<Material> &mat) {
+        MeshInstance3D *mi = new MeshInstance3D();
+        mi->set_name(name);
+        mi->mesh = Mesh::box(size);
+        mi->set_position(centre);
+        mi->set_material(0, mat.get());
+        region->add_child(mi);
+        return mi;
+    };
+
+    slab("Ground", Vec3(0, -0.25f, 0), Vec3(44, 0.5f, 44), ground_mat);
+    // Four blocks around a square, with the gaps between them as
+    // streets. The watershed cuts a level like this into a region per
+    // open space, which is what the region colours in the overlay
+    // show.
+    slab("BlockA", Vec3(-8.5f, 2.0f, -8.5f), Vec3(9, 4, 9), stone);
+    slab("BlockB", Vec3(8.5f, 2.0f, -8.5f), Vec3(9, 4, 9), stone);
+    slab("BlockC", Vec3(-8.5f, 2.0f, 8.5f), Vec3(9, 4, 9), stone);
+    slab("BlockD", Vec3(8.5f, 3.0f, 8.5f), Vec3(9, 6, 9), stone);
+    // Something in the middle of the square, so there is an obstacle
+    // with open ground all round it -- the case that makes a region
+    // a ring and needs its hole bridged.
+    slab("Fountain", Vec3(0, 0.5f, 0), Vec3(3.2f, 1.0f, 3.2f), stone);
+
+    // A walkway at three metres, off the ground and reachable only by
+    // the ladder. Without a link this is an island: a body on it
+    // could not plan a route to the street, and a body on the street
+    // could not plan one up.
+    slab("Walkway", Vec3(-1.5f, 2.9f, 15.0f), Vec3(31, 0.4f, 3.4f), stone);
+    // A stair up at one end, so there is a way that is not the
+    // ladder and the routes have something to choose between.
+    //
+    // Each tread rises 0.35 m, which is under the body's 0.45 m
+    // climb -- go over that and the bake is right to call every
+    // tread a ledge, and the stair becomes scenery.
+    for (int i = 0; i < 9; ++i) {
+        const float top = 0.35f * float(i + 1);
+        slab("Step", Vec3(-15.5f, top * 0.5f, 9.25f + float(i) * 0.5f),
+             Vec3(3.0f, top, 0.5f), stone);
+    }
+
+    NavLink3D *ladder = new NavLink3D();
+    ladder->set_name("ladder");
+    // Clear of the block behind it: a link whose foot is inside a
+    // building has no polygon to attach to, and the only sign is
+    // that nothing ever uses it.
+    ladder->set_position(Vec3(9.0f, 0.0f, 13.9f));
+    ladder->start = Vec3();
+    ladder->end = Vec3(0.0f, 3.15f, 0.9f);
+    ladder->radius = 1.2f;
+    // Climbing costs more than the distance, or every route in the
+    // level would rather go up a ladder than walk round.
+    ladder->cost = 6.0f;
+    region->add_child(ladder);
+
+    // The quarry.
+    Node3D *quarry = new Node3D();
+    quarry->set_name("Quarry");
+    root->add_child(quarry);
+    MeshInstance3D *quarry_body = new MeshInstance3D();
+    quarry_body->mesh = Mesh::box(Vec3(0.7f, 1.8f, 0.7f));
+    quarry_body->set_position(Vec3(0, 0.9f, 0));
+    Ref<Material> quarry_mat(new Material());
+    quarry_mat->albedo = Color::hex(0xf0d060);
+    quarry_mat->emissive = Color::hex(0x403000);
+    quarry_body->set_material(0, quarry_mat.get());
+    quarry->add_child(quarry_body);
+
+    // The pack.
+    Ref<Material> pack_mat(new Material());
+    pack_mat->albedo = Color::hex(0x8a5a4a);
+    pack_mat->roughness = 0.7f;
+    std::vector<NavAgent3D *> pack;
+    const int kPack = 18;
+    for (int i = 0; i < kPack; ++i) {
+        // Round the outside of the blocks, which end at 13 metres.
+        // Spawning on a circle that crosses them puts bodies inside
+        // buildings -- which, before the pruning above, was ground
+        // they could stand on and never leave.
+        float a = float(i) / float(kPack) * TAU;
+        float r = 18.0f + float(i % 3) * 1.1f;
+        NavAgent3D *agent = new NavAgent3D();
+        agent->set_name("Shambler" + std::to_string(i));
+        agent->radius = 0.4f;
+        agent->height = 1.8f;
+        agent->max_speed = 2.2f + float(i % 5) * 0.12f;
+        agent->max_accel = 10.0f;
+        // Near enough, because eighteen bodies cannot stand on one
+        // point and trying is what makes a mob orbit its target.
+        agent->goal_radius = 2.2f;
+        agent->set_position(Vec3(std::cos(a) * r, 0.0f, std::sin(a) * r));
+        region->add_child(agent);
+
+        MeshInstance3D *body = new MeshInstance3D();
+        body->mesh = Mesh::box(Vec3(0.66f, 1.8f, 0.5f));
+        body->set_position(Vec3(0, 0.9f, 0));
+        body->set_material(0, pack_mat.get());
+        agent->add_child(body);
+        pack.push_back(agent);
+    }
+
+    // The overlay. Built after the first bake, below.
+    MeshInstance3D *surface = new MeshInstance3D();
+    surface->set_name("NavSurface");
+    surface->cast_shadows = false;
+    Ref<Material> overlay(new Material());
+    overlay->roughness = 1.0f;
+    overlay->metallic = 0.0f;
+    overlay->unlit = true;
+    surface->set_material(0, overlay.get());
+    root->add_child(surface);
+
+    MeshInstance3D *edges = new MeshInstance3D();
+    edges->set_name("NavEdges");
+    edges->cast_shadows = false;
+    edges->set_material(0, overlay.get());
+    root->add_child(edges);
+
+    MeshInstance3D *link_marks = new MeshInstance3D();
+    link_marks->set_name("NavLinks");
+    link_marks->cast_shadows = false;
+    link_marks->set_material(0, overlay.get());
+    root->add_child(link_marks);
+
+    // Bake now rather than waiting for the first tick, so the overlay
+    // has something to show and the agents have somewhere to stand on
+    // frame one.
+    region->bake();
+    region->collect_links();
+    const nav::BakeStats &st = region->stats();
+    WR_INFO("nav demo: %d polys, %d verts, %d regions, %d holes bridged, "
+            "%d unreachable pruned, %.0f ms",
+            st.polys, st.verts, st.regions, st.merged_holes, st.pruned,
+            double(st.seconds * 1000.0f));
+
+    if (const nav::NavMesh *mesh = region->mesh()) {
+        surface->mesh = nav::debug_surface(*mesh, 0.06f);
+        edges->mesh = nav::debug_edges(*mesh, 0.08f);
+        link_marks->mesh = nav::debug_links(*mesh);
+    }
+
+    quarry->set_script(new NavDemoDriver(region, quarry, pack));
+}
+
 void build_skin_demo(Engine &e) {
     Node3D *root = new Node3D();
     root->set_name("SkinDemo");
@@ -874,7 +1152,8 @@ int main(int argc, char **argv) {
             std::printf(
                 "warren [options]\n"
                 "  --backend vulkan|gl   which renderer (default vulkan)\n"
-                "  --demo portals        which scene (portals, terrain, fly, skin)\n"
+                "  --demo portals        which scene (portals, terrain, fly, skin,\n"
+                "                        nav)\n"
                 "  --shot FILE           save a png and carry on\n"
                 "  --shot-frame N        which frame to save (default 8)\n"
                 "  --frames N            stop after N frames (fixed 1/60s step)\n"
@@ -978,6 +1257,7 @@ int main(int argc, char **argv) {
         else if (demo == "fly") build_flythrough(e);
         else if (demo == "terrain") build_terrain_demo(e);
         else if (demo == "skin") build_skin_demo(e);
+        else if (demo == "nav") build_nav_demo(e);
         else WR_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;

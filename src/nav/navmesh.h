@@ -83,6 +83,9 @@ struct BakeSettings {
     // one, in cells, and the longest edge to leave unsplit.
     float contour_max_error = 1.3f;
     float max_edge_length = 12.0f;
+    // If any are given, the bake keeps only the ground reachable
+    // from them. See NavMesh::prune_unreachable.
+    std::vector<Vec3> reachable_from;
 };
 
 struct BakeStats {
@@ -92,6 +95,8 @@ struct BakeStats {
     int polys = 0;
     int verts = 0;
     int merged_holes = 0;
+    // Polygons removed for being unreachable from the bake's seeds.
+    int pruned = 0;
     float seconds = 0.0f;
 };
 
@@ -140,6 +145,25 @@ public:
     // the caller wants to inspect or alter it in between.
     bool bake_from(const CompactField &field, const BakeSettings &settings,
                    BakeStats *stats = nullptr);
+
+    // KEEP ONLY WHAT CAN BE REACHED FROM HERE, and delete the rest.
+    // Returns how many polygons went.
+    //
+    // A bake rasterises surfaces, not solids, so the floor under a
+    // sealed box is walkable ground with a roof over it -- correct,
+    // and enclosed by walls nothing can pass. Every building in a
+    // town has one, and each is somewhere a body can be told to go
+    // and will never arrive; a wandering monster picking a random
+    // point finds itself pathing into a wall for ever.
+    //
+    // The region filter only drops islands too SMALL to be worth
+    // reaching, because size is all it can judge from. Reachability
+    // needs somewhere to start from, which only the game knows: the
+    // player's spawn, the mouth of the sewer, wherever the level
+    // begins. Given that, this is exact -- it floods the polygon
+    // graph, links included, and removes what the flood did not
+    // touch.
+    int prune_unreachable(const std::vector<Vec3> &seeds);
 
     void add_link(const NavLink &link);
     void clear_links();

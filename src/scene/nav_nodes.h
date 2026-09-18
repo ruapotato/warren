@@ -186,6 +186,11 @@ public:
     // How hard avoidance is bending the route, in metres per second.
     // Large and sustained means stuck in a crowd.
     float deflection() const;
+    // How long this body has been claiming to be going somewhere
+    // while barely moving. The crowd re-plans off it by itself; a
+    // game reads it to decide something has gone wrong enough to do
+    // something else -- give up, attack what is in the way, despawn.
+    float stuck_time() const;
 
     NavRegion3D *region() const { return region_; }
 

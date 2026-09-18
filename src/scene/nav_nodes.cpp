@@ -21,6 +21,16 @@ void NavRegion3D::set_mesh(nav::NavMesh *m) {
 
 void NavRegion3D::gather(Node *n, std::vector<Vec3> *tris) const {
     if (!n) return;
+    // OPTING OUT, by group rather than by a flag on MeshInstance3D.
+    //
+    // Plenty of geometry should not be baked: a decorative grille a
+    // body walks through, a glass pane, a volume used for triggers,
+    // a skybox shell. A group says so without putting a navigation
+    // field on a class that has nothing to do with navigation, and
+    // it applies to a whole subtree, which is how such things are
+    // usually arranged anyway.
+    if (n->in_group("no-navigation")) return;
+
     if (MeshInstance3D *mi = n->cast_to<MeshInstance3D>()) {
         // Hidden geometry is geometry the player cannot see and
         // cannot walk into. Baking it puts invisible walls in the
@@ -73,9 +83,9 @@ bool NavRegion3D::bake_within(const AABB &bounds, Node *source) {
     collect_links(source);
 
     WR_INFO("nav: '%s' baked %d polys from %zu triangles in %.0f ms "
-            "(%d regions, %d holes bridged)",
+            "(%d regions, %d holes bridged, %d unreachable pruned)",
             name().c_str(), st.polys, tris.size() / 3, double(st.seconds * 1000),
-            st.regions, st.merged_holes);
+            st.regions, st.merged_holes, st.pruned);
     return true;
 }
 
@@ -292,6 +302,10 @@ float NavAgent3D::deflection() const {
     const nav::CrowdAgent *a = me();
     return a ? a->deflection : 0.0f;
 }
+float NavAgent3D::stuck_time() const {
+    const nav::CrowdAgent *a = me();
+    return a ? a->stuck_for : 0.0f;
+}
 
 void NavAgent3D::on_physics(float dt) {
     (void)dt;
@@ -362,7 +376,8 @@ static void register_nav_nodes() {
         .method("path_partial", &NavAgent3D::path_partial)
         .method("velocity", &NavAgent3D::velocity)
         .method("on_link", &NavAgent3D::on_link)
-        .method("deflection", &NavAgent3D::deflection);
+        .method("deflection", &NavAgent3D::deflection)
+        .method("stuck_time", &NavAgent3D::stuck_time);
 }
 WR_REGISTER(register_nav_nodes)
 

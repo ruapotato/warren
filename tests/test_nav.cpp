@@ -775,6 +775,103 @@ int main() {
         check_int(off_mesh, 0, "every leg of which stays on the navmesh");
     }
 
+    // ------------------------------------------ what cannot be reached
+    //
+    // A bake rasterises surfaces, not solids, so the floor under a
+    // sealed box is walkable ground with a roof over it. Every
+    // building in a town has one, and each is somewhere a body can
+    // be told to go and will never arrive. The region filter cannot
+    // help: it drops islands too SMALL to be worth reaching, and a
+    // building's floor is not small.
+    //
+    // Reachability needs somewhere to start from, which only the
+    // game knows.
+    {
+        std::vector<Vec3> tris;
+        box(tris, Vec3(-12, -0.4f, -12), Vec3(12, 0, 12));
+        // A sealed block. Its roof is unreachable and so is the
+        // ground beneath it.
+        box(tris, Vec3(-5, 0, -5), Vec3(5, 4, 5));
+        AABB b(Vec3(-13, -1.4f, -13), Vec3(13, 7, 13));
+
+        NavMesh mesh;
+        BakeStats st;
+        check(mesh.bake(tris, b, settings, &st), "a block on a plain bakes");
+        check_int(st.pruned, 0, "and nothing is pruned when nothing seeds it");
+
+        // Both the roof and the floor inside are real walkable
+        // surfaces before pruning.
+        check(mesh.find_poly(Vec3(0, 4, 0), Vec3(1, 1, 1)) != kNoPoly,
+              "the block's roof is walkable ground");
+        check(mesh.find_poly(Vec3(0, 0, 0), Vec3(1, 1, 1)) != kNoPoly,
+              "and so is the floor sealed inside it");
+
+        int gone = mesh.prune_unreachable({Vec3(10, 0, 10)});
+        check(gone > 0, "seeding from the open plain prunes both");
+        check(mesh.find_poly(Vec3(0, 4, 0), Vec3(1, 1, 1)) == kNoPoly,
+              "the roof is no longer in the mesh");
+        check(mesh.find_poly(Vec3(0, 0, 0), Vec3(1, 1, 1)) == kNoPoly,
+              "nor the floor inside");
+        check(mesh.find_poly(Vec3(10, 0, 10), Vec3(1, 1, 1)) != kNoPoly,
+              "and the plain the seed stood on is untouched");
+        check_mesh(mesh, "pruned");
+
+        // Pruning renumbers every polygon and every vertex. A path
+        // afterwards is the check that the remapping is right --
+        // an off-by-one in the adjacency shows up as a mesh that
+        // still looks correct and cannot be crossed.
+        std::vector<PathPoint> path;
+        bool partial = true;
+        check(mesh.find_path(Vec3(10, 0, 10), Vec3(-10, 0, -10), &path,
+                             &partial),
+              "a path right round the block is found after pruning");
+        check(!partial, "and it gets all the way there");
+        int off_mesh = 0;
+        for (size_t i = 1; i < path.size(); ++i) {
+            Vec3 h;
+            if (!mesh.raycast(path[i - 1].position, path[i].position, &h))
+                ++off_mesh;
+        }
+        check_int(off_mesh, 0, "with every leg still on the mesh");
+    }
+
+    // A LINK IS AN EDGE OF THE REACHABILITY GRAPH, so a roof reached
+    // only by a ladder must survive the prune. Get this wrong and
+    // pruning silently deletes exactly the places links were added
+    // to make reachable.
+    {
+        std::vector<Vec3> tris;
+        box(tris, Vec3(-12, -0.4f, -12), Vec3(0, 0, 12));
+        box(tris, Vec3(2, 3.6f, -12), Vec3(12, 4, 12));
+        AABB b(Vec3(-13, -1.4f, -13), Vec3(13, 8, 13));
+
+        NavMesh mesh;
+        mesh.bake(tris, b, settings, nullptr);
+        check(mesh.find_poly(Vec3(7, 4, 0), Vec3(1, 1, 1)) != kNoPoly,
+              "the far platform is in the mesh");
+
+        NavLink ladder;
+        ladder.from = Vec3(-1.0f, 0.0f, 0.0f);
+        ladder.to = Vec3(3.0f, 4.0f, 0.0f);
+        ladder.radius = 1.5f;
+        ladder.name = "ladder";
+        mesh.add_link(ladder);
+
+        mesh.prune_unreachable({Vec3(-8, 0, 0)});
+        check(mesh.find_poly(Vec3(7, 4, 0), Vec3(1, 1, 1)) != kNoPoly,
+              "and survives pruning, because the ladder reaches it");
+        check(mesh.links().size() == 1 &&
+                  mesh.links()[0].from_poly != kNoPoly &&
+                  mesh.links()[0].to_poly != kNoPoly,
+              "with the ladder still attached at both ends");
+
+        std::vector<PathPoint> path;
+        bool partial = true;
+        check(mesh.find_path(Vec3(-8, 0, 0), Vec3(7, 4, 0), &path, &partial) &&
+                  !partial,
+              "and the route up it still works");
+    }
+
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
 }
