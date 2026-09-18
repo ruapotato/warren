@@ -65,6 +65,12 @@ void Mesh::transform(const Transform3D &t) {
     compute_bounds();
 }
 
+AABB compute_bounds(const std::vector<Vertex> &vertices) {
+    AABB b;
+    for (const Vertex &v : vertices) b.expand(v.position);
+    return b;
+}
+
 void Mesh::compute_bounds() {
     bounds_ = AABB();
     for (const Vertex &v : vertices) bounds_.expand(v.position);
@@ -120,7 +126,10 @@ void Mesh::compute_normals(float smooth_angle) {
 // Lengyel's method: accumulate per-triangle tangent and bitangent from
 // the UV derivatives, then Gram-Schmidt against the normal and store
 // the handedness in w.
-void Mesh::compute_tangents() {
+void Mesh::compute_tangents() { mf::compute_tangents(vertices, indices); }
+
+void compute_tangents(std::vector<Vertex> &vertices,
+                      const std::vector<uint32_t> &indices) {
     std::vector<Vec3> tan(vertices.size());
     std::vector<Vec3> bitan(vertices.size());
 

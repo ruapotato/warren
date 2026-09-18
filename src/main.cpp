@@ -530,6 +530,7 @@ int main(int argc, char **argv) {
     std::string demo = "portals";
     std::string stub_path;
     std::string shadow_dump;
+    bool bench = false;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -569,6 +570,18 @@ int main(int argc, char **argv) {
             cfg.startup_script = next("");
         } else if (a == "--script-path") {
             cfg.script_paths.push_back(next("."));
+        } else if (a == "--no-sky") {
+            cfg.render.draw_sky = false;
+        } else if (a == "--clear") {
+            cfg.render.clear_colour = Color::hex(uint32_t(
+                std::stoul(next("000000"), nullptr, 16)));
+        } else if (a == "--bench") {
+            bench = true;
+            if (!cfg.max_frames) cfg.max_frames = 600;
+            // REAL TIME, NOT A FIXED STEP. A benchmark that tells the
+            // engine each frame took exactly 1/60s measures nothing.
+            cfg.fixed_delta = -1.0f;
+            cfg.window.vsync = false;
         } else if (a == "--no-lights") {
             cfg.render.punctual_lights = false;
         } else if (a == "--clustered-views") {
@@ -618,6 +631,9 @@ int main(int argc, char **argv) {
                 "  --script-path DIR     add a directory to sys.path\n"
                 "  --no-python           do not start the interpreter\n"
                 "  --stubs FILE          write manifold.pyi and exit\n"
+                "  --no-sky              flat clear instead of the sky\n"
+                "  --clear RRGGBB        the clear colour, for spotting holes\n"
+                "  --bench               time 600 frames and print percentiles\n"
                 "  --no-lights           no punctual lights, sun only\n"
                 "  --clustered-views N   how many views get a froxel grid\n"
                 "  --no-shadows          turn the shadow pass off\n"
@@ -678,8 +694,30 @@ int main(int argc, char **argv) {
             e.window()->set_title("Manifold -- " + e.status_line() + extra);
         }
     };
+    engine.record_timings(bench);
     if (!engine.init(cfg)) return 1;
     int rc = engine.run();
+    if (bench) {
+        // The first thirty frames are pipeline warm-up, the first
+        // shader uploads and the first wave of terrain streaming.
+        const Engine::FrameTimes t = engine.frame_times(30);
+        const RenderStats &r = engine.renderer()->stats();
+        std::printf(
+            "\nbench  %s  %s  %ux%u  msaa %d\n"
+            "  %u frames after warm-up\n"
+            "  frame   mean %6.2f ms  (%5.1f fps)\n"
+            "          min  %6.2f   p50 %6.2f   p95 %6.2f   p99 %6.2f   max %6.2f\n"
+            "  record  mean %6.2f ms   (the renderer's own CPU time)\n"
+            "  last frame: %u draws, %u tris, %u views, %u portal levels,\n"
+            "              %u cascades (%u shadow draws), %u lights in %u "
+            "clustered views\n",
+            rhi::backend_name(engine.device()->backend()), demo.c_str(),
+            cfg.window.width, cfg.window.height, cfg.render.msaa, t.frames,
+            t.mean_ms, t.mean_ms > 0 ? 1000.0 / t.mean_ms : 0.0, t.min_ms,
+            t.p50_ms, t.p95_ms, t.p99_ms, t.max_ms, t.mean_cpu_ms, r.draw_calls,
+            r.triangles, r.views, r.max_depth_reached, r.cascades,
+            r.shadow_draws, r.lights, r.clustered_views);
+    }
     if (!shadow_dump.empty()) engine.renderer()->dump_shadow_map(shadow_dump);
     {
         if (Node *t = engine.tree()->root()->find_by_class("VoxelTerrain3D")) {

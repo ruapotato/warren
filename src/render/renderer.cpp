@@ -1038,13 +1038,13 @@ int Renderer::cluster_view(const View &v, int slot) {
 
     const float near = std::max(v.projection.get_z_near(), 1e-3f);
     const float far = kClusterFar;
-    // The same exponential slicing the shader inverts.
-    const float log_ratio = std::log2(far / near);
-    const float scale = float(kClusterZ) / log_ratio;
-    const float bias = -float(kClusterZ) * std::log2(near) / log_ratio;
 
-    // The view-space z at each slice boundary, so a froxel's depth
-    // range is a lookup rather than an exp per light per froxel.
+    // The view-space z at each slice boundary. The shader inverts
+    // this with a log; the binder reads it off a table instead,
+    // because a light behind the eye still lights what is in front of
+    // it and log2 of a negative depth is not a number. Both describe
+    // the same slicing -- upload_view writes the shader's scale and
+    // bias from the same near and far.
     float slice_z[kClusterZ + 1];
     for (int k = 0; k <= kClusterZ; k++)
         slice_z[k] = near * std::pow(far / near, float(k) / float(kClusterZ));

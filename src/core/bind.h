@@ -6,8 +6,19 @@
 // of the cost, paid once.
 #pragma once
 
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+// A HEADER THAT ONLY COMPILES SECOND IS NOT A HEADER. This used to
+// rely on object.h having been included before it, which held right
+// up until a translation unit wanted the reflection macros without
+// the scene tree in front of them -- and then failed with forty
+// lines of template error naming none of the cause.
+#include "core/math/mathdefs.h"
+#include "core/object.h"
+#include "core/variant.h"
 
 namespace mf {
 

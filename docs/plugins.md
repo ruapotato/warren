@@ -98,3 +98,27 @@ plugins. The voxel terrain meshes chunks on them. Two rules:
   a worker and flips an atomic state to `Ready`; the main thread reads
   that state with acquire. Without the pairing, the vertex data is a
   data race that happens to work on x86 and does not elsewhere.
+
+## Level of detail, and what a test for it has to check
+
+The voxel plugin's chunks carry a level. A level-L chunk is twice as
+wide as a level-(L-1) one and holds the same number of cells, so it
+costs the same to mesh and to draw and covers four times the ground.
+Level 0 reaches `lod_distance`, each level after it twice as far.
+
+The selection rule is deliberately generous at both edges: a chunk
+belongs to level L if its NEAREST point is inside L's range and its
+FARTHEST point is outside the finer level's. Two levels then overlap
+by a chunk along a boundary, which the depth buffer settles. The tight
+version — testing the chunk's centre for both — leaves a ring of the
+world at the wrong level instead, and the depth buffer cannot settle
+that.
+
+`tests/test_voxel_lod` is the check, and its first version was worth
+nothing. It asked "is some chunk loaded at this point", which a
+level-4 chunk satisfies for five hundred metres in every direction: a
+scheme that skipped level 0 entirely still passed. The check with
+teeth is **at what level**: ground must be drawn at the level its
+distance calls for, finer being allowed because the shells overlap on
+purpose. Under that check the tight rule fails 275 of 797 samples,
+worst by two levels, and the generous one fails none.

@@ -82,6 +82,22 @@ public:
     bool save_screenshot(const std::string &path);
     std::string status_line() const;
 
+    // HOW LONG A FRAME ACTUALLY TOOK, and not the average.
+    //
+    // A mean frame time hides the thing that matters: an engine that
+    // averages 4 ms and spikes to 40 every second when a chunk
+    // streams in is worse to play than one that sits at 8. So the
+    // last N frames are kept and reported as percentiles. `--bench`
+    // prints them and exits.
+    struct FrameTimes {
+        uint32_t frames = 0;
+        double mean_ms = 0, min_ms = 0, p50_ms = 0, p95_ms = 0, p99_ms = 0,
+               max_ms = 0;
+        double mean_cpu_ms = 0;  // the renderer's own, from RenderStats
+    };
+    FrameTimes frame_times(uint32_t skip_first = 0) const;
+    void record_timings(bool on) { timing_ = on; }
+
 private:
     EngineConfig config_;
     Window window_;
@@ -94,6 +110,8 @@ private:
     double physics_accumulator_ = 0.0;
     uint64_t frames_ = 0;
     bool running_ = false;
+    bool timing_ = false;
+    std::vector<double> frame_ms_, render_cpu_ms_;
 };
 
 }  // namespace mf

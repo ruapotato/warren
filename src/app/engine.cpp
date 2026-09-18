@@ -8,6 +8,7 @@
 
 #include <SDL2/SDL.h>
 
+#include <algorithm>
 #include <filesystem>
 
 #include "core/jobs.h"
@@ -145,6 +146,7 @@ void Engine::shutdown() {
 bool Engine::step() {
     if (!running_ || !device_) return false;
     if (!window_.poll()) return false;
+    const double frame_start = Clock::now();
     float real_dt = clock_.tick();
     const float dt = config_.fixed_delta > 0.0f ? config_.fixed_delta : real_dt;
 
@@ -189,10 +191,49 @@ bool Engine::step() {
         device_->end_frame();
     }
 
+    if (timing_) {
+        // WALL CLOCK AROUND THE WHOLE STEP, submission included. The
+        // renderer's own cpu_ms covers recording only, and a frame
+        // that spends its time waiting on a fence spends it outside
+        // that. Both are kept, because the gap between them is where
+        // "the GPU is the bottleneck" lives.
+        frame_ms_.push_back((Clock::now() - frame_start) * 1000.0);
+        render_cpu_ms_.push_back(renderer_.stats().cpu_ms);
+    }
     frames_++;
     if (want_shot) save_screenshot(config_.screenshot_path);
     if (config_.max_frames && frames_ >= config_.max_frames) return false;
     return true;
+}
+
+Engine::FrameTimes Engine::frame_times(uint32_t skip_first) const {
+    FrameTimes t;
+    if (frame_ms_.size() <= skip_first) return t;
+    // The first frames are pipeline warm-up, shader upload and the
+    // first chunk of streaming; including them measures the load, not
+    // the loop.
+    std::vector<double> v(frame_ms_.begin() + skip_first, frame_ms_.end());
+    t.frames = uint32_t(v.size());
+    double sum = 0;
+    for (double d : v) sum += d;
+    t.mean_ms = sum / double(v.size());
+    double cpu = 0;
+    for (size_t i = skip_first; i < render_cpu_ms_.size(); i++)
+        cpu += render_cpu_ms_[i];
+    t.mean_cpu_ms = render_cpu_ms_.size() > skip_first
+                        ? cpu / double(render_cpu_ms_.size() - skip_first)
+                        : 0.0;
+    std::sort(v.begin(), v.end());
+    auto at = [&](double q) {
+        size_t i = size_t(q * double(v.size() - 1) + 0.5);
+        return v[std::min(i, v.size() - 1)];
+    };
+    t.min_ms = v.front();
+    t.p50_ms = at(0.50);
+    t.p95_ms = at(0.95);
+    t.p99_ms = at(0.99);
+    t.max_ms = v.back();
+    return t;
 }
 
 int Engine::run() {

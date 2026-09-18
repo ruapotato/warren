@@ -142,7 +142,19 @@ ctest --test-dir build --output-on-failure
 build/bin/manifold --demo portals              # Vulkan by default
 build/bin/manifold --demo portals --backend gl
 build/bin/manifold --demo terrain              # the voxel plugin
+build/bin/manifold --demo terrain --bench      # time it and print percentiles
 build/bin/manifold --help
+```
+
+`--bench` runs 600 frames unthrottled and reports percentiles rather
+than an average, because an engine that averages 4 ms and spikes to 40
+whenever a chunk streams in is worse to play than one that sits at 8:
+
+```
+bench  Vulkan  terrain  1600x900  msaa 4
+  frame   mean  12.43 ms  ( 80.4 fps)
+          min    8.87   p50  10.85   p95  18.36   p99  30.47   max  59.34
+  record  mean   2.93 ms   (the renderer's own CPU time)
 ```
 
 Right mouse captures the cursor, escape releases it. WASD moves, Q/E or
@@ -191,7 +203,11 @@ would mean the plugin's classes register somewhere nobody reads. See
 
 The voxel terrain plugin ships in the box: a signed distance field,
 dual contouring with QEF vertex placement, chunk streaming on the job
-system, and runtime digging and building.
+system, runtime digging and building, and **level of detail** — a
+chunk holds the same number of cells at every level and covers twice
+the world at each one, so the horizon costs what your feet cost. On
+this machine that is the difference between 25 fps at a 192 m view
+distance and **80 fps at 512 m**, for 150k triangles instead of 1.1M.
 
 ```python
 t = mf.instantiate("VoxelTerrain3D")
@@ -219,7 +235,7 @@ plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
-                   lights, Python
+                   lights, the plugin ABI and terrain LOD, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -243,7 +259,7 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: LOD for the terrain, image-based lighting, shadows for
-punctual lights, audio, networking, and an editor.
+Not yet: image-based lighting, shadows for punctual lights, audio,
+networking, and an editor.
 
 See `docs/conventions.md` before touching the renderer.

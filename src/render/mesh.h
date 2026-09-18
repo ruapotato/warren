@@ -49,6 +49,16 @@ struct SubMesh {
     std::string name;
 };
 
+// THE SAME WORK, WITHOUT A Mesh TO HANG IT ON.
+//
+// A streaming system generates vertices on a worker thread and has no
+// reason to wait for the main thread to derive tangents from them --
+// but Mesh is an Object, and making one per chunk off-thread to call
+// a method is the tail wagging the dog. These take the arrays.
+void compute_tangents(std::vector<Vertex> &vertices,
+                      const std::vector<uint32_t> &indices);
+AABB compute_bounds(const std::vector<Vertex> &vertices);
+
 class Mesh : public Object {
     MF_CLASS(Mesh, Object)
 
@@ -77,6 +87,14 @@ public:
     void compute_tangents();
     void compute_bounds();
     AABB bounds() const { return bounds_; }
+    // For a mesh whose bounds were worked out elsewhere -- a streamed
+    // chunk, say, whose mesher already knew them. Also fixes up the
+    // default submesh, since a mesh with no bounds on its submeshes
+    // is culled away entirely.
+    void set_bounds(const AABB &b) {
+        bounds_ = b;
+        for (SubMesh &sm : submeshes) sm.bounds = b;
+    }
 
     // Weld vertices closer than `epsilon` that also agree on normal and
     // UV. Returns how many were removed.
