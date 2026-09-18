@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "nav/crowd.h"
+#include "render/mesh.h"
 #include "nav/navmesh.h"
 #include "scene/node.h"
 
@@ -46,6 +47,45 @@ public:
     // one size of thing -- a hound and a survivor want two bakes,
     // not one -- so this is part of the region, not of the agent.
     nav::BakeSettings settings;
+
+    // THE SAME SETTINGS, ONE FIELD AT A TIME, for a script.
+    //
+    // BakeSettings is a plain struct and has no business becoming a
+    // reflected class -- it is a parameter block, not an object with
+    // an identity. But a game has to be able to say how big its
+    // bodies are, and every one of these is a number somebody tunes.
+    float get_agent_radius() const { return settings.agent.radius; }
+    void set_agent_radius(float v) { settings.agent.radius = v; }
+    float get_agent_height() const { return settings.agent.height; }
+    void set_agent_height(float v) { settings.agent.height = v; }
+    float get_agent_climb() const { return settings.agent.max_climb; }
+    void set_agent_climb(float v) { settings.agent.max_climb = v; }
+    float get_agent_slope() const { return settings.agent.max_slope_degrees; }
+    void set_agent_slope(float v) { settings.agent.max_slope_degrees = v; }
+    float get_cell_size() const { return settings.cell_size; }
+    void set_cell_size(float v) { settings.cell_size = v; }
+    float get_cell_height() const { return settings.cell_height; }
+    void set_cell_height(float v) { settings.cell_height = v; }
+    float get_min_region_area() const { return settings.min_region_area; }
+    void set_min_region_area(float v) { settings.min_region_area = v; }
+
+    // Where the level starts, for pruning what cannot be reached
+    // from it. See NavMesh::prune_unreachable -- and note that a
+    // seed standing on something small keeps only that something.
+    // PRUNE AFTER THE FACT, from points chosen once there is a mesh
+    // to choose them on.
+    //
+    // Seeding the bake itself means naming the points before the
+    // navmesh exists, and a point named blind lands wherever it
+    // lands -- on a crate, on a statue, on the roof of the thing it
+    // was meant to stand beside. What survives is then whatever is
+    // reachable from the top of a crate. Baking first and pruning
+    // second lets a caller ask where the ground actually is.
+    int prune_from(const Array &points);
+
+    void add_seed(const Vec3 &p) { settings.reachable_from.push_back(p); }
+    void clear_seeds() { settings.reachable_from.clear(); }
+    int seed_count() const { return int(settings.reachable_from.size()); }
 
     // Collect the geometry under `source` (or under this node, when
     // it is null) and bake. Everything visible with a mesh counts,
@@ -83,6 +123,17 @@ public:
     // vertically, because the usual mistake is a body half a metre
     // above the floor and the usual disaster is snapping it to the
     // storey below.
+    // WHAT THE BAKE ACTUALLY PRODUCED, as geometry to look at.
+    //
+    // A navmesh is invisible and everything about it is geometric,
+    // which is a bad combination: "the bodies will not go upstairs"
+    // has a dozen causes that look identical from outside and
+    // entirely different with the polygons on screen. `mode` picks
+    // the colouring -- 0 per region, 1 per polygon, 2 flat.
+    Mesh *debug_surface(float lift, int mode) const;
+    Mesh *debug_edges(float lift) const;
+    Mesh *debug_links() const;
+
     // Turn area bits on or off over a box, which is how a zone
     // opens without re-baking. See NavMesh::set_area_in.
     int set_area_in(const AABB &box, int set_bits, int clear_bits);
@@ -111,6 +162,11 @@ public:
 private:
     friend class NavAgent3D;
     void gather(Node *n, std::vector<Vec3> *tris) const;
+
+    // The debug meshes are kept alive here, because a script that
+    // assigns one to a MeshInstance3D and drops its own reference
+    // would otherwise be holding a freed mesh.
+    mutable Ref<Mesh> debug_surface_, debug_edges_, debug_links_;
 
     Ref<nav::NavMesh> mesh_;
     nav::Crowd crowd_;

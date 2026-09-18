@@ -188,6 +188,9 @@ public:
     // Re-resolve every link against the polygons. Called by bake;
     // call it again after adding links to a mesh already baked.
     void resolve_links();
+    // One link, against the current mesh. Quiet when there is no
+    // mesh yet.
+    void resolve_link(NavLink &link);
 
     // Counted accessors, for the places that only want the size --
     // reflection among them, since a vector of structs is not a

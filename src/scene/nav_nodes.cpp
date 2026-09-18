@@ -6,6 +6,7 @@
 
 #include "core/bind.h"
 #include "core/log.h"
+#include "nav/debug.h"
 #include "scene/nodes.h"
 
 namespace wr {
@@ -80,7 +81,17 @@ bool NavRegion3D::bake_within(const AABB &bounds, Node *source) {
     mesh_ = fresh;
     stats_ = st;
     crowd_.set_navmesh(mesh_.get());
+    // THE LINKS FIRST, THEN THE PRUNE. A ladder is the only way onto
+    // a roof, so a roof pruned before the ladder is hung is a roof
+    // the ladder then cannot reach -- and the only symptom is that
+    // nothing ever goes up there.
     collect_links(source);
+    if (!settings.reachable_from.empty()) {
+        stats_.pruned = mesh_->prune_unreachable(settings.reachable_from);
+        // Pruning renumbers the polygons, so the links have to find
+        // themselves again.
+        mesh_->resolve_links();
+    }
 
     WR_INFO("nav: '%s' baked %d polys from %zu triangles in %.0f ms "
             "(%d regions, %d holes bridged, %d unreachable pruned)",
@@ -169,6 +180,37 @@ void NavRegion3D::on_physics(float dt) {
         bake();
     }
     if (active && mesh_) crowd_.step(dt);
+}
+
+Mesh *NavRegion3D::debug_surface(float lift, int mode) const {
+    if (!mesh_) return nullptr;
+    nav::DebugColour c = mode == 1   ? nav::DebugColour::Polygon
+                         : mode == 2 ? nav::DebugColour::Flat
+                                     : nav::DebugColour::Region;
+    debug_surface_ = nav::debug_surface(*mesh_, lift, c);
+    return debug_surface_.get();
+}
+
+Mesh *NavRegion3D::debug_edges(float lift) const {
+    if (!mesh_) return nullptr;
+    debug_edges_ = nav::debug_edges(*mesh_, lift);
+    return debug_edges_.get();
+}
+
+Mesh *NavRegion3D::debug_links() const {
+    if (!mesh_) return nullptr;
+    debug_links_ = nav::debug_links(*mesh_);
+    return debug_links_.get();
+}
+
+int NavRegion3D::prune_from(const Array &points) {
+    if (!mesh_) return 0;
+    std::vector<Vec3> seeds;
+    seeds.reserve(points.size());
+    for (const Variant &v : points) seeds.push_back(v.to_vec3());
+    int n = mesh_->prune_unreachable(seeds);
+    mesh_->resolve_links();
+    return n;
 }
 
 int NavRegion3D::set_area_in(const AABB &box, int set_bits, int clear_bits) {
@@ -355,10 +397,33 @@ void NavAgent3D::on_physics(float dt) {
 static void register_nav_nodes() {
     ClassBuilder<NavRegion3D>()
         .field("active", &NavRegion3D::active)
+        .prop("agent_radius", &NavRegion3D::get_agent_radius,
+              &NavRegion3D::set_agent_radius, "range:0.05,4")
+        .prop("agent_height", &NavRegion3D::get_agent_height,
+              &NavRegion3D::set_agent_height, "range:0.2,8")
+        .prop("agent_climb", &NavRegion3D::get_agent_climb,
+              &NavRegion3D::set_agent_climb, "range:0,4")
+        .prop("agent_slope", &NavRegion3D::get_agent_slope,
+              &NavRegion3D::set_agent_slope, "range:1,89")
+        .prop("cell_size", &NavRegion3D::get_cell_size,
+              &NavRegion3D::set_cell_size, "range:0.05,2")
+        .prop("cell_height", &NavRegion3D::get_cell_height,
+              &NavRegion3D::set_cell_height, "range:0.02,2")
+        .prop("min_region_area", &NavRegion3D::get_min_region_area,
+              &NavRegion3D::set_min_region_area, "range:0,64")
+        .method("prune_from", &NavRegion3D::prune_from).args("points")
+        .method("add_seed", &NavRegion3D::add_seed).args("point")
+        .method("clear_seeds", &NavRegion3D::clear_seeds)
+        .method("seed_count", &NavRegion3D::seed_count)
         .method("bake", &NavRegion3D::bake_now)
         .method("poly_count", &NavRegion3D::poly_count)
         .method("bake_seconds", &NavRegion3D::bake_seconds)
         .method("collect_links", &NavRegion3D::collect_links_now)
+        .method("debug_surface", &NavRegion3D::debug_surface,
+                {Variant(0.06), Variant(0)}).args("lift", "mode")
+        .method("debug_edges", &NavRegion3D::debug_edges, {Variant(0.08)})
+            .args("lift")
+        .method("debug_links", &NavRegion3D::debug_links)
         .method("set_area_in", &NavRegion3D::set_area_in)
             .args("box", "set_bits", "clear_bits")
         .method("area_at", &NavRegion3D::area_at).args("point")

@@ -72,8 +72,14 @@ class Player:
         return wr.Vec3(-math.sin(self.yaw) * cp, math.sin(self.pitch),
                        -math.cos(self.yaw) * cp)
 
+    def overhead(self, at):
+        """Park the camera above the town and stop driving it."""
+        self._overhead = True
+        self.camera.position = at
+        self.camera.euler = wr.Vec3(0.0, -1.35, 0.0)
+
     def update(self, dt, window_captured):
-        if not self.body:
+        if not self.body or getattr(self, "_overhead", False):
             return
         if window_captured:
             m = wr.mouse_motion()

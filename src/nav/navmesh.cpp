@@ -91,10 +91,14 @@ bool NavMesh::bake_from(const CompactField &input, const BakeSettings &settings,
     for (const Vec3 &v : verts_) bounds_.expand(v);
     build_grid();
     resolve_links();
-    // Pruning comes after the links are resolved, because a link is
-    // an edge of the reachability graph -- a roof reached only by a
-    // ladder must not be pruned for want of a walk to it.
-    int pruned = prune_unreachable(settings.reachable_from);
+    // NOT PRUNED HERE, even though the settings say to. A link is an
+    // edge of the reachability graph, and a mesh being baked for the
+    // first time has no links on it yet -- they are hung on it
+    // afterwards, by whoever owns the level. Pruning now would
+    // delete every roof for want of a walk to it, and then the
+    // ladder would have nothing to attach to. NavRegion3D::bake_within
+    // collects the links and prunes after.
+    int pruned = 0;
 
     if (stats) {
         stats->spans = int(field.spans().size());
@@ -436,16 +440,32 @@ uint16_t NavMesh::area_at(const Vec3 &p, const Vec3 &extents) const {
 
 void NavMesh::add_link(const NavLink &link) {
     links_.push_back(link);
-    resolve_links();
+    // Only the new one. Re-resolving the whole list per addition is
+    // quadratic, and -- worse -- it re-warns about every link that
+    // has not attached yet, so adding twenty links to a mesh that
+    // has not been baked prints two hundred warnings about the
+    // first nineteen.
+    resolve_link(links_.back());
 }
 void NavMesh::clear_links() { links_.clear(); }
 
 void NavMesh::resolve_links() {
-    for (NavLink &l : links_) {
+    for (NavLink &l : links_) resolve_link(l);
+}
+
+void NavMesh::resolve_link(NavLink &l) {
+    {
         Vec3 ext(l.radius, std::fmax(l.radius, 1.0f), l.radius);
         Vec3 p;
         l.from_poly = kNoPoly;
         l.to_poly = kNoPoly;
+        // NOTHING TO ATTACH TO IS NOT A COMPLAINT. Links are
+        // routinely added before the bake -- a level builds its
+        // ladders as it builds its geometry -- and re-resolved
+        // afterwards. Saying so each time would bury the one case
+        // that matters: a link that still has no polygon AFTER
+        // there is a mesh.
+        if (polys_.empty()) return;
         if (nearest_point(l.from, ext, &p, &l.from_poly) &&
             (p - l.from).length() > l.radius)
             l.from_poly = kNoPoly;
