@@ -16,6 +16,7 @@
 #include "plugin/host.h"
 #include "script/stubs.h"
 #include "scene/bodies.h"
+#include "resource/resource.h"
 #include "scene/controls.h"
 #include "scene/portal.h"
 
@@ -627,7 +628,7 @@ int main(int argc, char **argv) {
     std::string demo = "portals";
     std::string stub_path;
     std::string shadow_dump;
-    std::string save_scene_path, load_scene_path;
+    std::string save_scene_path, load_scene_path, data_directory;
     bool bench = false;
 
     for (int i = 1; i < argc; i++) {
@@ -684,6 +685,8 @@ int main(int argc, char **argv) {
             save_scene_path = next("scene.mfs");
         } else if (a == "--load-scene") {
             load_scene_path = next("scene.mfs");
+        } else if (a == "--data") {
+            data_directory = next(".");
         } else if (a == "--editor") {
             cfg.editor_visible = true;
         } else if (a == "--no-editor") {
@@ -747,7 +750,8 @@ int main(int argc, char **argv) {
                 "  --no-lights           no punctual lights, sun only\n"
                 "  --editor              start with the editor open (F1 toggles)\n"
                 "  --save-scene FILE     write the scene out and carry on\n"
-                "  --load-scene FILE     replace the demo scene with a file\n"
+                "  --load-scene FILE     replace the scene: .mfs, .glb or .gltf\n"
+                "  --data DIR            where relative asset paths resolve\n"
                 "  --no-editor           do not build it at all\n"
                 "  --no-ibl              hemisphere ambient, no environment\n"
                 "  --no-punctual-shadows lights, but nothing blocks them\n"
@@ -812,6 +816,8 @@ int main(int argc, char **argv) {
     };
     engine.record_timings(bench);
     if (!engine.init(cfg)) return 1;
+    if (!data_directory.empty())
+        ResourceLoader::set_base_directory(data_directory);
     if (!load_scene_path.empty()) engine.editor()->load_scene(load_scene_path);
     if (!save_scene_path.empty()) engine.editor()->save_scene(save_scene_path);
     int rc = engine.run();

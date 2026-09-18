@@ -1,6 +1,7 @@
 #include "editor/editor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
@@ -12,6 +13,7 @@
 #include "render/material.h"
 #include "render/mesh.h"
 #include "resource/packed_scene.h"
+#include "resource/resource.h"
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
@@ -374,12 +376,58 @@ bool Editor::save_scene(const std::string &path) {
 
 bool Editor::load_scene(const std::string &path) {
     if (!engine_ || !engine_->tree()) return false;
-    Ref<PackedScene> packed = PackedScene::load(path);
-    if (!packed || !packed->valid()) return false;
+    // THROUGH THE RESOURCE LOADER, so that anything which imports to
+    // a scene opens the same way: .mfs, .glb, .gltf, and whatever a
+    // plugin registers next. "Open a level" and "open a model"
+    // should not be two commands.
+    Ref<Resource> r = ResourceLoader::load(path);
+    PackedScene *packed = r ? r->cast_to<PackedScene>() : nullptr;
+    if (!packed || !packed->valid()) {
+        MF_ERROR("scene: '%s' did not load as a scene", path.c_str());
+        return false;
+    }
     Node *scene = packed->instantiate();
     if (!scene) return false;
     selected_.reset();
     engine_->tree()->set_scene(scene);
+
+    // A MODEL FILE HAS NO CAMERA, and a scene with no camera draws
+    // nothing at all -- which looks like the import failing rather
+    // than succeeding. Opening a model should show you the model, so
+    // if the file brought no camera, one is put where the whole of
+    // it is visible.
+    if (!engine_->tree()->active_camera()) {
+        AABB bounds;
+        std::vector<Node *> stack{scene};
+        while (!stack.empty()) {
+            Node *n = stack.back();
+            stack.pop_back();
+            for (const auto &c : n->children())
+                if (c) stack.push_back(c.get());
+            if (MeshInstance3D *mi = n->cast_to<MeshInstance3D>())
+                if (mi->mesh) bounds.expand(mi->world_bounds());
+        }
+        if (!bounds.valid()) bounds = AABB(Vec3(-1, -1, -1), Vec3(1, 1, 1));
+        const Vec3 centre = bounds.center();
+        const float radius = std::max(0.5f, bounds.radius());
+
+        Camera3D *cam = new Camera3D();
+        cam->set_name("ViewCamera");
+        cam->set_fov_degrees(50.0f);
+        cam->set_near(std::max(0.01f, radius * 0.005f));
+        cam->set_far(radius * 50.0f);
+        // Back off far enough for the bounding sphere to fit the
+        // vertical field of view, with a little margin.
+        const float distance = radius / std::tan(cam->fov() * 0.5f) * 1.3f;
+        cam->set_position(centre + Vec3(0.55f, 0.45f, 1.0f).normalized() *
+                                       distance);
+        cam->look_at(centre);
+        scene->add_child(cam);
+        cam->make_current();
+        MF_INFO("scene: no camera in the file; framing %.2f m of content",
+                double(radius * 2.0f));
+    }
+
     MF_INFO("scene: loaded %s", path.c_str());
     return true;
 }
