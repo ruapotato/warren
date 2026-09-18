@@ -189,8 +189,11 @@ public:
     // Can a body walk from `from` to `to` in a straight line without
     // leaving the mesh? Used to shorten a path as an agent moves,
     // and to decide whether a path is needed at all.
+    // On a hit, `normal` is the wall's outward direction in the xz
+    // plane -- which is what a caller needs in order to slide along
+    // it rather than stop dead against it.
     bool raycast(const Vec3 &from, const Vec3 &to, Vec3 *hit,
-                 const NavFilter &filter = {}) const;
+                 const NavFilter &filter = {}, Vec3 *normal = nullptr) const;
 
     // ------------------------------------------------ persistence
     std::vector<uint8_t> save() const;

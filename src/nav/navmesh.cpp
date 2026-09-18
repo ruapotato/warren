@@ -587,52 +587,153 @@ bool NavMesh::find_path(const Vec3 &from, const Vec3 &to,
 }
 
 bool NavMesh::raycast(const Vec3 &from, const Vec3 &to, Vec3 *hit,
-                      const NavFilter &filter) const {
-    uint16_t cur = find_poly(from, Vec3(1.0f, 2.0f, 1.0f), filter);
-    if (cur == kNoPoly) {
-        if (hit) *hit = from;
-        return false;
-    }
-    // Walk polygon to polygon along the segment. Each step crosses
-    // one edge; the first edge with no neighbour on the far side is
-    // the wall the ray hits.
-    Vec3 p = from;
-    for (int guard = 0; guard < 256; ++guard) {
-        const NavPoly &np = polys_[cur];
-        if (height_at(cur, to, nullptr)) {
-            if (hit) *hit = to;
-            return true;
+                      const NavFilter &filter, Vec3 *normal) const {
+    if (normal) *normal = Vec3();
+    if (hit) *hit = from;
+
+    // WHICH POLYGON TO START IN, when the answer is more than one.
+    //
+    // A point on a shared edge, or on a vertex, is in every polygon
+    // that touches it, and `find_poly` returns whichever it saw
+    // first. That is fine for a height query and wrong here: if the
+    // ray leaves that polygon immediately, the walk reports a wall
+    // at zero distance and a perfectly good route reads as blocked.
+    // Since the taut paths this is mostly asked about begin and end
+    // exactly on vertices, that case is the common one, not the
+    // exotic one.
+    //
+    // So: collect every polygon the start point touches and try
+    // them. The first that does not fail on the spot is the right
+    // one, and there is never more than a handful.
+    std::vector<uint16_t> starts;
+    {
+        std::vector<uint16_t> nearby;
+        query_cells(from - Vec3(0.05f, 0.0f, 0.05f),
+                    from + Vec3(0.05f, 0.0f, 0.05f), &nearby);
+        for (uint16_t i : nearby) {
+            if (!filter.passes(polys_[i].area)) continue;
+            float y = 0.0f;
+            if (!height_at(i, from, &y)) continue;
+            if (std::fabs(y - from.y) > 2.0f) continue;
+            starts.push_back(i);
         }
+    }
+    if (starts.empty()) {
+        uint16_t one = find_poly(from, Vec3(1.0f, 2.0f, 1.0f), filter);
+        if (one == kNoPoly) return false;
+        starts.push_back(one);
+    }
+
+    Vec3 best_hit = from, best_normal;
+    float best_reached = -1.0f;
+    for (size_t attempt = 0; attempt < starts.size(); ++attempt) {
+    uint16_t cur = starts[attempt];
+
+    // CLIP THE WHOLE SEGMENT AGAINST EACH POLYGON, rather than
+    // testing it against each edge in turn.
+    //
+    // The pairwise test looks simpler and cannot be made to work.
+    // The rays that matter most here are the ones a taut path is
+    // made of, and those run along shared edges and straight
+    // through vertices -- precisely where "do these two segments
+    // cross" has no answer that is not a coin toss, and where
+    // getting it wrong means either a body walks through a wall or
+    // a correct path is reported as blocked.
+    //
+    // Clipping against the convex polygon has no such case. The
+    // segment's intersection with a convex region is an interval;
+    // grazing a vertex just means two edges agree about where that
+    // interval ends, and either one leads to the same place.
+    // Parameters are measured from `from` throughout, so nothing
+    // accumulates across the walk.
+    Vec3 dir = to - from;
+    dir.y = 0.0f;
+    if (dir.length_sq() < 1e-12f) {
+        if (hit) *hit = to;
+        return true;
+    }
+    auto at = [&](float t) {
+        Vec3 p = from + dir * t;
+        p.y = from.y + (to.y - from.y) * t;
+        return p;
+    };
+
+    float reached = 0.0f;
+    for (int guard = 0; guard < 512; ++guard) {
+        const NavPoly &np = polys_[cur];
+        float tmin = 0.0f, tmax = 1.0f;
         int exit_edge = -1;
-        float best_t = 1e30f;
-        Vec3 best_p;
+        bool outside = false;
+
         for (int k = 0; k < np.count; ++k) {
             const Vec3 &a = verts_[np.verts[k]];
             const Vec3 &b = verts_[np.verts[(k + 1) % np.count]];
-            // Does the segment p..to cross this edge, forward?
-            float d1 = area2(a, b, p), d2 = area2(a, b, to);
-            if ((d1 > 0.0f) == (d2 > 0.0f)) continue;
-            float e1 = area2(p, to, a), e2 = area2(p, to, b);
-            if ((e1 > 0.0f) == (e2 > 0.0f)) continue;
-            float t = d1 / (d1 - d2);
-            if (t < 1e-5f || t >= best_t) continue;
-            best_t = t;
-            best_p = p + (to - p) * t;
-            exit_edge = k;
+            Vec3 e = b - a;
+            float el = std::sqrt(e.x * e.x + e.z * e.z);
+            if (el < 1e-9f) continue;
+            // Outward normal: the interior is on the left of a
+            // directed edge, so the outside is to the right.
+            Vec3 n(-e.z / el, 0.0f, e.x / el);
+            float denom = dir.x * n.x + dir.z * n.z;
+            float dist = (from.x - a.x) * n.x + (from.z - a.z) * n.z;
+
+            if (std::fabs(denom) < 1e-9f) {
+                // Running parallel to this edge: either inside it
+                // for the whole segment, or outside it for the
+                // whole segment.
+                if (dist > 1e-4f) {
+                    outside = true;
+                    break;
+                }
+                continue;
+            }
+            float t = -dist / denom;
+            if (denom < 0.0f) {
+                tmin = std::fmax(tmin, t);  // entering across this edge
+            } else if (t < tmax) {
+                tmax = t;                   // leaving across this edge
+                exit_edge = k;
+            }
+            if (tmin > tmax + 1e-6f) {
+                outside = true;
+                break;
+            }
         }
-        if (exit_edge < 0) {
+        if (outside) break;
+        if (exit_edge < 0 || tmax >= 1.0f) {
             if (hit) *hit = to;
             return true;
         }
+
         uint16_t next = np.neis[exit_edge];
         if (next == kNoPoly || !filter.passes(polys_[next].area)) {
-            if (hit) *hit = best_p;
-            return false;
+            reached = std::fmax(reached, tmax);
+            if (reached > best_reached) {
+                best_reached = reached;
+                best_hit = at(tmax);
+                const Vec3 &a = verts_[np.verts[exit_edge]];
+                const Vec3 &b = verts_[np.verts[(exit_edge + 1) % np.count]];
+                Vec3 e = b - a;
+                float el = std::sqrt(e.x * e.x + e.z * e.z);
+                best_normal = el > 1e-9f ? Vec3(-e.z / el, 0.0f, e.x / el)
+                                         : Vec3();
+            }
+            break;
         }
-        p = best_p;
+        reached = std::fmax(reached, tmax);
         cur = next;
     }
-    if (hit) *hit = p;
+    // Ran out of guard, or stopped at a wall. Either way this start
+    // got as far as `reached`; keep the furthest of all the tries.
+    if (reached > best_reached) {
+        best_reached = reached;
+        best_hit = at(reached);
+        best_normal = Vec3();
+    }
+    }  // next start polygon
+
+    if (hit) *hit = best_hit;
+    if (normal) *normal = best_normal;
     return false;
 }
 
