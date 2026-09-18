@@ -1,8 +1,12 @@
 #include "mesh.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <map>
+#include <queue>
+#include <set>
 #include <unordered_map>
 
 #include "core/log.h"
@@ -165,6 +169,373 @@ void compute_tangents(std::vector<Vertex> &vertices,
     }
 }
 
+// ------------------------------------------------- simplification
+
+namespace {
+
+// A quadric is the symmetric 4x4 matrix of a sum of squared plane
+// distances, which has ten distinct entries. Adding two quadrics adds
+// the two sets of planes; evaluating one at a point gives the total
+// squared distance to all of them.
+struct Quadric {
+    double m[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    // THE TOTAL WEIGHT, so the error can be reported in metres.
+    //
+    // The planes are weighted by face area, which is what keeps a
+    // big flat face from being outvoted by a cluster of small ones.
+    // But it also means the raw quadric is an area times a squared
+    // distance, and a threshold in those units means nothing to a
+    // caller and changes meaning with the size of the model.
+    // Dividing by the weight gives a mean squared distance, whose
+    // square root is a length somebody can reason about.
+    double w = 0;
+
+    void add_plane(double a, double b, double c, double d, double weight) {
+        m[0] += a * a * weight; m[1] += a * b * weight; m[2] += a * c * weight;
+        m[3] += a * d * weight;
+        m[4] += b * b * weight; m[5] += b * c * weight; m[6] += b * d * weight;
+        m[7] += c * c * weight; m[8] += c * d * weight;
+        m[9] += d * d * weight;
+        w += weight;
+    }
+    void add(const Quadric &o) {
+        for (int i = 0; i < 10; i++) m[i] += o.m[i];
+        w += o.w;
+    }
+    double at(const Vec3 &p) const {
+        const double x = p.x, y = p.y, z = p.z;
+        return m[0]*x*x + 2*m[1]*x*y + 2*m[2]*x*z + 2*m[3]*x +
+               m[4]*y*y + 2*m[5]*y*z + 2*m[6]*y +
+               m[7]*z*z + 2*m[8]*z + m[9];
+    }
+};
+
+struct Collapse {
+    uint32_t a = 0, b = 0;
+    double cost = 0;
+    Vec3 to;
+    // The version of each endpoint when this was costed; a stale
+    // entry is discarded rather than kept up to date, because
+    // re-costing every neighbour of every collapse into a heap that
+    // cannot delete is far more work than throwing a few away.
+    uint32_t version_a = 0, version_b = 0;
+    bool operator<(const Collapse &o) const { return cost > o.cost; }  // min-heap
+};
+
+}  // namespace
+
+size_t Mesh::simplify(float ratio, float max_error) {
+    const size_t triangles = indices.size() / 3;
+    if (triangles < 4 || ratio >= 1.0f) return triangles;
+    const size_t target = std::max<size_t>(4, size_t(double(triangles) * std::max(ratio, 0.0f)));
+
+    // WELDED BY POSITION FIRST, and mapped back afterwards.
+    //
+    // A mesh whose vertices were split for a hard edge or a UV seam
+    // has several vertices in the same place, and an edge collapse
+    // that moves one and not the others tears the surface open. So
+    // the topology worked on here is the merged one, and every
+    // original vertex follows the merged vertex it belongs to.
+    struct Key {
+        int64_t x, y, z;
+        bool operator<(const Key &o) const {
+            return x != o.x ? x < o.x : y != o.y ? y < o.y : z < o.z;
+        }
+    };
+    std::map<Key, uint32_t> unique;
+    std::vector<uint32_t> to_merged(vertices.size());
+    std::vector<uint32_t> first_original;  // one original per merged vertex
+    std::vector<Vec3> position;
+    for (size_t i = 0; i < vertices.size(); i++) {
+        const Vec3 &p = vertices[i].position;
+        const Key k{int64_t(std::llround(double(p.x) * 65536.0)),
+                    int64_t(std::llround(double(p.y) * 65536.0)),
+                    int64_t(std::llround(double(p.z) * 65536.0))};
+        auto it = unique.find(k);
+        if (it == unique.end()) {
+            it = unique.emplace(k, uint32_t(position.size())).first;
+            position.push_back(p);
+            first_original.push_back(uint32_t(i));
+        }
+        to_merged[i] = it->second;
+    }
+    const size_t n = position.size();
+
+    std::vector<std::array<uint32_t, 3>> faces;
+    faces.reserve(triangles);
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const std::array<uint32_t, 3> f{to_merged[indices[i]], to_merged[indices[i + 1]],
+                                        to_merged[indices[i + 2]]};
+        if (f[0] == f[1] || f[1] == f[2] || f[0] == f[2]) continue;  // already degenerate
+        faces.push_back(f);
+    }
+
+    std::vector<Quadric> quadrics(n);
+    std::vector<std::vector<uint32_t>> vertex_faces(n);
+    auto face_plane = [&](const std::array<uint32_t, 3> &f, double *a, double *b,
+                          double *c, double *d) {
+        const Vec3 &p0 = position[f[0]];
+        const Vec3 nrm = cross(position[f[1]] - p0, position[f[2]] - p0);
+        const float len = nrm.length();
+        if (len < 1e-20f) return 0.0;
+        const Vec3 u = nrm / len;
+        *a = u.x; *b = u.y; *c = u.z;
+        *d = -double(dot(u, p0));
+        return double(len) * 0.5;  // the area, used as the weight
+    };
+    for (size_t i = 0; i < faces.size(); i++) {
+        double a, b, c, d;
+        const double area = face_plane(faces[i], &a, &b, &c, &d);
+        if (area <= 0.0) continue;
+        for (int k = 0; k < 3; k++) {
+            quadrics[faces[i][k]].add_plane(a, b, c, d, area);
+            vertex_faces[faces[i][k]].push_back(uint32_t(i));
+        }
+    }
+
+    // OPEN EDGES ARE PINNED.
+    //
+    // An edge belonging to one triangle is the rim of a surface that
+    // does not close -- a terrain chunk's border, a decal, a cut
+    // plane. Collapsing across it eats the rim away and leaves a gap
+    // next to whatever was sitting alongside. A plane perpendicular
+    // to the surface along that edge, weighted heavily, makes any
+    // collapse that moves it prohibitively expensive without
+    // forbidding it outright.
+    {
+        std::map<std::pair<uint32_t, uint32_t>, int> edge_count;
+        for (const auto &f : faces)
+            for (int k = 0; k < 3; k++) {
+                const uint32_t u = f[k], v = f[(k + 1) % 3];
+                edge_count[{std::min(u, v), std::max(u, v)}]++;
+            }
+        for (const auto &f : faces) {
+            double a, b, c, d;
+            if (face_plane(f, &a, &b, &c, &d) <= 0.0) continue;
+            const Vec3 normal{float(a), float(b), float(c)};
+            for (int k = 0; k < 3; k++) {
+                const uint32_t u = f[k], v = f[(k + 1) % 3];
+                if (edge_count[{std::min(u, v), std::max(u, v)}] != 1) continue;
+                const Vec3 along = position[v] - position[u];
+                const Vec3 wall = cross(along, normal);
+                const float len = wall.length();
+                if (len < 1e-20f) continue;
+                const Vec3 wn = wall / len;
+                const double wd = -double(dot(wn, position[u]));
+                quadrics[u].add_plane(wn.x, wn.y, wn.z, wd, 1000.0);
+                quadrics[v].add_plane(wn.x, wn.y, wn.z, wd, 1000.0);
+            }
+        }
+    }
+
+    std::vector<uint32_t> version(n, 0);
+    std::vector<bool> dead(n, false);
+
+    // WHERE TO PUT THE MERGED VERTEX.
+    //
+    // The minimiser of the combined quadric, found by solving the
+    // 3x3 system its gradient gives. This is not a refinement over
+    // picking the better endpoint or the midpoint: on a curved
+    // surface every one of those three lies INSIDE the surface, so
+    // taking them loses volume on every collapse and a decimated
+    // sphere comes out four percent small. The solved point sits
+    // where the neighbouring planes intersect, which is outside the
+    // chord, and the shrinkage goes away.
+    //
+    // The system is singular exactly where the planes are parallel
+    // -- a flat region -- and there the three candidates are already
+    // exact, so they are the fallback and cost nothing.
+    auto best_point = [&](uint32_t a, uint32_t bb, Quadric *q, double *cost) {
+        Quadric sum = quadrics[a];
+        sum.add(quadrics[bb]);
+        *q = sum;
+
+        const double *m = sum.m;
+        const double det =
+            m[0] * (m[4] * m[7] - m[5] * m[5]) -
+            m[1] * (m[1] * m[7] - m[5] * m[2]) +
+            m[2] * (m[1] * m[5] - m[4] * m[2]);
+        // Scaled against the matrix's own magnitude, so the test
+        // means "nearly singular" at any size of model.
+        const double scale = std::fabs(m[0]) + std::fabs(m[4]) + std::fabs(m[7]);
+        Vec3 chosen;
+        bool solved = false;
+        if (scale > 0.0 && std::fabs(det) > 1e-10 * scale * scale * scale) {
+            const double inv = 1.0 / det;
+            const double x = -inv * (m[3] * (m[4] * m[7] - m[5] * m[5]) -
+                                     m[6] * (m[1] * m[7] - m[2] * m[5]) +
+                                     m[8] * (m[1] * m[5] - m[2] * m[4]));
+            const double y = -inv * (m[0] * (m[6] * m[7] - m[5] * m[8]) -
+                                     m[1] * (m[3] * m[7] - m[2] * m[8]) +
+                                     m[2] * (m[3] * m[5] - m[2] * m[6]));
+            const double z = -inv * (m[0] * (m[4] * m[8] - m[5] * m[6]) -
+                                     m[1] * (m[1] * m[8] - m[2] * m[6]) +
+                                     m[3] * (m[1] * m[5] - m[2] * m[4]));
+            const Vec3 p{float(x), float(y), float(z)};
+            // A solve that lands a long way from the edge it came
+            // from is a solve that has gone wrong, whatever the
+            // determinant said.
+            const Vec3 mid = (position[a] + position[bb]) * 0.5f;
+            const float span = (position[a] - position[bb]).length() + 1e-6f;
+            if (std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
+                (p - mid).length() < span * 4.0f) {
+                chosen = p;
+                solved = true;
+            }
+        }
+        if (!solved) {
+            const Vec3 candidates[3] = {position[a], position[bb],
+                                        (position[a] + position[bb]) * 0.5f};
+            double best = sum.at(candidates[0]);
+            int which = 0;
+            for (int i = 1; i < 3; i++) {
+                const double e = sum.at(candidates[i]);
+                if (e < best) { best = e; which = i; }
+            }
+            chosen = candidates[which];
+        }
+        // Mean squared distance to the planes, so the threshold the
+        // caller gave is a distance in metres.
+        *cost = sum.w > 0.0 ? std::max(sum.at(chosen), 0.0) / sum.w : 0.0;
+        return chosen;
+    };
+
+    std::priority_queue<Collapse> queue;
+    auto push_edge = [&](uint32_t a, uint32_t bb) {
+        if (a == bb) return;
+        Collapse c;
+        c.a = std::min(a, bb);
+        c.b = std::max(a, bb);
+        Quadric q;
+        c.to = best_point(c.a, c.b, &q, &c.cost);
+        c.version_a = version[c.a];
+        c.version_b = version[c.b];
+        queue.push(c);
+    };
+    {
+        std::set<std::pair<uint32_t, uint32_t>> seen;
+        for (const auto &f : faces)
+            for (int k = 0; k < 3; k++) {
+                const uint32_t u = f[k], v = f[(k + 1) % 3];
+                if (seen.emplace(std::min(u, v), std::max(u, v)).second)
+                    push_edge(u, v);
+            }
+    }
+
+    size_t live_faces = faces.size();
+    const double error_limit = double(max_error) * double(max_error);
+    while (live_faces > target && !queue.empty()) {
+        const Collapse c = queue.top();
+        queue.pop();
+        if (dead[c.a] || dead[c.b]) continue;
+        if (version[c.a] != c.version_a || version[c.b] != c.version_b) continue;
+        if (c.cost > error_limit) break;  // everything cheaper is gone
+
+        // WOULD ANY TRIANGLE TURN INSIDE OUT?
+        //
+        // A collapse that is cheap by the quadric can still fold a
+        // triangle over, because the quadric measures distance to
+        // planes and says nothing about which side of them anything
+        // is on. One fold is a black facet that no amount of
+        // relighting fixes, so every affected face is checked.
+        bool flips = false;
+        for (uint32_t which : {c.a, c.b}) {
+            for (uint32_t fi : vertex_faces[which]) {
+                const auto &f = faces[fi];
+                if (f[0] == f[1]) continue;  // retired
+                // Faces containing both endpoints vanish; they cannot flip.
+                int has = 0;
+                for (int k = 0; k < 3; k++)
+                    if (f[k] == c.a || f[k] == c.b) has++;
+                if (has == 2) continue;
+                Vec3 p[3];
+                for (int k = 0; k < 3; k++)
+                    p[k] = (f[k] == c.a || f[k] == c.b) ? c.to : position[f[k]];
+                const Vec3 before = cross(position[f[1]] - position[f[0]],
+                                          position[f[2]] - position[f[0]]);
+                const Vec3 after = cross(p[1] - p[0], p[2] - p[0]);
+                if (after.length_sq() < 1e-24f || dot(before, after) <= 0.0f) {
+                    flips = true;
+                    break;
+                }
+            }
+            if (flips) break;
+        }
+        if (flips) continue;
+
+        // Do it: b becomes a, a moves to the new point.
+        position[c.a] = c.to;
+        quadrics[c.a].add(quadrics[c.b]);
+        dead[c.b] = true;
+        version[c.a]++;
+
+        for (uint32_t fi : vertex_faces[c.b]) {
+            auto &f = faces[fi];
+            if (f[0] == f[1]) continue;
+            for (int k = 0; k < 3; k++)
+                if (f[k] == c.b) f[k] = c.a;
+            if (f[0] == f[1] || f[1] == f[2] || f[0] == f[2]) {
+                f = {0, 0, 0};  // retired
+                live_faces--;
+            } else {
+                vertex_faces[c.a].push_back(fi);
+            }
+        }
+        vertex_faces[c.b].clear();
+
+        // Re-cost every edge still touching the merged vertex.
+        std::set<uint32_t> neighbours;
+        for (uint32_t fi : vertex_faces[c.a]) {
+            const auto &f = faces[fi];
+            if (f[0] == f[1]) continue;
+            for (int k = 0; k < 3; k++)
+                if (f[k] != c.a && !dead[f[k]]) neighbours.insert(f[k]);
+        }
+        for (uint32_t v : neighbours) push_edge(c.a, v);
+    }
+
+    // --- rebuild
+    //
+    // Each surviving merged vertex keeps one original, so its normal,
+    // UV and colour come from a vertex that was really there rather
+    // than from an average of several that were not.
+    std::vector<uint32_t> remap(n, UINT32_MAX);
+    std::vector<Vertex> out_vertices;
+    for (size_t i = 0; i < n; i++) {
+        if (dead[i]) continue;
+        remap[i] = uint32_t(out_vertices.size());
+        Vertex v = vertices[first_original[i]];
+        v.position = position[i];
+        out_vertices.push_back(v);
+    }
+    std::vector<uint32_t> out_indices;
+    out_indices.reserve(live_faces * 3);
+    for (const auto &f : faces) {
+        if (f[0] == f[1] || f[1] == f[2] || f[0] == f[2]) continue;
+        if (remap[f[0]] == UINT32_MAX || remap[f[1]] == UINT32_MAX ||
+            remap[f[2]] == UINT32_MAX)
+            continue;
+        out_indices.push_back(remap[f[0]]);
+        out_indices.push_back(remap[f[1]]);
+        out_indices.push_back(remap[f[2]]);
+    }
+
+    vertices.swap(out_vertices);
+    indices.swap(out_indices);
+    // One submesh: the ranges the old ones described no longer exist.
+    if (submeshes.size() > 1)
+        WR_WARN("mesh: simplify collapsed %zu submeshes into one",
+                submeshes.size());
+    submeshes.clear();
+    SubMesh sm;
+    sm.first_index = 0;
+    sm.index_count = uint32_t(indices.size());
+    sm.name = "simplified";
+    submeshes.push_back(sm);
+    compute_bounds();
+    return indices.size() / 3;
+}
+
 size_t Mesh::weld(float epsilon) {
     if (vertices.empty()) return 0;
     const float inv = 1.0f / std::max(epsilon, 1e-9f);
@@ -315,7 +686,16 @@ Ref<Mesh> Mesh::box(const Vec3 &size) {
     };
     for (const Face &f : faces) {
         uint32_t base = uint32_t(m->vertices.size());
-        Vec3 centre = f.n * (f.n.x * h.x + f.n.y * h.y + f.n.z * h.z);
+        // THE MAGNITUDE OF THE HALF-EXTENT ALONG THE NORMAL, not
+        // the signed projection. The signed one puts the -Z face at
+        // +Z -- two minus signs cancelling -- so the "box" was three
+        // doubled quads through the positive faces and nothing at
+        // all on the other three sides. It renders as a box from one
+        // octant, which is where every screenshot of it was taken
+        // from, and the renderer draws back faces so the missing
+        // sides never showed as holes.
+        Vec3 centre = f.n * (std::fabs(f.n.x) * h.x + std::fabs(f.n.y) * h.y +
+                             std::fabs(f.n.z) * h.z);
         Vec3 eu = f.u * (std::fabs(f.u.x) * h.x + std::fabs(f.u.y) * h.y +
                          std::fabs(f.u.z) * h.z);
         Vec3 ev = f.v * (std::fabs(f.v.x) * h.x + std::fabs(f.v.y) * h.y +
@@ -371,7 +751,12 @@ Ref<Mesh> Mesh::sphere(float radius, int rings, int segments) {
             uint32_t b = a + 1;
             uint32_t c = a + uint32_t(segments + 1);
             uint32_t d = c + 1;
-            for (uint32_t i : {a, c, b, b, c, d}) m->indices.push_back(i);
+            // Counter-clockwise seen from outside. It was the other
+            // way round, which nothing noticed because the renderer
+            // draws back faces on purpose -- a portal shows you the
+            // far side of things constantly -- so an inside-out
+            // sphere shades exactly like a right-way-out one.
+            for (uint32_t i : {a, b, c, b, d, c}) m->indices.push_back(i);
         }
     return finish(m);
 }
@@ -407,14 +792,16 @@ Ref<Mesh> Mesh::cylinder(float radius, float height, int segments, bool capped) 
             }
             for (int x = 0; x < segments; x++) {
                 uint32_t a = centre + 1 + uint32_t(x);
+                // Seen from outside: the top cap runs one way and
+                // the bottom the other. Both were the wrong way.
                 if (end) {
                     m->indices.push_back(centre);
-                    m->indices.push_back(a);
                     m->indices.push_back(a + 1);
+                    m->indices.push_back(a);
                 } else {
                     m->indices.push_back(centre);
-                    m->indices.push_back(a + 1);
                     m->indices.push_back(a);
+                    m->indices.push_back(a + 1);
                 }
             }
         }
@@ -450,9 +837,11 @@ Ref<Mesh> Mesh::cone(float radius, float height, int segments) {
     }
     for (int x = 0; x < segments; x++) {
         uint32_t a = centre + 1 + uint32_t(x);
+        // The base faces down, so seen from below it runs the other
+        // way round than the slope does seen from outside.
         m->indices.push_back(centre);
-        m->indices.push_back(a + 1);
         m->indices.push_back(a);
+        m->indices.push_back(a + 1);
     }
     return finish(m);
 }
@@ -480,7 +869,7 @@ Ref<Mesh> Mesh::torus(float major, float minor, int major_segments,
             uint32_t b = a + 1;
             uint32_t c = a + uint32_t(minor_segments + 1);
             uint32_t d = c + 1;
-            for (uint32_t k : {a, c, b, b, c, d}) m->indices.push_back(k);
+            for (uint32_t k : {a, b, c, b, d, c}) m->indices.push_back(k);
         }
     return finish(m);
 }
@@ -501,19 +890,29 @@ Ref<Mesh> Mesh::capsule(float radius, float height, int rings, int segments) {
             m->vertices.push_back(vtx(p, (p - centre).normalized(), {u, v}));
         }
     };
-    for (int i = 0; i <= rings; i++) {
-        float t = float(i) / float(rings);
-        float phi = t * PI * 0.5f;
-        ring(half + std::sin(phi) * radius, std::cos(phi) * radius,
-             1.0f - t * 0.25f, {0, half, 0});
-    }
-    ring(half, radius, 0.75f, {0, half, 0});
-    ring(-half, radius, 0.25f, {0, -half, 0});
+    // THE ROWS MUST DESCEND, all the way down, with no repeats.
+    //
+    // They did not: the top cap was built equator-upwards to the
+    // pole and then the cylinder's top ring was emitted again, so
+    // the strip ran up the cap and straight back down it -- a
+    // folded copy of the cap laid over itself, cancelling. Same at
+    // the bottom. The mesh looked like a capsule from outside
+    // because the fold is exactly where the surface already is.
+    //
+    // The top cap's last row IS the cylinder's top ring, and the
+    // bottom cap's first row is its bottom ring, so the cylinder is
+    // the band between them and needs no rings of its own.
     for (int i = rings; i >= 0; i--) {
         float t = float(i) / float(rings);
         float phi = t * PI * 0.5f;
+        ring(half + std::sin(phi) * radius, std::cos(phi) * radius,
+             0.75f + t * 0.25f, {0, half, 0});
+    }
+    for (int i = 0; i <= rings; i++) {
+        float t = float(i) / float(rings);
+        float phi = t * PI * 0.5f;
         ring(-half - std::sin(phi) * radius, std::cos(phi) * radius,
-             t * 0.25f, {0, -half, 0});
+             0.25f - t * 0.25f, {0, -half, 0});
     }
     int row = segments + 1;
     int rows = int(m->vertices.size()) / row;
@@ -523,7 +922,7 @@ Ref<Mesh> Mesh::capsule(float radius, float height, int rings, int segments) {
             uint32_t b = a + 1;
             uint32_t c = a + uint32_t(row);
             uint32_t d = c + 1;
-            for (uint32_t k : {a, c, b, b, c, d}) m->indices.push_back(k);
+            for (uint32_t k : {a, b, c, b, d, c}) m->indices.push_back(k);
         }
     return finish(m);
 }

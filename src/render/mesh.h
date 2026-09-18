@@ -104,6 +104,38 @@ public:
     // winding convention.
     void flip_winding();
 
+    // FEWER TRIANGLES, IN THE PLACES THEY ARE NOT DOING ANYTHING.
+    //
+    // Contoured geometry has no idea which of its triangles matter.
+    // A crate cut out of a signed distance field comes out with
+    // thirty-six thousand of them, most lying flat on a face that
+    // two would have described, because the contourer emits one
+    // quad per cell whether the surface is curved there or not. An
+    // importer has the same problem with somebody else's export.
+    //
+    // Quadric error metrics: each vertex accumulates the squared
+    // distance to the planes of the faces around it, an edge
+    // collapse costs the error at the point it collapses to, and
+    // the cheapest collapse is taken until the target is reached.
+    // Flat regions cost nothing to collapse and go first; a
+    // silhouette or a crease costs a great deal and survives.
+    //
+    // Two limits, whichever stops it first. `ratio` is the fraction
+    // of triangles to keep; `max_error` is how far, in metres, a
+    // surface may move. Returns how many triangles are left.
+    //
+    // The error limit is the more useful of the two, and the reason
+    // the quadrics are normalised by area: a flat face collapses for
+    // nothing and vanishes entirely, while a crease costs real
+    // distance and survives. One setting then works on a crate and
+    // on a boulder, where a fixed ratio would over-simplify one and
+    // under-simplify the other.
+    //
+    // Collapses that would flip a triangle over, or pull a vertex
+    // off an open boundary, are refused, so a closed mesh stays
+    // closed and nothing turns inside out.
+    size_t simplify(float ratio, float max_error = 1e30f);
+
     // --- uploading --------------------------------------------------------
     // Idempotent; call again after changing the arrays to re-upload.
     bool upload(rhi::Device *dev, const char *name = nullptr);

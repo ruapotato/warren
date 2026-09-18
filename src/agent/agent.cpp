@@ -798,6 +798,7 @@ Json cmd_make_mesh(const AgentContext &ctx, const Json &c) {
     if (c.has("cell_size")) options.cell_size = float(c["cell_size"].number());
     if (c.has("detail")) options.target_cells = int(c["detail"].number());
     if (c.has("smooth")) options.smooth_normals = c["smooth"].boolean();
+    if (c.has("simplify")) options.simplify_error = float(c["simplify"].number());
 
     Ref<Mesh> mesh = shape.to_mesh(options, &error);
     if (!mesh) return fail("mesh_failed", error);
@@ -805,6 +806,7 @@ Json cmd_make_mesh(const AgentContext &ctx, const Json &c) {
     Json j = ok();
     j.set("vertices", int(mesh->vertex_count()));
     j.set("triangles", int(mesh->triangle_count()));
+    j.set("nodes_in_shape", int(shape.node_count()));
     const AABB b = mesh->bounds();
     Json size = Json::object();
     size.set("x", double(b.max.x - b.min.x)).set("y", double(b.max.y - b.min.y));
@@ -984,7 +986,7 @@ const Command kCommands[] = {
      "", cmd_shapes},
     {"make_mesh", "build a mesh from a shape and, optionally, put it in the world",
      "shape:object, parent:string?, name:string?, at:vec3?, cell_size:float?, "
-     "detail:int?, smooth:bool?, save:string?", cmd_make_mesh},
+     "detail:int?, simplify:float?, smooth:bool?, save:string?", cmd_make_mesh},
     {"surfaces", "the procedural surface language: patterns, blends and what a "
      "material is made of", "", cmd_surfaces},
     {"make_material", "build albedo, normal and roughness maps from one surface "

@@ -116,10 +116,21 @@ size_t open_edges(const Mesh &m) {
                       std::lround(double(p.z) * 65536.0)};
     };
     for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+        const PosKey k[3] = {key(m.indices[i]), key(m.indices[i + 1]),
+                             key(m.indices[i + 2])};
+        // A TRIANGLE WITH TWO CORNERS IN THE SAME PLACE CONTRIBUTES
+        // NOTHING -- not even its one real edge.
+        //
+        // The poles of a UV sphere are a whole ring of vertices at
+        // one point, so the top and bottom rows of quads collapse to
+        // degenerate triangles. Skipping only the zero-length edge
+        // leaves the other two, which are the same edge twice, and
+        // the count comes out wrong for a mesh that is perfectly
+        // closed.
+        if (k[0] == k[1] || k[1] == k[2] || k[0] == k[2]) continue;
         for (int e = 0; e < 3; e++) {
-            const PosKey a = key(m.indices[i + size_t(e)]);
-            const PosKey b = key(m.indices[i + size_t((e + 1) % 3)]);
-            if (a == b) continue;  // a degenerate triangle has no edge
+            const PosKey &a = k[e];
+            const PosKey &b = k[(e + 1) % 3];
             edges[{std::min(a, b), std::max(a, b)}]++;
         }
     }
@@ -167,9 +178,13 @@ int main() {
         const Sdf t = Sdf::torus(1.0f, 0.25f);
         check_near(t.distance(Vec3(1, 0, 0)), -0.25f, 1e-5f, "a torus's ring is minor in");
         check_near(t.distance(Vec3()), 0.75f, 1e-5f, "and its hole is outside it");
+        // `height` is between the cap centres, matching the physics
+        // capsule, so this one is 3 + 2 * 0.5 = 4 metres tall.
         const Sdf cap = Sdf::capsule(0.5f, 3.0f);
-        check_near(cap.distance(Vec3(0, 1.5f, 0)), 0.0f, 1e-5f,
-                   "a capsule's height includes its round ends");
+        check_near(cap.distance(Vec3(0, 1.5f, 0)), -0.5f, 1e-5f,
+                   "a capsule's height is between its cap centres");
+        check_near(cap.distance(Vec3(0, 2.0f, 0)), 0.0f, 1e-5f,
+                   "so the whole thing is height plus two radii tall");
     }
 
     // ------------------------------------------------ the booleans
@@ -304,6 +319,11 @@ int main() {
         std::string error;
         Sdf::MeshOptions options;
         options.target_cells = 64;
+        // Decimation off: these measure what the CONTOURER produces,
+        // and the decimation has its own section with its own
+        // tolerances. Mixing the two would let either one's error
+        // hide inside the other's budget.
+        options.simplify_error = 0.0f;
 
         Ref<Mesh> sphere = Sdf::sphere(1.0f).to_mesh(options, &error);
         check(sphere && error.empty(), "a sphere meshes");
@@ -461,6 +481,185 @@ int main() {
                        &error);
         check(error.find("child 1") != std::string::npos,
               "and a bad child says which child it was");
+    }
+
+    // -------------------------------------- THE BUILT-IN PRIMITIVES
+    //
+    // Measured, not looked at. The signed volume of a closed surface
+    // is the enclosed volume when the triangles wind counter-
+    // clockwise seen from outside, and something else entirely when
+    // they do not -- so one number checks the winding, the size and
+    // the topology at once, against an answer from a textbook rather
+    // than from another run of the same code.
+    //
+    // Worth doing because nothing else in this engine would notice.
+    // The renderer draws back faces on purpose -- through a portal
+    // you see the far side of things constantly -- so an inside-out
+    // sphere shades exactly like a right-way-out one, and a box
+    // missing three of its faces looks like a box from the other
+    // three. This found: a box whose -X, -Y and -Z faces were all
+    // placed on the POSITIVE side (three doubled quads, no box at
+    // all); inside-out spheres, tori and capsules; inverted cylinder
+    // caps and cone bases; and a capsule whose rows ran up the top
+    // cap and back down it, cancelling.
+    {
+        const double PId = 3.14159265358979;
+        struct Case { const char *name; Ref<Mesh> mesh; double volume; };
+        const std::vector<Case> cases = {
+            {"box", Mesh::box(Vec3::one()), 1.0},
+            {"box 2x1x3", Mesh::box(Vec3(2, 1, 3)), 6.0},
+            {"sphere", Mesh::sphere(0.5f, 64, 96), 4.0 / 3.0 * PId * 0.125},
+            {"cylinder", Mesh::cylinder(0.5f, 1.0f, 128), PId * 0.25},
+            {"cone", Mesh::cone(0.5f, 1.0f, 128), PId * 0.25 / 3.0},
+            {"torus", Mesh::torus(0.5f, 0.15f, 96, 48),
+             2.0 * PId * PId * 0.5 * 0.15 * 0.15},
+            // Between the cap centres, so it is height + 2r tall.
+            {"capsule", Mesh::capsule(0.25f, 1.0f, 32, 48),
+             PId * 0.0625 * 1.0 + 4.0 / 3.0 * PId * 0.015625},
+        };
+        for (const Case &c : cases) {
+            const double v = mesh_volume(*c.mesh);
+            g_checks += 2;
+            if (v < 0.0) {
+                std::printf("  FAIL  %s is wound inside out\n", c.name);
+                g_fail++;
+            } else if (std::fabs(v - c.volume) > c.volume * 0.02) {
+                std::printf("  FAIL  %s encloses %.5f, should be %.5f\n", c.name, v,
+                            c.volume);
+                g_fail++;
+            }
+            if (open_edges(*c.mesh) != 0) {
+                std::printf("  FAIL  %s is not closed\n", c.name);
+                g_fail++;
+            }
+        }
+        // A plane is open on purpose and has no volume; what it must
+        // have is the size it was asked for.
+        Ref<Mesh> sheet = Mesh::plane(Vec2(2, 3), 4);
+        const AABB b = sheet->bounds();
+        check_near(b.max.x - b.min.x, 2.0f, 1e-4f, "a plane is the width it was given");
+        check_near(b.max.z - b.min.z, 3.0f, 1e-4f, "and the depth");
+    }
+
+    // ------------------------------------------- SIMPLIFICATION
+    //
+    // A contourer emits one quad per surface cell whether the
+    // surface needs it or not, so the meshes above are one to two
+    // orders of magnitude heavier than the shapes they describe. The
+    // decimation has to take that back WITHOUT changing what the
+    // thing looks like, and "looks like" has three measurable parts:
+    // the volume is the same, the surface is still closed, and no
+    // triangle turned inside out.
+    {
+        struct Case { const char *name; Sdf shape; double volume; };
+        const std::vector<Case> cases = {
+            {"a box", Sdf::box(Vec3(1, 1, 1)), 1.0},
+            {"a sphere", Sdf::sphere(0.5f), 4.0 / 3.0 * 3.14159265358979 * 0.125},
+            {"a box with a hole", Sdf::box(Vec3(1, 1, 1)).subtracted(Sdf::sphere(0.35f)),
+             1.0 - 4.0 / 3.0 * 3.14159265358979 * 0.042875},
+            {"a rock", Sdf::sphere(0.5f).displaced(0.08f, 0.4f, 4), 0.0},
+        };
+        for (const Case &c : cases) {
+            std::string error;
+            Sdf::MeshOptions full;
+            full.target_cells = 64;
+            full.simplify_error = 0.0f;
+            Ref<Mesh> before = c.shape.to_mesh(full, &error);
+            Sdf::MeshOptions lean;
+            lean.target_cells = 64;
+            Ref<Mesh> after = c.shape.to_mesh(lean, &error);
+            if (!before || !after) {
+                std::printf("  FAIL  %s did not mesh\n", c.name);
+                g_fail++;
+                g_checks++;
+                continue;
+            }
+            const double v_before = mesh_volume(*before);
+            const double v_after = mesh_volume(*after);
+            const size_t t_before = before->triangle_count();
+            const size_t t_after = after->triangle_count();
+            std::printf("  %-18s %6zu -> %5zu triangles (%.0fx), volume %.4f -> %.4f\n",
+                        c.name, t_before, t_after,
+                        t_after ? double(t_before) / double(t_after) : 0.0,
+                        v_before, v_after);
+
+            g_checks += 3;
+            if (t_after >= t_before / 4) {
+                std::printf("  FAIL  %s was barely simplified\n", c.name);
+                g_fail++;
+            }
+            if (open_edges(*after) != 0) {
+                std::printf("  FAIL  %s came apart when simplified\n", c.name);
+                g_fail++;
+            }
+            // Three percent of the volume. The surface may move by
+            // half a cell, and half a cell over the whole surface of
+            // a unit shape is about that.
+            if (std::fabs(v_after - v_before) > std::fabs(v_before) * 0.03 + 1e-4) {
+                std::printf("  FAIL  %s changed volume by %.1f%%\n", c.name,
+                            100.0 * (v_after - v_before) / v_before);
+                g_fail++;
+            }
+            // NOTHING INSIDE OUT. A single folded triangle is a black
+            // facet that no amount of relighting fixes, and the
+            // volume test will not see one.
+            size_t inverted = 0;
+            for (size_t i = 0; i + 2 < after->indices.size(); i += 3) {
+                const Vertex &a = after->vertices[after->indices[i]];
+                const Vertex &b = after->vertices[after->indices[i + 1]];
+                const Vertex &cc = after->vertices[after->indices[i + 2]];
+                const Vec3 face = cross(b.position - a.position, cc.position - a.position);
+                // Against the direction from the centre, which for a
+                // roughly convex shape is the outward one. The hollow
+                // case is excluded below.
+                if (dot(face, a.position + b.position + cc.position) < 0.0f) inverted++;
+            }
+            if (std::string(c.name) != "a box with a hole") {
+                g_checks++;
+                if (inverted > after->triangle_count() / 50) {
+                    std::printf("  FAIL  %s has %zu triangles facing inward\n",
+                                c.name, inverted);
+                    g_fail++;
+                }
+            }
+        }
+
+        // An error budget of zero keeps everything, which is how a
+        // caller says "do not touch it".
+        std::string error;
+        Sdf::MeshOptions off;
+        off.target_cells = 32;
+        off.simplify_error = 0.0f;
+        Ref<Mesh> kept = Sdf::sphere(0.5f).to_mesh(off, &error);
+        Ref<Mesh> kept_again = Sdf::sphere(0.5f).to_mesh(off, &error);
+        check(kept && kept_again && kept->triangle_count() == kept_again->triangle_count(),
+              "an error budget of zero changes nothing, repeatably");
+
+        // Directly on a Mesh, which is what an importer will do: a
+        // ratio rather than an error, so the caller gets the count
+        // they asked for.
+        Ref<Mesh> ball = Mesh::sphere(0.5f, 48, 64);
+        const size_t was = ball->triangle_count();
+        const size_t now = ball->simplify(0.2f);
+        check(now < was / 4 && now > 0, "a mesh can be simplified by ratio");
+        check(open_edges(*ball) == 0, "and a closed sphere stays closed");
+        const double ball_volume = mesh_volume(*ball);
+        const double ball_should = 4.0 / 3.0 * 3.14159265358979 * 0.125;
+        if (std::fabs(ball_volume - ball_should) >= 0.01)
+            std::printf("    (%zu -> %zu triangles, volume %.4f, wanted %.4f)\n", was,
+                        now, ball_volume, ball_should);
+        check(std::fabs(ball_volume - ball_should) < 0.01, "keeping its volume");
+
+        // AN OPEN MESH KEEPS ITS EDGE. A plane decimated without
+        // pinning its boundary shrinks, and a terrain chunk that
+        // shrinks leaves a gap next to the one beside it.
+        Ref<Mesh> sheet = Mesh::plane(Vec2(4, 4), 24);
+        const AABB rim_before = sheet->bounds();
+        sheet->simplify(0.1f);
+        const AABB rim_after = sheet->bounds();
+        check(std::fabs((rim_after.max.x - rim_after.min.x) -
+                        (rim_before.max.x - rim_before.min.x)) < 0.01f,
+              "an open mesh keeps its boundary when simplified");
     }
 
     // ================================================== surfaces

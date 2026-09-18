@@ -387,9 +387,9 @@ Sdf Sdf::cylinder(float radius, float height, float round) {
 Sdf Sdf::capsule(float radius, float height) {
     auto n = make(SdfNode::Op::Capsule);
     n->a = std::max(radius, 0.0f);
-    // `height` is the whole thing, ends included, the way a capsule
-    // collider is measured everywhere else in this engine.
-    n->b = std::max(height * 0.5f - n->a, 0.0f);
+    // The half-segment. `height` is between the cap centres, which
+    // is what the physics capsule and Mesh::capsule both mean by it.
+    n->b = std::max(height * 0.5f, 0.0f);
     const float half = n->b + n->a;
     finish_leaf(n, AABB(Vec3(-n->a, -half, -n->a), Vec3(n->a, half, n->a)));
     return Sdf(n);
@@ -739,6 +739,16 @@ Ref<Mesh> Sdf::to_mesh(const MeshOptions &options, std::string *error) const {
     sm.name = "sdf";
     mesh->submeshes.push_back(sm);
     if (options.weld) mesh->weld(cell * 1e-3f);
+    if (options.simplify_error > 0.0f) {
+        const size_t before = mesh->triangle_count();
+        const float floor_ratio =
+            before ? float(options.min_triangles) / float(before) : 1.0f;
+        mesh->simplify(std::min(floor_ratio, 1.0f),
+                       options.simplify_error * cell);
+    }
+    // AFTER the decimation, not before: collapsing edges moves
+    // vertices, and a normal computed for where a vertex used to be
+    // is worse than no normal at all.
     if (!options.smooth_normals)
         mesh->compute_normals(deg2rad(options.smooth_angle_degrees));
     mesh->compute_tangents();
@@ -1036,7 +1046,7 @@ Json node_json(const SdfNode *n) {
             break;
         case SdfNode::Op::Capsule:
             j.set("shape", "capsule").set("radius", double(n->a));
-            j.set("height", double((n->b + n->a) * 2.0f));
+            j.set("height", double(n->b * 2.0f));
             break;
         case SdfNode::Op::Cone:
             j.set("shape", "cone").set("radius", double(n->a));

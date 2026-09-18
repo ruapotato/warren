@@ -62,6 +62,10 @@ public:
     static Sdf box(const Vec3 &size = Vec3::one(), float round = 0.0f);
     static Sdf cylinder(float radius = 0.5f, float height = 1.0f,
                         float round = 0.0f);
+    // `height` is the distance BETWEEN the cap centres, so the whole
+    // thing is height + 2 * radius tall -- the same convention as
+    // the physics capsule and Mesh::capsule, so a shape, its
+    // collider and its mesh agree without a fudge factor.
     static Sdf capsule(float radius = 0.25f, float height = 1.0f);
     static Sdf cone(float radius = 0.5f, float height = 1.0f, float round = 0.0f);
     static Sdf torus(float major = 0.5f, float minor = 0.15f);
@@ -151,6 +155,23 @@ public:
         bool smooth_normals = false;
         // Collapse vertices that ended up in the same place.
         bool weld = true;
+        // HOW FAR THE SURFACE MAY MOVE, as a fraction of the cell.
+        //
+        // A contourer emits one quad per surface cell whether the
+        // surface is curved there or not, so a crate comes out with
+        // sixty thousand triangles and needs a few hundred.
+        // Decimation puts that back, and driving it by error rather
+        // than by a triangle count is what makes one setting work
+        // on a crate and on a boulder: the flat faces collapse for
+        // nothing while the creases cost real distance and survive.
+        //
+        // Half a cell is invisible by construction -- it is smaller
+        // than the contourer's own sampling error. 0 keeps every
+        // triangle.
+        float simplify_error = 0.5f;
+        // A floor, so a small shape is not decimated to a
+        // tetrahedron by a generous error budget.
+        int min_triangles = 200;
         // Sharper than this stays a hard edge.
         float smooth_angle_degrees = 40.0f;
     };
