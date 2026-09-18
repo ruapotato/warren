@@ -5,7 +5,7 @@
 // it fills exactly the pixels nothing else reached -- including,
 // because it is stencil-tested like everything else, the pixels inside
 // a portal that nothing inside the portal reached.
-#include "common.glsl"
+#include "sky_model.glsl"
 
 #pragma stage vertex
 
@@ -35,25 +35,7 @@ layout(location = 0) in vec3 v_direction;
 layout(location = 0) out vec4 out_colour;
 
 void main() {
-    vec3 dir = normalize(v_direction);
-    vec3 sun = normalize(frame.sun_direction.xyz);
-
-    // A physically-flavoured gradient: more scattering towards the
-    // horizon, warmer near the sun, darker overhead.
-    float up = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-    float horizon = pow(1.0 - abs(dir.y), 4.0);
-
-    vec3 zenith = frame.ambient.rgb * 1.4;
-    vec3 ground = frame.fog.rgb * 0.5;
-    vec3 sky = mix(ground, zenith, smoothstep(0.42, 0.62, up));
-    sky = mix(sky, frame.fog.rgb, horizon * 0.85);
-
-    // Forward scattering around the sun, then the disc itself.
-    float cos_sun = max(dot(dir, sun), 0.0);
-    sky += frame.sun_colour.rgb * pow(cos_sun, 8.0) * 0.25;
-    sky += frame.sun_colour.rgb * pow(cos_sun, 900.0) * 6.0;
-    float disc = smoothstep(0.9993, 0.9997, cos_sun);
-    sky += frame.sun_colour.rgb * disc * frame.sun_colour.a * 12.0;
+    vec3 sky = sky_radiance(v_direction);
 
     // Dither, because a smooth gradient in 8 bits bands visibly and
     // this is the cheapest fix there is.

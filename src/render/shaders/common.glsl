@@ -35,6 +35,7 @@ layout(set = SET_FRAME, binding = B_FRAME(0), std140) uniform FrameData {
     vec4 cascade_texel;     // world size of one shadow texel, per cascade
     vec4 screen;            // width, height, 1/width, 1/height
     ivec4 counts;           // lights, unused, unused, unused
+    vec4 env;               // specular mips, intensity, unused, unused
 } frame;
 
 // ------------------------------------------------------- punctual lights
@@ -83,6 +84,16 @@ layout(set = SET_FRAME, binding = B_FRAME(3), std430) readonly buffer Clusters {
 layout(set = SET_FRAME, binding = B_FRAME(4), std430) readonly buffer LightIndex {
     uint light_index[];
 };
+
+// --------------------------------------------------- the environment
+//
+// Two cubemaps baked from the sky at start-up and whenever the sun
+// moves: the cosine-convolved irradiance a diffuse surface receives,
+// and the GGX-prefiltered radiance a specular one reflects, one mip
+// per roughness. frame.env.x is the number of mips in the specular
+// one; zero means there is no environment and the shader falls back.
+layout(set = SET_FRAME, binding = B_FRAME(5)) uniform samplerCube env_irradiance;
+layout(set = SET_FRAME, binding = B_FRAME(6)) uniform samplerCube env_specular;
 
 // ----------------------------------------------------------------- view
 //

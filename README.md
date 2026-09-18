@@ -88,6 +88,15 @@ at. The light is uploaded through the same uniform block a camera
 uses, so the matrix that rendered the map and the matrix that samples
 it cannot drift apart.
 
+**The environment is the sky, and it cannot disagree with it.** Image-
+based lighting is baked from the same `sky_radiance` the backdrop is
+drawn with — six faces, a cosine convolution for diffuse and a GGX
+prefilter per mip for specular — and rebaked when the sun moves, which
+in a static scene is once. Nothing to author and nothing to ship. The
+second half of the split-sum is Lazarov's analytic fit rather than a
+lookup table: four multiply-adds, and one less texture to bind with
+the wrong filter.
+
 **So do the light clusters.** Punctual lights are binned into a froxel
 grid, and the grid is built **per view**: a portal view is a different
 camera looking at different geometry through the same pixels, so it
@@ -235,7 +244,8 @@ plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
-                   lights, the plugin ABI and terrain LOD, Python
+                   lights, image-based lighting, the plugin ABI and
+                   terrain LOD, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -259,7 +269,7 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: image-based lighting, shadows for punctual lights, audio,
-networking, and an editor.
+Not yet: shadows for punctual lights, audio, networking, and an
+editor.
 
 See `docs/conventions.md` before touching the renderer.

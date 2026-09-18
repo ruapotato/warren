@@ -189,3 +189,33 @@ same property the shadow cascades rely on.
 Lights are gathered in `Renderer::collect`, and a `DirectionalLight3D`
 in the tree now overrides the renderer's own sun fields. The first one
 wins; a second sun is a scene mistake, not a feature.
+
+## The environment
+
+Baked from `sky_radiance` in `sky_model.glsl`, which `sky.glsl` also
+draws the backdrop with. Two copies of that gradient would drift the
+first time anyone tuned one, and a world lit slightly wrong for the
+sky behind it is not a bug anybody traces to a duplicated shader. The
+reflectance model is shared the same way, in `brdf.glsl`, between the
+surface shader and the prefilter.
+
+A shader file with **no `#pragma stage`** is an include, not a
+program, and the build skips it on that basis rather than by its name.
+
+`cube_direction(face, st)` maps a texel to the direction it looks in,
+with `st` measured from the **top left** like any other render target.
+Twelve signs, and one wrong lights the world by a sky reflected in an
+axis — which looks entirely plausible. `tests/test_ibl` renders a
+white sphere lit only by the environment, recovers the surface normal
+at each pixel from its position on the sphere, and requires brightness
+to rise with the cosine to the sun at every step. Flipping one face
+breaks the ordering while leaving the average over the sphere
+unchanged, which is why the average alone is not the test.
+
+The two backends do **not** agree to the bit here, and this is the one
+place in the engine where they do not. Cubemap mip generation is a
+driver's own box filter on OpenGL and a chain of blits on Vulkan, the
+prefilter reads those mips, and the difference is largest on the
+shiniest surface in the frame: mean 0.03/255 and worst 3 on the test's
+sphere, mean 0.08 and worst 20 in the portals demo. It must stay a
+rounding difference — smooth, small and everywhere — never a shape.

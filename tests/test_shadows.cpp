@@ -110,6 +110,13 @@ Shot run(Backend backend, bool shadows, bool validation) {
     rs.msaa = 1;               // one sample, so a pixel is one answer
     rs.draw_sky = false;       // a flat clear, so nothing else varies
     rs.shadows = shadows;
+    // NO IMAGE-BASED LIGHTING HERE. This test sets a deliberately low
+    // ambient so that lit and shadowed are far apart in a byte, and
+    // an environment baked from the sky overrides that with whatever
+    // the sky happens to be -- which is correct behaviour and makes
+    // the measurement about the sky instead of about the shadow.
+    // tests/test_ibl is where the environment is checked.
+    rs.image_based_lighting = false;
     rs.shadow_map_size = 1024;
     rs.shadow_cascades = 4;
     rs.shadow_distance = 40.0f;

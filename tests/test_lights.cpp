@@ -101,10 +101,14 @@ Shot run(Backend backend, Scene which, int clustered_views, bool validation) {
     RenderSettings rs;
     rs.msaa = 1;
     rs.draw_sky = false;
-    // NO SUN AND NO AMBIENT. Whatever is not black in the result was
-    // put there by a punctual light, which is the only way to measure
-    // one without subtracting two pictures.
+    // NO SUN, NO AMBIENT AND NO ENVIRONMENT. Whatever is not black
+    // in the result was put there by a punctual light, which is the
+    // only way to measure one without subtracting two pictures. An
+    // environment baked from the sky would light the whole scene
+    // from every direction and there would be nothing left to
+    // isolate; tests/test_ibl is where that is checked instead.
     rs.shadows = false;
+    rs.image_based_lighting = false;
     rs.clear_colour = Color(0, 0, 0, 1);
     rs.max_clustered_views = clustered_views;
     rs.max_portal_depth = 1;

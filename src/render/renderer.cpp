@@ -28,6 +28,7 @@ struct FrameUniforms {
     Vec4 cascade_texel;
     Vec4 screen;
     int32_t counts[4];
+    Vec4 env;
 };
 
 // Matches ViewData.
@@ -118,7 +119,18 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     // fragment stage only.
     for (uint32_t b = 2; b <= 4; b++)
         fl.entries.push_back({b, BindingType::StorageBuffer, false, true, false, 1});
+    // The baked environment: irradiance, then prefiltered specular.
+    fl.entries.push_back({5, BindingType::SampledTexture, false, true, false, 1});
+    fl.entries.push_back({6, BindingType::SampledTexture, false, true, false, 1});
     frame_layout_ = dev->create_bind_group_layout(fl);
+
+    // The bake's own set: one cubemap in, one face out. It borrows
+    // the material slot so the prefilter shaders can be written
+    // against a binding the standard layout already defines.
+    BindGroupLayoutDesc el;
+    el.entries.push_back({17, BindingType::SampledTexture, false, true, false, 1});
+    el.name = "environment source";
+    env_layout_ = dev->create_bind_group_layout(el);
 
     BindGroupLayoutDesc vl;
     vl.entries.push_back({8, BindingType::UniformBufferDynamic, true, true, false, 1});
@@ -175,6 +187,34 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         light_index_buffer_ = dev->create_buffer(lb);
     }
 
+    {
+        // RGBA16F, not 8-bit: the sun in this sky is worth several
+        // hundred and the whole point of prefiltering it is that a
+        // mirror can still see it.
+        TextureDesc ec;
+        ec.width = ec.height = std::clamp(settings_.env_size, 16u, 1024u);
+        ec.dim = TextureDim::TexCube;
+        ec.format = Format::RGBA16F;
+        ec.usage = TextureUsage::Sampled | TextureUsage::ColourTarget;
+        // Mips all the way down on the source too, so the prefilter
+        // can read a blurred version for its rough lobes instead of
+        // sparkling.
+        ec.mips = 0;
+        ec.name = "environment";
+        env_cube_ = dev->create_texture(ec);
+
+        ec.mips = 0;
+        ec.name = "environment specular";
+        env_specular_ = dev->create_texture(ec);
+        env_mips_ = dev->texture_desc(env_specular_).mips;
+
+        ec.width = ec.height =
+            std::clamp(settings_.env_irradiance_size, 8u, 128u);
+        ec.mips = 1;
+        ec.name = "environment irradiance";
+        env_irradiance_ = dev->create_texture(ec);
+    }
+
     // THE SHADOW MAP IS ONE ARRAY, ONE LAYER PER CASCADE. An atlas in
     // a single 2D texture would work too, but then every filter tap
     // has to be clamped inside its tile by hand or a cascade bleeds
@@ -223,6 +263,14 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         l.binding = 4;
         l.buffer = light_index_buffer_;
         fg.entries.push_back(l);
+        BindGroupEntry env;
+        env.binding = 5;
+        env.texture = env_irradiance_;
+        env.sampler = SamplerCache::linear_clamp(dev);
+        fg.entries.push_back(env);
+        env.binding = 6;
+        env.texture = env_specular_;
+        fg.entries.push_back(env);
     }
     frame_group_ = dev->create_bind_group(fg);
 
@@ -231,6 +279,18 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     fg.entries[1].texture = shadow_dummy_;
     fg.name = "frame (shadow pass)";
     frame_group_no_shadow_ = dev->create_bind_group(fg);
+
+    {
+        BindGroupDesc eg;
+        eg.layout = env_layout_;
+        eg.name = "environment source";
+        BindGroupEntry e;
+        e.binding = 17;
+        e.texture = env_cube_;
+        e.sampler = SamplerCache::linear_clamp(dev);
+        eg.entries.push_back(e);
+        env_group_ = dev->create_bind_group(eg);
+    }
 
     BindGroupDesc vg;
     vg.layout = view_layout_;
@@ -286,6 +346,9 @@ void Renderer::shutdown() {
     if (light_buffer_.valid()) device_->destroy(light_buffer_);
     if (cluster_buffer_.valid()) device_->destroy(cluster_buffer_);
     if (light_index_buffer_.valid()) device_->destroy(light_index_buffer_);
+    if (env_cube_.valid()) device_->destroy(env_cube_);
+    if (env_irradiance_.valid()) device_->destroy(env_irradiance_);
+    if (env_specular_.valid()) device_->destroy(env_specular_);
     for (BindGroupLayoutH *l : {&frame_layout_, &view_layout_, &material_layout_,
                                 &portal_layout_, &tonemap_layout_})
         if (l->valid()) device_->destroy(*l);
@@ -383,6 +446,12 @@ bool Renderer::create_pipelines() {
     ShaderH full_fs = shader("fullscreen", ShaderStage::Fragment);
     ShaderH shadow_vs = shader("shadow", ShaderStage::Vertex);
     ShaderH shadow_fs = shader("shadow", ShaderStage::Fragment);
+    ShaderH skycube_vs = shader("skycube", ShaderStage::Vertex);
+    ShaderH skycube_fs = shader("skycube", ShaderStage::Fragment);
+    ShaderH irr_vs = shader("irradiance", ShaderStage::Vertex);
+    ShaderH irr_fs = shader("irradiance", ShaderStage::Fragment);
+    ShaderH pre_vs = shader("prefilter", ShaderStage::Vertex);
+    ShaderH pre_fs = shader("prefilter", ShaderStage::Fragment);
     if (!mesh_vs.valid() || !portal_vs.valid() || !full_vs.valid()) return false;
 
     // EVERY PIPELINE TESTS THE STENCIL. There is no "outside a portal"
@@ -459,6 +528,36 @@ bool Renderer::create_pipelines() {
         sp.raster.cull = CullMode::None;
         sp.name = "shadow (two sided)";
         pipe_.shadow_ds = device_->create_pipeline(sp);
+    }
+
+    // ------------------------------------------- the environment bake
+    //
+    // No depth, no stencil, no vertex buffer: a full-screen triangle
+    // into one cube face. Run at start-up and when the sun moves,
+    // never inside a normal frame's budget.
+    {
+        PipelineDesc ep;
+        ep.vertex = skycube_vs;
+        ep.fragment = skycube_fs;
+        ep.colour_formats = {Format::RGBA16F};
+        ep.depth_format = Format::Undefined;
+        ep.samples = 1;
+        ep.raster.cull = CullMode::None;
+        ep.push_constant_size = sizeof(PushUniforms);
+        ep.blend = {BlendState::opaque()};
+        ep.bind_group_layouts = {frame_layout_, view_layout_};
+        ep.name = "sky to cube";
+        if (skycube_vs.valid()) pipe_.skycube = device_->create_pipeline(ep);
+
+        ep.bind_group_layouts = {frame_layout_, view_layout_, env_layout_};
+        ep.vertex = irr_vs;
+        ep.fragment = irr_fs;
+        ep.name = "irradiance";
+        if (irr_vs.valid()) pipe_.irradiance = device_->create_pipeline(ep);
+        ep.vertex = pre_vs;
+        ep.fragment = pre_fs;
+        ep.name = "prefilter";
+        if (pre_vs.valid()) pipe_.prefilter = device_->create_pipeline(ep);
     }
 
     base.name = "mesh opaque";
@@ -634,6 +733,10 @@ void Renderer::upload_frame() {
                     width_ ? 1.0f / float(width_) : 0.0f,
                     height_ ? 1.0f / float(height_) : 0.0f);
     f.counts[0] = int32_t(lights_.size());
+    f.env = Vec4(settings_.image_based_lighting && env_baked_
+                     ? float(env_mips_)
+                     : 0.0f,
+                 settings_.env_intensity, 0.0f, 0.0f);
     device_->write_buffer(frame_ubo_, &f, sizeof(f));
 }
 
@@ -1005,6 +1108,127 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
 }
 
 
+
+
+// ------------------------------------------------------ the environment
+
+bool Renderer::environment_is_stale() const {
+    if (!env_baked_) return true;
+    // The sky is a function of these five and nothing else, so this
+    // is not a heuristic -- it is the exact condition.
+    const Vec3 d = sun_dir_used_.normalized();
+    if ((d - baked_sun_).length_sq() > 1e-6f) return true;
+    if (std::fabs(sun_energy_used_ - baked_sun_energy_) > 1e-4f) return true;
+    auto differs = [](const Color &a, const Color &b) {
+        return std::fabs(a.r - b.r) + std::fabs(a.g - b.g) +
+                   std::fabs(a.b - b.b) >
+               1e-4f;
+    };
+    return differs(sun_colour_used_, baked_sun_colour_) ||
+           differs(ambient, baked_ambient_) || differs(fog_colour, baked_fog_);
+}
+
+void Renderer::bake_environment(rhi::CommandList *cmd) {
+    if (!pipe_.skycube.valid() || !env_cube_.valid()) return;
+    MF_GPU_SCOPE(cmd, "environment");
+
+    const uint32_t size = device_->texture_desc(env_cube_).width;
+
+    auto face_pass = [&](TextureH target, uint32_t face, uint32_t mip,
+                         uint32_t extent, const char *name) {
+        RenderingInfo ri;
+        ColourAttachment ca;
+        ca.texture = target;
+        ca.layer = int32_t(face);
+        ca.mip = mip;
+        ca.load = LoadOp::DontCare;
+        ri.colour.push_back(ca);
+        ri.width = extent;
+        ri.height = extent;
+        ri.name = name;
+        cmd->begin_rendering(ri);
+        Viewport vp;
+        vp.width = float(extent);
+        vp.height = float(extent);
+        cmd->set_viewport(vp);
+        cmd->set_scissor({0, 0, extent, extent});
+    };
+
+    // --- 1. the sky, into six faces
+    for (uint32_t face = 0; face < 6; face++) {
+        face_pass(env_cube_, face, 0, size, "sky face");
+        cmd->bind_pipeline(pipe_.skycube);
+        cmd->bind_group(0, frame_group_no_shadow_);
+        uint32_t zero = 0;
+        cmd->bind_group(1, view_group_, &zero, 1);
+        PushUniforms pu{};
+        pu.model = Projection::identity();
+        pu.tint = Vec4(1, 1, 1, 1);
+        pu.params = Vec4(float(face), 0, 0, 0);
+        cmd->push_constants(&pu, sizeof(pu));
+        cmd->draw(3);
+        cmd->end_rendering();
+    }
+    // The prefilter reads blurred mips of this for its rough lobes.
+    cmd->texture_barrier(env_cube_, TextureUsage::ColourTarget,
+                         TextureUsage::Sampled);
+    cmd->generate_mips(env_cube_);
+
+    // --- 2. the diffuse convolution
+    if (pipe_.irradiance.valid() && env_irradiance_.valid()) {
+        const uint32_t isize = device_->texture_desc(env_irradiance_).width;
+        for (uint32_t face = 0; face < 6; face++) {
+            face_pass(env_irradiance_, face, 0, isize, "irradiance face");
+            cmd->bind_pipeline(pipe_.irradiance);
+            cmd->bind_group(0, frame_group_no_shadow_);
+            uint32_t zero = 0;
+            cmd->bind_group(1, view_group_, &zero, 1);
+            cmd->bind_group(2, env_group_);
+            PushUniforms pu{};
+            pu.model = Projection::identity();
+            pu.params = Vec4(float(face), 0, 0, 0);
+            cmd->push_constants(&pu, sizeof(pu));
+            cmd->draw(3);
+            cmd->end_rendering();
+        }
+        cmd->texture_barrier(env_irradiance_, TextureUsage::ColourTarget,
+                             TextureUsage::Sampled);
+    }
+
+    // --- 3. the specular chain, one mip per roughness
+    if (pipe_.prefilter.valid() && env_specular_.valid()) {
+        const uint32_t mips = env_mips_ ? env_mips_ : 1;
+        for (uint32_t mip = 0; mip < mips; mip++) {
+            const uint32_t extent = std::max(1u, size >> mip);
+            const float rough =
+                mips > 1 ? float(mip) / float(mips - 1) : 0.0f;
+            for (uint32_t face = 0; face < 6; face++) {
+                face_pass(env_specular_, face, mip, extent, "prefilter face");
+                cmd->bind_pipeline(pipe_.prefilter);
+                cmd->bind_group(0, frame_group_no_shadow_);
+                uint32_t zero = 0;
+                cmd->bind_group(1, view_group_, &zero, 1);
+                cmd->bind_group(2, env_group_);
+                PushUniforms pu{};
+                pu.model = Projection::identity();
+                pu.params = Vec4(float(face), rough, float(size), 0);
+                cmd->push_constants(&pu, sizeof(pu));
+                cmd->draw(3);
+                cmd->end_rendering();
+            }
+        }
+        cmd->texture_barrier(env_specular_, TextureUsage::ColourTarget,
+                             TextureUsage::Sampled);
+    }
+
+    env_baked_ = true;
+    env_bakes_++;
+    baked_sun_ = sun_dir_used_.normalized();
+    baked_sun_colour_ = sun_colour_used_;
+    baked_sun_energy_ = sun_energy_used_;
+    baked_ambient_ = ambient;
+    baked_fog_ = fog_colour;
+}
 
 // --------------------------------------------------------- light culling
 
@@ -1429,7 +1653,9 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
                       rhi::TextureH target) {
     if (!device_ || !cmd || !camera) return;
     double t0 = Clock::now();
+    const uint64_t bakes = env_bakes_;
     stats_ = RenderStats();
+    stats_.environment_bakes = bakes;
     view_cursor_ = 0;
     portal_cursor_ = 0;
     clustered_views_ = 0;
@@ -1459,6 +1685,14 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
         views.reserve(16);
         gather_views(root, &views);
         fit_cascades(views);
+    }
+    // THE ENVIRONMENT IS BAKED BEFORE THE FRAME UNIFORMS GO UP, and
+    // from the frame uniforms of the PREVIOUS upload -- so the bake
+    // needs its own, written first. It only happens when the sky has
+    // actually changed.
+    if (settings_.image_based_lighting && environment_is_stale()) {
+        upload_frame();
+        bake_environment(cmd);
     }
     upload_frame();
     if (cascade_count_ > 0) shadow_pass(cmd);
@@ -1529,6 +1763,7 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     // recursion reaches it, instead of having to predict the
     // traversal twice.
     stats_.clustered_views = uint32_t(clustered_views_);
+    stats_.environment_bakes = env_bakes_;
     if (settings_.punctual_lights) upload_lights();
 
     stats_.cpu_ms = (Clock::now() - t0) * 1000.0;

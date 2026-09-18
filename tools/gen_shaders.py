@@ -164,8 +164,20 @@ def main():
     spirv_opt = _w("spirv-opt")
 
     os.makedirs(args.out_dir, exist_ok=True)
-    sources = sorted(f for f in os.listdir(SHADER_DIR)
-                     if f.endswith(".glsl") and not f.startswith("common"))
+    # A FILE WITH NO STAGES IS AN INCLUDE, NOT A PROGRAM.
+    #
+    # This used to skip anything named common*, which worked until the
+    # second shared header wanted a name of its own and the build
+    # stopped with "which stage is it?". The property that actually
+    # distinguishes the two is whether the file declares any stages,
+    # so that is what is tested.
+    sources = []
+    for f in sorted(os.listdir(SHADER_DIR)):
+        if not f.endswith(".glsl"):
+            continue
+        if not PRAGMA_RE.search(open(os.path.join(SHADER_DIR, f)).read()):
+            continue
+        sources.append(f)
 
     entries = []
     body_cpp = []

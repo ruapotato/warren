@@ -6,7 +6,7 @@
 // everything around it: a deferred renderer would need a G-buffer per
 // recursion level, or a way to tell which level wrote each pixel, and
 // both cost more than the deferred lighting saves.
-#include "common.glsl"
+#include "brdf.glsl"
 
 layout(set = SET_MATERIAL, binding = B_MATERIAL(0), std140) uniform MaterialData {
     vec4 albedo;
@@ -59,42 +59,8 @@ layout(location = 4) in vec4 v_colour;
 
 layout(location = 0) out vec4 out_colour;
 
-// ------------------------------------------------------------ lighting
-
-float d_ggx(float n_dot_h, float rough) {
-    float a = rough * rough;
-    float a2 = a * a;
-    float d = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
-    return a2 / max(PI * d * d, 1e-7);
-}
-
-float v_smith(float n_dot_v, float n_dot_l, float rough) {
-    // Height-correlated Smith, the Hammon approximation -- one divide
-    // and no square roots, and indistinguishable from the exact form.
-    float a = rough * rough;
-    float gv = n_dot_l * (n_dot_v * (1.0 - a) + a);
-    float gl = n_dot_v * (n_dot_l * (1.0 - a) + a);
-    return 0.5 / max(gv + gl, 1e-6);
-}
-
-vec3 f_schlick(vec3 f0, float v_dot_h) {
-    float f = pow(1.0 - v_dot_h, 5.0);
-    return f0 + (1.0 - f0) * f;
-}
-
-vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float metallic, float rough) {
-    vec3 h = normalize(v + l);
-    float n_dot_v = max(dot(n, v), 1e-4);
-    float n_dot_l = max(dot(n, l), 0.0);
-    float n_dot_h = max(dot(n, h), 0.0);
-    float v_dot_h = max(dot(v, h), 0.0);
-
-    vec3 f0 = mix(vec3(0.04), albedo, metallic);
-    vec3 diffuse = albedo * (1.0 - metallic) / PI;
-    vec3 spec = f_schlick(f0, v_dot_h) * d_ggx(n_dot_h, rough) *
-                v_smith(n_dot_v, n_dot_l, rough);
-    return (diffuse + spec) * n_dot_l;
-}
+// The reflectance model lives in brdf.glsl, shared with the
+// environment prefilter so the two cannot disagree.
 
 // ------------------------------------------------------------- shadows
 
@@ -231,12 +197,40 @@ void main() {
     vec3 lit = brdf(n, v, l, base.rgb, metallic, rough) *
                frame.sun_colour.rgb * frame.sun_colour.a * shadow;
 
-    // Hemisphere ambient: sky above, bounced ground below. Cheap, and
-    // enough to keep shadowed geometry readable until image-based
-    // lighting lands.
-    float up = n.y * 0.5 + 0.5;
-    vec3 ambient = mix(frame.ambient.rgb * 0.35, frame.ambient.rgb, up) *
-                   frame.ambient.a * ao * base.rgb * (1.0 - metallic * 0.6);
+    // ------------------------------------------------ the environment
+    //
+    // Split-sum image-based lighting: a cosine-convolved cube for the
+    // diffuse half and a GGX-prefiltered one for the specular, with
+    // the second factor of the split solved analytically rather than
+    // read from a lookup table (see env_brdf).
+    vec3 ambient;
+    if (frame.env.x > 0.0) {
+        float n_dot_v = max(dot(n, v), 1e-4);
+        vec3 f0 = mix(vec3(0.04), base.rgb, metallic);
+        vec3 f = f_schlick_roughness(f0, n_dot_v, rough);
+
+        // Energy that is not reflected is available to scatter, and
+        // none of it is inside a metal.
+        vec3 kd = (1.0 - f) * (1.0 - metallic);
+        vec3 diffuse = texture(env_irradiance, n).rgb * base.rgb * kd;
+
+        // The mip IS the roughness. reflect() wants the incident
+        // direction, which is -v.
+        vec3 r = reflect(-v, n);
+        float lod = rough * (frame.env.x - 1.0);
+        vec3 prefiltered = textureLod(env_specular, r, lod).rgb;
+        vec2 ab = env_brdf(n_dot_v, rough);
+        vec3 specular = prefiltered * (f * ab.x + ab.y);
+
+        ambient = (diffuse + specular) * frame.env.y * ao;
+    } else {
+        // No environment baked: a hemisphere ambient, sky above and
+        // bounced ground below. A fair guess for an overcast day and
+        // wrong for every other one, which is why the cubemaps exist.
+        float up = n.y * 0.5 + 0.5;
+        ambient = mix(frame.ambient.rgb * 0.35, frame.ambient.rgb, up) *
+                  frame.ambient.a * ao * base.rgb * (1.0 - metallic * 0.6);
+    }
 
     vec3 colour = lit + punctual(v_world, n, v, base.rgb, metallic, rough,
                                  view_depth) +

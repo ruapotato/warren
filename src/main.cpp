@@ -710,13 +710,16 @@ int main(int argc, char **argv) {
             "  record  mean %6.2f ms   (the renderer's own CPU time)\n"
             "  last frame: %u draws, %u tris, %u views, %u portal levels,\n"
             "              %u cascades (%u shadow draws), %u lights in %u "
-            "clustered views\n",
+            "clustered views\n"
+            "  environment baked %llu time%s in the whole run\n",
             rhi::backend_name(engine.device()->backend()), demo.c_str(),
             cfg.window.width, cfg.window.height, cfg.render.msaa, t.frames,
             t.mean_ms, t.mean_ms > 0 ? 1000.0 / t.mean_ms : 0.0, t.min_ms,
             t.p50_ms, t.p95_ms, t.p99_ms, t.max_ms, t.mean_cpu_ms, r.draw_calls,
             r.triangles, r.views, r.max_depth_reached, r.cascades,
-            r.shadow_draws, r.lights, r.clustered_views);
+            r.shadow_draws, r.lights, r.clustered_views,
+            (unsigned long long)r.environment_bakes,
+            r.environment_bakes == 1 ? "" : "s");
     }
     if (!shadow_dump.empty()) engine.renderer()->dump_shadow_map(shadow_dump);
     {

@@ -79,6 +79,17 @@ struct RenderSettings {
     // pixels, so it needs its own froxel grid. Views past this many
     // (the deepest recursion levels, which occupy a handful of pixels)
     // fall back to the sun and the ambient alone.
+    // IMAGE-BASED LIGHTING.
+    //
+    // The sky is baked into two cubemaps -- cosine-convolved for
+    // diffuse, GGX-prefiltered per mip for specular -- and rebaked
+    // when the sun moves. Nothing to author and nothing to ship: the
+    // environment is the same function the backdrop is drawn from.
+    bool image_based_lighting = true;
+    uint32_t env_size = 128;        // the specular cube's top mip
+    uint32_t env_irradiance_size = 32;
+    float env_intensity = 1.0f;
+
     bool punctual_lights = true;
     int max_clustered_views = 16;
     int max_lights = 256;
@@ -102,6 +113,10 @@ struct RenderStats {
     uint32_t lights = 0;            // punctual, after culling
     uint32_t light_assignments = 0; // light-froxel pairs binned
     uint32_t clustered_views = 0;
+    // Counts up over the session, not per frame: an environment that
+    // rebakes every frame is a bug that costs milliseconds and is
+    // otherwise invisible.
+    uint64_t environment_bakes = 0;
     double cpu_ms = 0.0;
 };
 
@@ -186,6 +201,11 @@ private:
     // its block, or -1 if the frame has run out of room for grids.
     int cluster_view(const View &v, int slot);
     void upload_lights();
+    // Six faces of sky, then the two convolutions. Costs a few
+    // milliseconds and happens when the sun has moved enough to
+    // matter, not every frame.
+    void bake_environment(rhi::CommandList *cmd);
+    bool environment_is_stale() const;
     void shadow_pass(rhi::CommandList *cmd);
 
     bool create_targets(uint32_t w, uint32_t h);
@@ -232,6 +252,18 @@ private:
     rhi::BindGroupH frame_group_, view_group_, portal_group_, tonemap_group_;
     rhi::BindGroupH frame_group_no_shadow_;
     rhi::BufferH light_buffer_, cluster_buffer_, light_index_buffer_;
+    rhi::TextureH env_cube_, env_irradiance_, env_specular_;
+    rhi::BindGroupLayoutH env_layout_;
+    rhi::BindGroupH env_group_, env_specular_group_;
+    uint32_t env_mips_ = 0;
+    uint64_t env_bakes_ = 0;
+    bool env_baked_ = false;
+    // What the environment was baked for. The sky is a function of
+    // these and nothing else, so comparing them is exactly the test
+    // for whether the bake is still valid.
+    Vec3 baked_sun_{0, 0, 0};
+    Color baked_sun_colour_, baked_ambient_, baked_fog_;
+    float baked_sun_energy_ = -1.0f;
     rhi::BufferH frame_ubo_, view_ubo_, portal_ubo_;
     uint32_t view_stride_ = 0, portal_stride_ = 0;
     uint32_t view_cursor_ = 0, portal_cursor_ = 0;
@@ -247,6 +279,7 @@ private:
         rhi::PipelineH portal_rim;
         rhi::PipelineH tonemap;
         rhi::PipelineH shadow, shadow_ds;
+        rhi::PipelineH skycube, irradiance, prefilter;
     } pipe_;
 
     // Exactly the bytes of the Light struct in common.glsl.
