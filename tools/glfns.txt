@@ -1,0 +1,175 @@
+# Every OpenGL entry point Manifold may call, and nothing else.
+#
+# The loader is generated from this list against the Khronos header, so a
+# typo is a build error rather than a null pointer at run time, and the
+# list doubles as a statement of exactly how much of OpenGL the engine
+# depends on. Everything here is core 4.5 -- direct state access, so no
+# bind-to-edit anywhere in the renderer.
+
+# --- strings and limits
+glGetString
+glGetStringi
+glGetIntegerv
+glGetFloatv
+glGetError
+
+# --- debug output
+glDebugMessageCallback
+glDebugMessageControl
+glObjectLabel
+glPushDebugGroup
+glPopDebugGroup
+glDebugMessageInsert
+
+# --- buffers
+glCreateBuffers
+glDeleteBuffers
+glNamedBufferStorage
+glNamedBufferData
+glNamedBufferSubData
+glCopyNamedBufferSubData
+glBindBuffer
+glBindBufferBase
+glBindBufferRange
+glMapNamedBufferRange
+glUnmapNamedBuffer
+glFlushMappedNamedBufferRange
+
+# --- vertex arrays
+glCreateVertexArrays
+glDeleteVertexArrays
+glBindVertexArray
+glVertexArrayVertexBuffer
+glVertexArrayElementBuffer
+glEnableVertexArrayAttrib
+glVertexArrayAttribFormat
+glVertexArrayAttribIFormat
+glVertexArrayAttribBinding
+glVertexArrayBindingDivisor
+
+# --- shaders and programs
+glCreateShader
+glDeleteShader
+glShaderSource
+glCompileShader
+glGetShaderiv
+glGetShaderInfoLog
+glCreateProgram
+glDeleteProgram
+glAttachShader
+glDetachShader
+glLinkProgram
+glGetProgramiv
+glGetProgramInfoLog
+glUseProgram
+glGetUniformLocation
+glGetUniformBlockIndex
+glUniformBlockBinding
+glProgramUniform1i
+glProgramUniform1f
+glProgramUniform2fv
+glProgramUniform3fv
+glProgramUniform4fv
+glProgramUniformMatrix3fv
+glProgramUniformMatrix4fv
+
+# --- textures and samplers
+glCreateTextures
+glDeleteTextures
+glTextureStorage2D
+glTextureStorage3D
+glTextureStorage2DMultisample
+glTextureSubImage2D
+glTextureSubImage3D
+glCompressedTextureSubImage2D
+glTextureParameteri
+glTextureParameterf
+glTextureParameterfv
+glTextureParameteriv
+glGenerateTextureMipmap
+glBindTextureUnit
+glGetTextureImage
+glGetTextureLevelParameteriv
+glCreateSamplers
+glDeleteSamplers
+glSamplerParameteri
+glSamplerParameterf
+glSamplerParameterfv
+glBindSampler
+
+# --- framebuffers
+glCreateFramebuffers
+glDeleteFramebuffers
+glNamedFramebufferTexture
+glNamedFramebufferTextureLayer
+glNamedFramebufferRenderbuffer
+glNamedFramebufferDrawBuffer
+glNamedFramebufferDrawBuffers
+glNamedFramebufferReadBuffer
+glCheckNamedFramebufferStatus
+glBindFramebuffer
+glBlitNamedFramebuffer
+glClearNamedFramebufferfv
+glClearNamedFramebufferfi
+glClearNamedFramebufferiv
+glCreateRenderbuffers
+glDeleteRenderbuffers
+glNamedRenderbufferStorage
+glNamedRenderbufferStorageMultisample
+
+# --- pipeline state
+glEnable
+glDisable
+glEnablei
+glDisablei
+glDepthFunc
+glDepthMask
+glDepthRange
+glClipControl
+glCullFace
+glFrontFace
+glBlendEquation
+glBlendEquationSeparate
+glBlendFunc
+glBlendFuncSeparate
+glBlendColor
+glColorMask
+glColorMaski
+glStencilFunc
+glStencilFuncSeparate
+glStencilOp
+glStencilOpSeparate
+glStencilMask
+glStencilMaskSeparate
+glPolygonOffset
+glPolygonMode
+glViewport
+glScissor
+glLineWidth
+glPixelStorei
+
+# --- compute
+glDispatchCompute
+glDispatchComputeIndirect
+glBindImageTexture
+
+# --- clears and draws
+glClear
+glClearColor
+glClearDepth
+glClearDepthf
+glClearStencil
+glDrawArrays
+glDrawArraysInstanced
+glDrawElements
+glDrawElementsInstanced
+glDrawElementsBaseVertex
+glMultiDrawElementsIndirect
+glFinish
+glFlush
+
+# --- sync
+glFenceSync
+glClientWaitSync
+glDeleteSync
+glMemoryBarrier

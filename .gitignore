@@ -1,0 +1,23 @@
+build/
+build-*/
+out/
+.cache/
+compile_commands.json
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+*.pyc
+__pycache__/
+.venv/
+# Generated: the loaders and the compiled shaders are build products.
+src/rhi/gl/glfn.h
+src/rhi/gl/glfn.cpp
+src/rhi/vk/vkfn.h
+src/rhi/vk/vkfn.cpp
+src/render/shaders/generated/
+*.spv
+.vscode/
+.idea/
+*.swp
