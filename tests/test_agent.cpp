@@ -26,6 +26,8 @@
 
 #include "agent/agent.h"
 #include "core/json.h"
+#include "procgen/sdf.h"
+#include "procgen/texture.h"
 #include "core/log.h"
 #include "resource/resource.h"
 #include "scene/controls.h"
@@ -368,6 +370,122 @@ int main() {
             if (reply["code"].string() == "no_such_command") unknown++;
         }
         check(unknown == 0, "every command help lists is a command that exists");
+    }
+
+    // ------------------------------------ THE DOCUMENTATION
+    //
+    // Every example in docs/agent.md, run against the engine.
+    //
+    // Worth doing because the whole argument for this interface is
+    // that it cannot drift from the engine -- and a reference that
+    // says a class has a property it does not have is exactly the
+    // drift the design was supposed to make impossible. It caught
+    // one on the first run: an example showing `energy` and
+    // `colour` on OmniLight3D, where they are declared on Light3D
+    // and a non-inherited dump does not list them.
+    //
+    // A block containing an arrow is illustrating a REPLY and is
+    // skipped; everything else is a command and must work.
+    {
+#ifdef WARREN_SOURCE_DIR
+        size_t ran = 0, broken = 0;
+        // The README makes the same claims in shorter form, and has
+        // the same way of going stale.
+        for (const char *doc : {"/docs/agent.md", "/README.md"}) {
+            const std::string path = std::string(WARREN_SOURCE_DIR) + doc;
+            FILE *f = std::fopen(path.c_str(), "rb");
+            check(f != nullptr, "the documentation is where the test expects it");
+            if (!f) continue;
+            std::string text;
+            char buf[4096];
+            size_t n;
+            while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
+            std::fclose(f);
+
+            size_t at = 0;
+            while ((at = text.find("```json", at)) != std::string::npos) {
+                const size_t start = text.find('\n', at);
+                const size_t end = text.find("```", start);
+                if (start == std::string::npos || end == std::string::npos) break;
+                const std::string block = text.substr(start + 1, end - start - 1);
+                at = end + 3;
+                // A reply, not a command.
+                if (block.find("\xe2\x86\x92") != std::string::npos) continue;
+
+                // One JSON value per block, possibly several in a row,
+                // possibly spread over several lines.
+                size_t pos = 0;
+                while (pos < block.size()) {
+                    const size_t open = block.find('{', pos);
+                    if (open == std::string::npos) break;
+                    int depth = 0;
+                    size_t close = open;
+                    bool in_string = false;
+                    for (; close < block.size(); close++) {
+                        const char ch = block[close];
+                        if (in_string) {
+                            if (ch == '\\') close++;
+                            else if (ch == '"') in_string = false;
+                            continue;
+                        }
+                        if (ch == '"') in_string = true;
+                        else if (ch == '{') depth++;
+                        else if (ch == '}' && --depth == 0) break;
+                    }
+                    if (close >= block.size()) break;
+                    const std::string one = block.substr(open, close - open + 1);
+                    pos = close + 1;
+
+                    std::string error;
+                    const Json cmd = Json::parse(one, &error);
+                    if (!error.empty()) {
+                        std::printf("  FAIL  an example in docs/agent.md is not "
+                                    "valid JSON: %s\n", error.c_str());
+                        broken++;
+                        continue;
+                    }
+                    // Some blocks are a shape or a surface on their
+                    // own, shown as an argument rather than a
+                    // command. Those are checked by building them.
+                    if (!cmd.has("cmd")) {
+                        if (cmd.has("shape") || cmd.has("op")) {
+                            gen::Sdf::from_json(cmd, &error);
+                            if (!error.empty()) {
+                                std::printf("  FAIL  a documented shape does not "
+                                            "parse: %s\n", error.c_str());
+                                broken++;
+                            }
+                            ran++;
+                        } else if (cmd.has("pattern")) {
+                            gen::render_height(cmd, 8, &error);
+                            if (!error.empty()) {
+                                std::printf("  FAIL  a documented surface does not "
+                                            "parse: %s\n", error.c_str());
+                                broken++;
+                            }
+                            ran++;
+                        }
+                        continue;
+                    }
+                    const Json reply = agent_execute(ctx, cmd);
+                    ran++;
+                    // Commands that need frames, and ones whose
+                    // paths belong to a demo scene this test does
+                    // not have, are not failures of the document.
+                    const std::string code = reply["code"].string();
+                    if (reply["ok"].boolean() || code == "no_engine" ||
+                        code == "no_such_node")
+                        continue;
+                    std::printf("  FAIL  a documented command fails: %s\n  ->  %s\n",
+                                one.c_str(), reply.to_string().c_str());
+                    broken++;
+                }
+            }
+        }
+        check(broken == 0, "every example in the documentation still works");
+        check(ran >= 12, "and the test found them to check");
+        std::printf("  checked %zu documented examples\n", ran);
+#endif
     }
 
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");

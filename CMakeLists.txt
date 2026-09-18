@@ -207,6 +207,9 @@ if(WARREN_TESTS)
     get_filename_component(name ${t} NAME_WE)
     add_executable(${name} ${t})
     target_link_libraries(${name} PRIVATE warren)
+    # So a test can read the documentation it is checking.
+    target_compile_definitions(${name} PRIVATE
+      WARREN_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME ${name} COMMAND ${name})
     # 77 is the POSIX convention for "skipped", which a test uses when
     # the thing it covers was not built (Python, say). A skip is not a

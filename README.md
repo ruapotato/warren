@@ -309,6 +309,91 @@ t.set_viewer(mf.camera())
 t.dig(mf.Vec3(0, 12, 0), 6.0)
 ```
 
+## Built by something that is not a person
+
+Warren has one class registry, and it already generates the Python
+bindings, the `.pyi` stubs, the property inspector, scene
+serialisation and network replication. Add a sixth reader of the same
+table and the engine becomes drivable by a program:
+
+```
+$ warren --schema -       # the whole API as JSON: 43 classes, 166
+                          # properties, 105 methods, argument names
+                          # included. No window, no GPU.
+$ warren --agent          # JSON commands on stdin, replies on stdout
+```
+
+```json
+{"cmd": "create", "class": "OmniLight3D", "parent": "/root/World",
+ "properties": {"position": {"y": 2.2}, "colour": "#ff7733", "energy": 40}}
+{"cmd": "screenshot", "path": "look.png"}
+```
+
+Because it is the same table, a property added to a node this
+afternoon is scriptable, inspectable, saveable **and** promptable this
+afternoon — with nothing written and nothing regenerated. An interface
+maintained alongside the engine drifts out of date with it. This one
+cannot.
+
+**A wrong guess is answered rather than refused**, which is what makes
+it usable by a model and not only by a program. `"color"` comes back
+with `did_you_mean: ["colour"]`. `"OmniLight"` comes back with
+`"OmniLight3D"`. A wrong path is matched on its last segment, because
+a caller with the wrong path usually has the right name. Setting
+`energy` on a plain `Node3D` comes back with `property_exists_on:
+["OmniLight3D", ...]` — the name was right and the node was wrong,
+which a spelling suggestion cannot help with. And calling
+`set_position()`, which is Godot's spelling and the commonest miss
+there is, comes back with `but_there_is_a_property: ["position"]`.
+
+## Assets that are written, not modelled
+
+An engine an agent can drive is not much use if every prop in it still
+has to come out of Blender. So geometry and surfaces are both things
+you can describe.
+
+**A shape is a signed distance field**, contoured with the same dual
+contourer the voxel terrain uses:
+
+```json
+{"op": "difference", "of": [
+    {"shape": "box", "size": [1, 1, 1], "round": 0.06},
+    {"shape": "cylinder", "radius": 0.3, "height": 2, "at": [0.6, 0, 0.6]}]}
+```
+
+Booleans on fields are `min` and `max`. They cannot fail, have no
+special cases and cost one instruction. Cutting one triangle mesh out
+of another needs exact predicates and still falls over on coplanar
+faces — which is what you get when you subtract a box from a box,
+which is what everybody does first. Fields also give you two things
+mesh booleans cannot do at all: smooth blends, where two shapes meet
+in a fillet rather than a crease, and twist, bend and displace applied
+to the whole tree at once.
+
+**A surface is one scalar field over the unit square, coloured at the
+end:**
+
+```json
+{"pattern": "bricks", "rows": 8, "columns": 4, "mortar": 0.06,
+ "colours": [[0, "#4a4440"], [0.55, "#8a4f38"], [1, "#b57a55"]],
+ "roughness": [0.95, 0.65], "bump": 1.4}
+```
+
+The same field becomes the albedo through the colour ramp, the normal
+map through its slope and the roughness through its value — so the
+mortar is rougher than the brick because it is darker, without anybody
+saying so twice. Eleven patterns, nine blend modes, and a domain warp
+that turns a sine wave into convincing wood grain in one line.
+Everything tiles exactly, by wrapping the noise lattice rather than
+blending its edges.
+
+Both are reachable three ways: the agent protocol, `warren.shape({...})`
+and `warren.surface({...})` from Python, and `gen::Sdf` in C++.
+Procedural materials are triplanar by default, because contoured
+geometry has no UVs worth having.
+
+`docs/agent.md` is the reference for all of it.
+
 ## Layout
 
 ```
@@ -325,20 +410,25 @@ src/physics/       shapes, BVH, sweeps, portal-aware tracing
 src/audio/         the mixer and clip loading
 src/net/           sockets, reliability, replication
 src/ui/            the draw list, a 5x7 font, immediate-mode widgets
-src/resource/      PackedScene: saving, loading and instancing
+src/resource/      resources, PackedScene, glTF import
+src/procgen/       noise, fields, dual contouring, SDF shapes,
+                   procedural textures
+src/agent/         the JSON protocol and the API schema
 src/editor/        the scene tree, inspector, console and scene files
 src/script/        the Python bridge and the stub generator
 src/plugin/        the plugin ABI and host
 src/app/           Engine: the loop that ties it together
-plugins/voxel/     dual-contoured voxel terrain
+plugins/voxel/     voxel terrain: generation, edits, LOD streaming
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
                    lights, image-based lighting, punctual shadows,
                    the plugin ABI and terrain LOD, audio,
                    networking, the UI, controls, scenes, the
-                   editor, Python
+                   editor, Python, resources, glTF, procedural
+                   generation, the agent protocol
 docs/conventions.md  the rules, stated once
+docs/agent.md        driving the engine from a program
 docs/plugins.md      how to write one
 ```
 
@@ -354,15 +444,21 @@ statement of exactly how much of that API the engine depends on.
 Early, and honest about it.
 
 Working: both backends at verified parity, the reverse-Z oblique
-projection, the scene tree with reflection, PBR forward shading, a
-procedural sky, filmic tonemapping, MSAA, **recursive stencil-clipped
-portals with per-pair size ratios**, portal-aware swept physics with
-size-changing traversal, a work-stealing job system, the plugin ABI,
-streaming dual-contoured voxel terrain, and Python scripting with
-generated type stubs.
+projection, the scene tree with reflection, PBR forward shading with
+cascaded and punctual shadows, clustered lights, image-based lighting,
+a procedural sky, filmic tonemapping, MSAA, triplanar mapping,
+**recursive stencil-clipped portals with per-pair size ratios**,
+portal-aware swept physics with size-changing traversal, portal-aware
+audio, a networking layer with three delivery channels, a
+work-stealing job system, the plugin ABI, streaming dual-contoured
+voxel terrain, Control-node UI, an editor whose inspector is derived
+from reflection, resources and scene instancing, glTF import,
+procedural shapes and surfaces, and Python scripting with generated
+type stubs.
 
-Not yet: a resource system (scenes store meshes inline), scripts in
-scene files, transform gizmos, an asset importer, and text wrapping
-in `Label`.
+Not yet: skeletal animation, an animation player, scripts saved in
+scene files, transform gizmos, particles, navigation, rigid bodies,
+and text wrapping in `Label`. The Windows paths exist and have never
+been compiled.
 
 See `docs/conventions.md` before touching the renderer.
