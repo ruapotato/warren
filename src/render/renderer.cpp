@@ -775,8 +775,18 @@ bool Renderer::create_pipelines() {
         pipe_.portal_depth_clear = device_->create_pipeline(d);
 
         // --- tonemap, straight to the swapchain
+        //
+        // ITS OWN VERTEX STAGE, not the shared full-screen one.
+        // fullscreen.glsl writes push.params.x into gl_Position.z,
+        // because the portal pass needs a triangle at a chosen depth
+        // to clear depth inside a stencil. The tonemap's fragment
+        // stage reads that same push slot as the exposure. Sharing
+        // the vertex shader therefore made the exposure the
+        // clip-space Z as well, and anything above 1.0 put the
+        // triangle outside the clip volume and deleted the frame.
+        // See docs/known-issues.md for the hunt.
         PipelineDesc t;
-        t.vertex = full_vs;
+        t.vertex = shader("tonemap", ShaderStage::Vertex);
         t.fragment = shader("tonemap", ShaderStage::Fragment);
         t.colour_formats = {device_->swapchain_format()};
         t.depth_format = Format::Undefined;

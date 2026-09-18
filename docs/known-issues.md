@@ -6,57 +6,6 @@ is a bug that gets argued about instead of fixed.
 
 ---
 
-## Exposure above 1.0 can produce an empty frame
-
-**Reproduce**
-
-```
-# in src/render/renderer.h, RenderSettings:
-#     float exposure = 1.15f;      (anything > 1.0)
-ninja -C build
-./build/bin/warren --demo nav --frames 12 --shot /tmp/a.png --shot-frame 8
-```
-
-Every pixel of `/tmp/a.png` comes back `(0, 0, 0, 0)`. At
-`exposure = 1.0` the same command produces the scene. The threshold
-is sharp: `0.99` and `1.0` are fine, `1.001` is not.
-
-**What is known**
-
-- Not the Environment proxy or the script bridge: it reproduces with
-  the value compiled in as the default and no script running.
-- Not a driver: Vulkan and OpenGL fail identically.
-- Not the screenshot picking the wrong image: the swapchain index
-  logged by the render and by the capture are the same one.
-- Not the tonemap pass failing to run. Giving that pass a green
-  `LoadOp::Clear` shows green everywhere, so the pass executes and
-  the full-screen triangle contributes nothing.
-- Not the tonemap shader's arithmetic. A debug build of it that
-  writes `vec4(push.params.x * 0.5, 0.25, 0, 1)` -- ignoring the HDR
-  texture entirely -- still writes nothing at 1.15 and writes the
-  expected colour at 1.0.
-- Clamping only the PUSHED value, with `settings_.exposure` left at
-  1.15, renders correctly. So the trigger is the float that reaches
-  the GPU.
-- **Not universal across scenes.** `--demo portals` renders correctly
-  at 1.15. `--demo nav` and the ROTGRAVE town do not. Whatever the
-  cause is, it involves the scene as well as the value, which is the
-  thread to pull next.
-
-The shape of it -- a draw that produces no fragments, depending on a
-uniform value and on what else is in the scene -- points at a NaN or
-an infinity somewhere in the HDR buffer that the multiply tips over
-an edge, rather than at anything in the tonemap itself. That is a
-guess and is labelled as one.
-
-**Workaround**
-
-Leave `exposure` at 1.0 and light the scene with `sun_energy`,
-`ambient_energy` and `env_intensity`, which are unaffected. ROTGRAVE
-does this.
-
----
-
 ## A doorway with a step in it does not connect
 
 **Reproduce**
@@ -118,3 +67,47 @@ zones -- the strict and correct semantics -- and no workaround.
 
 Worth recording because the wrong diagnosis was available, plausible,
 and had a real defect behind it.
+
+---
+
+# Fixed, and worth keeping
+
+The reasoning that missed, as well as the reasoning that landed. A
+wrong diagnosis that was plausible is worth more written down than
+forgotten, because the next person will reach for it too.
+
+## Exposure above 1.0 produced an empty frame
+
+**What it was.** The tonemap pass was built with `fullscreen.glsl`'s
+vertex stage, which writes `push.params.x` into `gl_Position.z` --
+that shader exists partly to clear depth inside a stencilled region
+by drawing a triangle at a chosen depth, and the depth is where it
+takes it from. The tonemap's own fragment stage reads that same push
+slot as the exposure. So the exposure was also the clip-space Z, and
+with `w = 1.0` anything above 1.0 put all three vertices outside the
+clip volume and the triangle was discarded before rasterising.
+
+That is the whole of it, and it explains the part that looked
+strangest: the threshold was *exactly* 1.0, because that is exactly
+where the clip volume ends. `0.99` drew, `1.001` did not.
+
+**What was guessed and was wrong.** A NaN or an infinity in the HDR
+buffer that the multiply tipped over an edge -- the note said at the
+time that this was a guess, and it was the wrong one. It fitted the
+evidence that had been gathered (a draw producing no fragments,
+depending on a uniform and seemingly on the scene) and it sent the
+search into the HDR pass, which was the one place the bug was not.
+
+Two observations should have ended it sooner. A debug tonemap
+fragment shader that ignored the HDR texture entirely *still* drew
+nothing, which rules out everything downstream of the vertex stage
+and was recorded without being followed. And the threshold sat on a
+round number that means something specific in clip space. "Not
+universal across scenes" was the observation that did the most harm:
+it was never nailed down, it argued for a data-dependent cause, and
+it pointed away from a pipeline that is identical in every scene.
+
+**The fix.** `renderer.cpp` gives the tonemap pass its own vertex
+stage, which `tonemap.glsl` already declared. Two passes sharing a
+vertex shader while disagreeing about what a push constant means is
+the actual defect; the empty frame was a symptom.
