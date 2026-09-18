@@ -319,6 +319,7 @@ bool build_poly_mesh(const ContourSet &contours, std::vector<Vec3> *out_verts,
     std::vector<int> idx, tris;
     std::vector<IVert> local;
     std::vector<uint16_t> local_global;
+    int dropped = 0, coincident = 0;
 
     for (const Contour &c : contours.contours) {
         const int n = int(c.verts.size());
@@ -356,6 +357,17 @@ bool build_poly_mesh(const ContourSet &contours, std::vector<Vec3> *out_verts,
             idx.push_back(i);
         }
 
+        {
+            // How many of this contour's points landed on a vertex
+            // another point of the SAME contour already claimed.
+            std::vector<uint16_t> seen;
+            for (uint16_t g : local_global) {
+                if (std::find(seen.begin(), seen.end(), g) != seen.end())
+                    ++coincident;
+                else
+                    seen.push_back(g);
+            }
+        }
         int ntris = triangulate(n, local, idx, tris);
         if (ntris <= 0) {
             WR_WARN("nav: region %u would not triangulate (%d of %d verts)",
@@ -376,8 +388,10 @@ bool build_poly_mesh(const ContourSet &contours, std::vector<Vec3> *out_verts,
             p.region = c.region;
             // A triangle whose three corners interned to fewer than
             // three vertices has no area; it comes from a bridge.
-            if (p.v[0] == p.v[1] || p.v[1] == p.v[2] || p.v[2] == p.v[0])
+            if (p.v[0] == p.v[1] || p.v[1] == p.v[2] || p.v[2] == p.v[0]) {
+                ++dropped;
                 continue;
+            }
             parts.push_back(p);
         }
 
@@ -409,6 +423,17 @@ bool build_poly_mesh(const ContourSet &contours, std::vector<Vec3> *out_verts,
         }
         for (const BuiltPoly &p : parts) built.push_back(p);
     }
+
+    // A DROPPED TRIANGLE IS A HOLE IN THE FLOOR, so it is worth
+    // saying. It happens when two points of one contour land on the
+    // same vertex -- a bridge into a hole does that on purpose, and
+    // a contour that pinches to a point does it by accident. The
+    // count of coincident points is the context: a couple is a
+    // bridge, a lot is a contour going wrong.
+    if (dropped)
+        WR_WARN("nav: %d triangles dropped as degenerate (%d coincident "
+                "contour points); the mesh has holes in it",
+                dropped, coincident);
 
     if (built.size() > 0xfffe) {
         WR_ERROR("nav: %zu polygons is more than the index space holds; "

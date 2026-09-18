@@ -255,7 +255,22 @@ class Town:
             # the plan named plus whatever connects to it, and what
             # goes is the accidental geometry -- which is the whole
             # point.
-            seeds = [self.sample_point(z) for z in self.design.zones.values()]
+            # FROM WHERE THE RUN BEGINS, which is the honest
+            # question: ground that cannot be walked to from the
+            # starting zones is not ground. A pocket behind a
+            # parked car, the top of a crate, the inside of a
+            # sealed void -- all of them go, and the one thing
+            # worse than a place a body cannot reach is a place a
+            # body can spawn in and not leave.
+            #
+            # This deleted half the town until the clutter stopped
+            # being placed across doorways. That was worth chasing
+            # rather than working around: a wreck parked in a
+            # doorway does not read as a hazard, it reads as a
+            # level that does not work, and the zone behind it is
+            # still on the map and still purchasable.
+            seeds = [self.sample_point(z)
+                     for z in self.design.starting_zones()]
             self.pruned = self.region.prune_from(seeds)
         self._mark_zones()
         return self.region.poly_count()
@@ -274,7 +289,7 @@ class Town:
             self.root.add_child(node)
             unlit = wr.Material()
             unlit.unlit = True
-            for name, mesh in (("Surface", self.region.debug_surface(0.07, 0)),
+            for name, mesh in (("Surface", self.region.debug_surface(0.07, int(os.environ.get("ROTGRAVE_NAVCOLOUR", "0")))),
                                ("Edges", self.region.debug_edges(0.09)),
                                ("Links", self.region.debug_links())):
                 mi = wr.MeshInstance3D()
@@ -481,9 +496,14 @@ class Town:
                                       zone.z1))
             self._kerb_steps(b, zone, y)
 
-        # Pavement in front of every building: the one piece of
-        # street furniture that changes how the place plays, because
-        # it is where a player runs and where a crowd bunches.
+        # PAVEMENT, AND IT IS LOAD-BEARING. A 0.12 m kerb round
+        # every building reads as a street, and it turns out to
+        # matter to the bake as well: removing it -- on the theory
+        # that a step in a doorway is a hazard, which it is --
+        # disconnected the diner and the east roofs rather than
+        # fixing anything. It appears to act as a transition
+        # between the road and the floor inside rather than as an
+        # obstacle. Left in, and measured.
         b.slot = KERB
         for zone in d.zones.values():
             if not zone.indoor or d.floor_of(zone.key) < 0.0:
@@ -795,12 +815,19 @@ class Town:
             mid = (a + c) * 0.5
             covered = False
             for (rx0, rz0, rx1, rz1) in rooms:
+                # ALONG the wall, strictly inside: a room that only
+                # touches the line at a point does not cover it.
+                # ACROSS the wall, inclusively: a room whose edge IS
+                # the wall line is a room on the other side of it,
+                # and walling there seals the join. The crypt's
+                # rectangle begins exactly at the spur's east end,
+                # so a strict test here bricks up the back way.
                 if along_x:
                     inside = (rx0 + eps < mid < rx1 - eps and
-                              rz0 + eps < fixed < rz1 - eps)
+                              rz0 - eps <= fixed <= rz1 + eps)
                 else:
                     inside = (rz0 + eps < mid < rz1 - eps and
-                              rx0 + eps < fixed < rx1 - eps)
+                              rx0 - eps <= fixed <= rx1 + eps)
                 if inside:
                     covered = True
                     break
@@ -1003,6 +1030,8 @@ class Town:
     # ---------------------------------------------------- the seed's job
 
     def _detail(self, b):
+        if os.environ.get("ROTGRAVE_NO_DETAIL"):
+            return
         """What the seed decides: rubbish, cars, crates. None of it
         changes where anything is, which is the rule -- the town is
         learnt and its contents are not."""
@@ -1012,12 +1041,25 @@ class Town:
             y = d.floor_of(zone.key)
             if zone.indoor or y < 0.0 or y > 2.0:
                 continue
+            # SPACED OUT, and away from the walls. Clutter that
+            # pens a corner off is clutter a body can be trapped
+            # behind -- and the navmesh then carries a pocket
+            # nothing can reach, which the prune deletes and the
+            # level is quietly a little smaller than it looks.
             n = max(2, int(zone.w * zone.h / 260.0))
-            for _ in range(n):
-                x = rng.uniform(zone.x + 2.0, zone.x1 - 2.0)
-                z = rng.uniform(zone.z + 2.0, zone.z1 - 2.0)
+            placed = []
+            for _ in range(n * 4):
+                if len(placed) >= n:
+                    break
+                x = rng.uniform(zone.x + 4.0, zone.x1 - 4.0)
+                z = rng.uniform(zone.z + 4.0, zone.z1 - 4.0)
                 if self._occupied(x, z):
                     continue
+                if any((x - px) ** 2 + (z - pz) ** 2 < 81.0
+                       for px, pz in placed):
+                    continue
+                placed.append((x, z))
+            for x, z in placed:
                 if rng.random() < 0.35:
                     b.slot = METAL
                     b.add_bounds(wr.AABB(wr.Vec3(x - 2.1, y, z - 0.9),
@@ -1028,15 +1070,26 @@ class Town:
                     b.add_box(wr.Vec3(x, y + s * 0.5, z), wr.Vec3(s, s, s))
 
     def _occupied(self, x, z):
-        pad = 2.4
+        """Is this a place a car or a crate must not go?
+
+        Clear of buildings by more than a car is long, and clear of
+        every doorway by more than a car is wide. A wreck parked
+        across a door does not read as a hazard, it reads as a
+        level that does not work: the room behind it is still on
+        the map, still purchasable, and nothing can walk in.
+        """
+        pad = 5.0
         for zone in self.design.zones.values():
             if not zone.indoor:
                 continue
             if (zone.x - pad <= x <= zone.x1 + pad and
                     zone.z - pad <= z <= zone.z1 + pad):
                 return True
+        for door in self.design.doors:
+            if abs(x - door.at[0]) < 6.0 and abs(z - door.at[2]) < 6.0:
+                return True
         for s in self.shafts:
-            if abs(x - s.x) < s.half + 1.5 and abs(z - s.z) < s.half + 1.5:
+            if abs(x - s.x) < s.half + 2.5 and abs(z - s.z) < s.half + 2.5:
                 return True
         return False
 

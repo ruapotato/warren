@@ -100,23 +100,34 @@ class Game(wr.Node3D):
                        f"from ({start.x:.1f},{start.y:.1f},{start.z:.1f}) "
                        f"to ({p.x:.1f},{p.y:.1f},{p.z:.1f}) "
                        f"path={len(path)} pts")
-        if os.environ.get("ROTGRAVE_PROBE"):
+        # ROTGRAVE_PROBE="x0,y,z0,x1,z1" walks a line and reports
+        # what the navmesh has along it. A junction that does not
+        # connect shows up as a jump in height, a run of misses, or
+        # two stretches whose areas never meet.
+        probe = os.environ.get("ROTGRAVE_PROBE")
+        if probe:
+            x0, py, z0, x1, z1 = (float(v) for v in probe.split(","))
             r = self.town.region
-            pairs = [("yard->church", (27, 0.7, -35.0), (27, 1.0, -37.0)),
-                     ("yard->far yard", (27, 0.7, -35.0), (14, 0.7, -33.0)),
-                     ("street->yard", (27, 0.1, -28.0), (27, 0.7, -35.0)),
-                     ("church->crypt", (27, 1.0, -40.0), (20, -6.0, -46.0))]
-            for label, a, bb in pairs:
-                pa = r.nearest_point(wr.Vec3(*a))
-                pb = r.nearest_point(wr.Vec3(*bb))
-                ok = r.is_reachable(pa, pb)
-                n = len(r.find_path(pa, pb))
-                wr.log(f"  probe {label:16s} {'OK ' if ok else 'NO '} "
-                       f"({pa.x:.1f},{pa.y:.2f},{pa.z:.1f}) -> "
-                       f"({pb.x:.1f},{pb.y:.2f},{pb.z:.1f}) path={n}")
-                if label == "yard->church":
-                    for q in r.find_path(pa, pb):
-                        wr.log(f"      ({q.x:.2f},{q.y:.2f},{q.z:.2f})")
+            n = 24
+            prev = None
+            for i in range(n + 1):
+                t = i / n
+                x, z = x0 + (x1 - x0) * t, z0 + (z1 - z0) * t
+                want = wr.Vec3(x, py, z)
+                got = r.nearest_point(want)
+                d = (got - want).length()
+                jump = "" if prev is None else f" dy={got.y - prev:+.2f}"
+                mark = "   " if d < 0.6 else "!! "
+                wr.log(f"  {mark}probe ({x:6.1f},{z:6.1f}) -> y={got.y:5.2f} "
+                       f"off={d:4.2f} area={r.area_at(got):3d}{jump}")
+                prev = got.y
+            a = r.nearest_point(wr.Vec3(x0, py, z0))
+            b = r.nearest_point(wr.Vec3(x1, py, z1))
+            path = r.find_path(a, b)
+            wr.log(f"  probe ends: reachable={r.is_reachable(a, b)} "
+                   f"path={len(path)} "
+                   f"end=({path[-1].x:.1f},{path[-1].z:.1f}) "
+                   f"wanted=({b.x:.1f},{b.z:.1f})" if path else "  no path")
 
         wr.log(f"open at the start: {', '.join(sorted(self.town.opened))}")
         for key, (cost, door) in sorted(self.town.buyable().items()):

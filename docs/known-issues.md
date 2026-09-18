@@ -105,3 +105,16 @@ Keep thresholds flush, or within one cell of `cell_height`.
 ROTGRAVE does: `Design._resolve_levels` snaps a building's floor to
 the ground immediately outside it when the two are close, so the
 church sits at its churchyard's height rather than 0.3 m above it.
+
+**A near miss worth recording.** This defect was blamed, for some
+time, for the town's zones being cut off from one another -- the
+symptom matched, several of the breaks were at height changes, and
+the pruning duly deleted a quarter of the map. It was not the cause.
+The cause was procedural clutter: parked wrecks placed across
+doorways, which seal a room as effectively as a wall and look like
+scenery. Keeping the clutter clear of doors connected every zone and
+every door in the plan, with the pruning seeded from the starting
+zones -- the strict and correct semantics -- and no workaround.
+
+Worth recording because the wrong diagnosis was available, plausible,
+and had a real defect behind it.
