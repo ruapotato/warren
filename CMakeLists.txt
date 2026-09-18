@@ -69,7 +69,7 @@ add_custom_target(warren_codegen DEPENDS ${GL_GEN} ${VK_GEN} ${SHADER_GEN})
 
 # ----------------------------------------------------------------- sources
 
-set(WARREN_DIRS core core/math platform audio net ui editor render
+set(WARREN_DIRS core core/math platform audio net ui editor render nav
                   render/shaders/generated scene physics script plugin
                   resource procgen anim agent app)
 set(WARREN_SRC "")
