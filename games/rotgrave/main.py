@@ -15,6 +15,8 @@ import warren as wr
 from rotgrave.design import load
 from rotgrave.town import Town, AREA_OPEN, AREA_SEWER
 from rotgrave.player import Player
+from rotgrave.undead import Bodies
+from rotgrave.rounds import Director
 
 
 BINDINGS = {
@@ -136,7 +138,16 @@ class Game(wr.Node3D):
         # F1 shows the bake. Off by default, on in a heartbeat --
         # it is the difference between "they will not go upstairs"
         # and "there is no upstairs".
+        self.bodies = Bodies(self.design)
+        # Under the region, because that is where a NavAgent3D
+        # looks for the crowd it belongs to -- it walks up its
+        # ancestors until it finds a NavRegion3D, and one parented
+        # anywhere else never moves.
+        self.director = Director(self.design, self.town, self.bodies,
+                                 self.town.region, seed=1)
+
         self._nav_debug = False
+        self._report_at = 0.0
         self._t = 0.0
 
         # A look at the whole town from above, with the bake drawn
@@ -165,7 +176,56 @@ class Game(wr.Node3D):
         if wr.key_pressed(wr.Key.F1):
             self._nav_debug = not self._nav_debug
             self.town.show_navmesh(self._nav_debug)
+
+        now = wr.time()
         self.player.update(dt, wr.mouse_captured())
+        if wr.mouse_pressed(wr.Mouse.LEFT) and wr.mouse_captured():
+            self._fire(now)
+
+        self.director.update(dt, now, [self.player])
+
+        if now >= self._report_at:
+            self._report_at = now + 5.0
+            wr.log(self.director.report()
+                   + f"  |  {self.player.health:.0f} hp")
+
+    def _fire(self, now):
+        """A placeholder shot, until the twelve guns are in.
+
+        One trace, one body, a fixed amount of damage. It exists so
+        that a round can end -- a director with nothing that can
+        kill is a director that spawns until the cap and stops, and
+        none of the round logic gets exercised at all.
+        """
+        self.player.last_shot = now
+        origin, far = self.player.aim_ray()
+        best, best_t = None, 2.0
+        for z in self.director.alive:
+            if z.dead:
+                continue
+            # Closest approach of the ray to the body's middle.
+            c = z.position + wr.Vec3(0.0, z.agent.height * 0.5, 0.0)
+            d = far - origin
+            L = d.length()
+            if L < 1e-3:
+                continue
+            u = d * (1.0 / L)
+            t = (c - origin).dot(u)
+            if t < 0.0 or t > L:
+                continue
+            miss = (origin + u * t - c).length()
+            if miss > z.agent.radius + 0.25:
+                continue
+            if miss < best_t:
+                best, best_t = z, miss
+        if best is None:
+            return
+        head = best.position.y + best.agent.height * 0.82
+        aim_y = origin.y + (far.y - origin.y) * 0.5
+        points, killed = best.hurt(90.0, headshot=aim_y > head - 0.25)
+        self.player.points += points
+        if killed:
+            self.director.killed(best, points)
 
 
 def start():

@@ -328,6 +328,21 @@ class Town:
             out.append((key, hit, total, y))
         return out
 
+    def usable_spawns(self):
+        """The plan's spawn points that are actually on the mesh.
+
+        A spawn point a body cannot stand on is a spawn point that
+        silently never fires, and the round gets easier by however
+        many of them there are. Checked once, out loud.
+        """
+        good, bad = [], []
+        for s in self.design.spawns:
+            ix, iz = s.inward
+            at = wr.Vec3(s.at[0] + ix * 0.9, s.at[1] + 0.3, s.at[2] + iz * 0.9)
+            on = self.region.nearest_point(at)
+            (good if (on - at).length() < 1.4 else bad).append((s, on))
+        return good, bad
+
     def door_report(self):
         """Does every door in the plan actually join its two zones?
 
@@ -1051,8 +1066,15 @@ class Town:
             for _ in range(n * 4):
                 if len(placed) >= n:
                     break
-                x = rng.uniform(zone.x + 4.0, zone.x1 - 4.0)
-                z = rng.uniform(zone.z + 4.0, zone.z1 - 4.0)
+                # Well inside the zone. A wreck is four metres
+                # long and the bake takes another 0.6 m off each
+                # side of it, so one parked near a boundary eats
+                # the strip beyond -- and the strip beyond a zone
+                # boundary is usually where its spawn points are.
+                x = rng.uniform(zone.x + 8.0, zone.x1 - 8.0)
+                z = rng.uniform(zone.z + 8.0, zone.z1 - 8.0)
+                if zone.x1 - zone.x < 18.0 or zone.z1 - zone.z < 18.0:
+                    break  # too small to clutter without pinching it
                 if self._occupied(x, z):
                     continue
                 if any((x - px) ** 2 + (z - pz) ** 2 < 81.0
@@ -1090,6 +1112,12 @@ class Town:
                 return True
         for s in self.shafts:
             if abs(x - s.x) < s.half + 2.5 and abs(z - s.z) < s.half + 2.5:
+                return True
+        # And clear of every spawn point, because a window with a
+        # skip parked in front of it is a window nothing comes out
+        # of, and the round quietly gets easier.
+        for sp in self.design.spawns:
+            if abs(x - sp.at[0]) < 6.0 and abs(z - sp.at[2]) < 6.0:
                 return True
         return False
 

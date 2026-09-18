@@ -24,6 +24,14 @@ class Player:
     BOOM_UP = 1.15
     BOOM_LAG = 0.10
 
+    # A survivor takes a few hits, not one and not twenty. The
+    # number matters less than the regeneration: out of contact for
+    # a moment and you are whole again, which is what lets a player
+    # take a risk and recover rather than limp for a round.
+    MAX_HEALTH = 100.0
+    REGEN_AFTER = 4.0
+    REGEN_RATE = 26.0
+
     def __init__(self, world):
         self.world = world
         self.body = None
@@ -32,6 +40,12 @@ class Player:
         self.pitch = -0.12
         self._boom = wr.Vec3()
         self._captured = False
+
+        self.health = self.MAX_HEALTH
+        self.downed = False
+        self.last_hurt = -99.0
+        self.last_shot = -99.0
+        self.points = 0
 
     def spawn(self, parent, at):
         self.body = wr.CharacterBody3D()
@@ -78,9 +92,43 @@ class Player:
         self.camera.position = at
         self.camera.euler = wr.Vec3(0.0, -1.35, 0.0)
 
+    def wound(self, amount):
+        if self.downed:
+            return
+        self.health -= amount
+        self.last_hurt = wr.time()
+        if self.health <= 0.0:
+            self.health = 0.0
+            self.downed = True
+            wr.log("you are down")
+
+    def revive(self):
+        self.downed = False
+        self.health = self.MAX_HEALTH * 0.5
+
+    def _heal(self, dt):
+        if self.downed:
+            return
+        if wr.time() - self.last_hurt < self.REGEN_AFTER:
+            return
+        self.health = min(self.MAX_HEALTH,
+                          self.health + self.REGEN_RATE * dt)
+
+    def aim_ray(self):
+        """From the camera, through the crosshair, out to range.
+
+        From the CAMERA rather than from the body, because the
+        crosshair is on the camera and a shot that does not go where
+        the crosshair is pointing is a shot the player will call a
+        miss whatever the geometry says.
+        """
+        origin = self.camera.global_position
+        return origin, origin + self.look_direction() * 120.0
+
     def update(self, dt, window_captured):
         if not self.body or getattr(self, "_overhead", False):
             return
+        self._heal(dt)
         if window_captured:
             m = wr.mouse_motion()
             self.yaw -= m.x * 0.0022
