@@ -541,6 +541,39 @@ int main() {
         check(std::fabs(std::atan2(-held.x, -held.z) - 1.2f) < 1e-3f,
               "while one with turn_speed zero is left pointing where it was");
 
+        // --- A BODY PUT SOMEWHERE ELSE.
+        //
+        // A respawn, a teleport, or a body recalled because it was
+        // holding a round up on the far side of the level. Moving
+        // the NODE is not enough and that is the point of the test:
+        // the crowd owns the position while the agent drives the
+        // transform and writes its own back the same frame, so a
+        // game that sets the node sees it snap back and thinks the
+        // teleport did nothing.
+        NavAgent3D *mover = new NavAgent3D();
+        mover->set_name("Mover");
+        mover->radius = 0.35f;
+        mover->max_speed = 2.5f;
+        mover->set_position(Vec3(-5, 0, -6));
+        region->add_child(mover);
+        frame();
+        mover->set_target(Vec3(5, 0, -6));
+        for (int i = 0; i < 30; ++i) frame();
+
+        mover->set_global_position(Vec3(-5, 0, 6));
+        frame();
+        check((mover->global_position() - Vec3(-5, 0, 6)).length() > 1.0f,
+              "setting the node's position alone does not move an agent");
+
+        mover->warp(Vec3(-5, 0, 6));
+        frame();
+        check((mover->global_position() - Vec3(-5, 0, 6)).length() < 1.0f,
+              "warp does, and it sticks after a step");
+        check(mover->has_target(),
+              "and it still wants what it wanted before");
+        check(mover->velocity().length() < 3.0f,
+              "without carrying its old momentum through");
+
         scene->queue_free();
     }
 

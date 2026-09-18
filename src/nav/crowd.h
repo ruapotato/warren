@@ -140,6 +140,21 @@ public:
     bool set_target(uint32_t id, const Vec3 &target);
     void stop(uint32_t id);
 
+    // PUT A BODY SOMEWHERE ELSE, AT ONCE.
+    //
+    // Not movement: a respawn, a teleport, a body recalled from the
+    // far side of a level because it was holding a round up. The
+    // path it was following is about the place it came from, so it
+    // goes; the velocity goes with it, because carrying momentum
+    // through a teleport throws the body straight back out.
+    //
+    // A game cannot do this by moving the node. The crowd owns the
+    // position while the agent drives its transform, and writes it
+    // back over anything the game set -- so the node moves for one
+    // frame and snaps back, which looks like the teleport silently
+    // failing.
+    bool warp(uint32_t id, const Vec3 &to);
+
     // How close counts as arrived, and how close counts as having
     // reached an intermediate corner.
     float arrive_radius = 0.35f;

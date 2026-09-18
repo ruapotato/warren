@@ -261,6 +261,21 @@ void Crowd::stop(uint32_t id) {
     a->desired = Vec3();
 }
 
+bool Crowd::warp(uint32_t id, const Vec3 &to) {
+    CrowdAgent *a = find(id);
+    if (!a) return false;
+    a->position = to;
+    a->velocity = Vec3();
+    a->desired = Vec3();
+    a->path.clear();
+    a->path_partial = false;
+    a->arrived = false;
+    // The target is kept: a body moved somewhere else usually still
+    // wants what it wanted. The cleared path makes it ask for a new
+    // route from where it now is, on the next step.
+    return true;
+}
+
 void Crowd::follow_paths(float dt) {
     int replanned = 0;
     const size_t n = agents_.size();

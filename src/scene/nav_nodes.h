@@ -110,6 +110,14 @@ public:
     // developer to worry about.
     const nav::BakeStats &stats() const { return stats_; }
     int poly_count() const { return mesh_ ? mesh_->poly_count() : 0; }
+    // HOW MANY LINKS ACTUALLY LANDED. collect_links takes every
+    // NavLink3D under the region and hands it to the mesh, and a
+    // link whose ends are not over walkable ground is dropped
+    // there -- silently, because one bad link in a level is not
+    // worth refusing to bake. A game that places links at runtime
+    // (a ladder dropped, a hole shot in a wall) needs to be able
+    // to ask whether the way through exists.
+    int link_count() const { return mesh_ ? int(mesh_->links().size()) : 0; }
     float bake_seconds() const { return stats_.seconds; }
 
     // Gather every NavLink3D under this region and hand them to the
@@ -248,6 +256,11 @@ public:
 
     void set_target(const Vec3 &p);
     void stop();
+    // Move this body at once -- a respawn, a teleport, a recall.
+    // Setting the node's position does NOT do this while the agent
+    // drives the transform: the crowd writes its own position back
+    // the same frame. See Crowd::warp.
+    void warp(const Vec3 &to);
     bool has_target() const;
     bool arrived() const;
     // True when the route ran out before reaching the target, which

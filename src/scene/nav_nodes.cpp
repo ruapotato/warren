@@ -316,6 +316,11 @@ void NavAgent3D::set_target(const Vec3 &p) {
     region_->crowd().set_target(id_, p);
 }
 
+void NavAgent3D::warp(const Vec3 &to) {
+    set_global_position(to);
+    if (region_) region_->crowd().warp(id_, to);
+}
+
 void NavAgent3D::stop() {
     pending_ = false;
     if (region_) region_->crowd().stop(id_);
@@ -452,6 +457,7 @@ static void register_nav_nodes() {
         .method("poly_count", &NavRegion3D::poly_count)
         .method("bake_seconds", &NavRegion3D::bake_seconds)
         .method("collect_links", &NavRegion3D::collect_links_now)
+        .method("link_count", &NavRegion3D::link_count)
         .method("debug_surface", &NavRegion3D::debug_surface,
                 {Variant(0.06), Variant(0)}).args("lift", "mode")
         .method("debug_edges", &NavRegion3D::debug_edges, {Variant(0.08)})
@@ -488,6 +494,7 @@ static void register_nav_nodes() {
         .field("turn_speed", &NavAgent3D::turn_speed, "range:0,32")
         .method("set_target", &NavAgent3D::set_target).args("point")
         .method("stop", &NavAgent3D::stop)
+        .method("warp", &NavAgent3D::warp).args("to")
         .method("has_target", &NavAgent3D::has_target)
         .method("arrived", &NavAgent3D::arrived)
         .method("path_partial", &NavAgent3D::path_partial)
