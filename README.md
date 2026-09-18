@@ -403,7 +403,8 @@ src/platform/      window, input, clock (SDL2)
 src/rhi/           the render hardware interface
 src/rhi/gl/        OpenGL 4.5 backend
 src/rhi/vk/        Vulkan 1.3 backend
-src/render/        meshes, materials, textures, the renderer
+src/render/        meshes, the mesh builder, materials, textures,
+                   the renderer
 src/render/shaders/  one source per program, both backends
 src/scene/         node tree, cameras, lights, Portal3D, bodies
 src/anim/          skeletons, poses, clips, retargeting

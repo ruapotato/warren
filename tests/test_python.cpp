@@ -241,10 +241,22 @@ mf.root().add_child(n)
             }
         }
         // And a base must be declared before the class that names it.
+        //
+        // Matched with the bracket, because a class name is a prefix
+        // of other class names: looking for "class Mesh" finds
+        // "class MeshBuilder" first and then reports that Mesh comes
+        // before its own base, which is a fact about this search and
+        // not about the file.
+        auto declared_at = [&](const std::string &name) {
+            size_t at = stubs.find("\nclass " + name + "(");
+            if (at == std::string::npos)
+                at = stubs.find("\nclass " + name + ":");
+            return at;
+        };
         for (ClassInfo *ci : ClassDB::all()) {
             if (!ci->base) continue;
-            const size_t self_at = stubs.find("\nclass " + ci->name);
-            const size_t base_at = stubs.find("\nclass " + ci->base->name);
+            const size_t self_at = declared_at(ci->name);
+            const size_t base_at = declared_at(ci->base->name);
             g_checks++;
             if (self_at == std::string::npos || base_at == std::string::npos ||
                 base_at >= self_at) {
@@ -288,14 +300,20 @@ root.add_child(region)
     check(region != nullptr, "and is a real node in the tree");
 
     if (region) {
-        // The floor, from C++, because primitive meshes are not
-        // script-reachable yet. The region does not care where its
-        // geometry came from.
-        MeshInstance3D *floor = new MeshInstance3D();
-        floor->set_name("Floor");
-        floor->mesh = Mesh::box(Vec3(16.0f, 0.4f, 16.0f));
-        floor->set_position(Vec3(0.0f, -0.2f, 0.0f));
-        region->add_child(floor);
+        // The level, built in the script. A game that lays its town
+        // out from a plan needs to make geometry, not just place
+        // meshes somebody else made.
+        check(Python::run_string(R"PY(
+import warren as mf
+region = mf.root().get_node("Nav")
+b = mf.MeshBuilder()
+b.add_room(mf.AABB(mf.Vec3(-8, -0.4, -8), mf.Vec3(8, 0, 8)), 3.0, 0.3)
+floor = mf.MeshInstance3D()
+floor.name = "Level"
+floor.mesh = b.build()
+region.add_child(floor)
+)PY"),
+              "a script builds the level geometry itself");
 
         check(Python::run_string(R"PY(
 import warren as mf
@@ -309,6 +327,19 @@ agent.position = mf.Vec3(-5, 0, -5)
 region.add_child(agent)
 )PY"),
               "and an agent is put in it, configured by property");
+
+        // The room is walled, so the walk below is inside a box the
+        // script built -- which also checks the walls are walls.
+        check(Python::run_string(R"PY(
+import warren as mf
+b = mf.MeshBuilder()
+b.add_box(mf.Vec3(0, 1, 0), mf.Vec3(2, 2, 2))
+b.add_wall(mf.Vec3(0, 0, 0), mf.Vec3(4, 0, 0), 3.0, 0.2)
+m = b.build()
+assert m.triangle_count == 24, "two boxes is twenty-four triangles"
+assert abs(m.bounds.min.y) < 1e-4, "and the wall stands on the ground"
+)PY"),
+              "and the builder's own numbers come back to the script");
 
         auto frame = [&] {
             tree.physics_tick(1.0f / 60.0f);
