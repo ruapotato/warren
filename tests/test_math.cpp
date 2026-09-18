@@ -469,6 +469,91 @@ static void test_frustum_planes() {
     }
 }
 
+// ------------------------------------------------ frustum slice corners
+//
+// What a shadow cascade is fitted to. Two properties matter and both
+// are easy to get subtly wrong: the corners must actually be the
+// frustum at those two distances, and -- the one that matters for
+// this engine -- they must NOT move when an oblique near plane is cut
+// into the projection. A portal view is the same cone of directions
+// as the camera it was warped from; only the near clip changed, and a
+// cascade fitted to it must not lurch every time the player's angle
+// to a portal changes.
+static void test_slice_corners() {
+    section("frustum slices");
+
+    const Projection p = Projection::perspective(deg2rad(60.0f), 16.0f / 9.0f,
+                                                 0.1f, 500.0f);
+    Vec3 c[8];
+    p.slice_corners(10.0f, 40.0f, c);
+
+    // The near face first, then the far one, each at -z.
+    for (int i = 0; i < 4; i++) near_check(c[i].z, -10.0f, 1e-4f, "near face at -z_near");
+    for (int i = 4; i < 8; i++) near_check(c[i].z, -40.0f, 1e-4f, "far face at -z_far");
+
+    // Ordered (-x,-y), (+x,-y), (+x,+y), (-x,+y) on each face.
+    for (int f = 0; f < 2; f++) {
+        const Vec3 *q = c + f * 4;
+        check(q[0].x < 0 && q[0].y < 0, "corner 0 is lower left");
+        check(q[1].x > 0 && q[1].y < 0, "corner 1 is lower right");
+        check(q[2].x > 0 && q[2].y > 0, "corner 2 is upper right");
+        check(q[3].x < 0 && q[3].y > 0, "corner 3 is upper left");
+    }
+
+    // A perspective frustum widens in proportion to distance.
+    near_check((c[5].x - c[4].x) / (c[1].x - c[0].x), 4.0f, 1e-3f,
+               "the far face is four times as wide at four times the distance");
+
+    // Every corner is on the frustum's boundary: projecting it lands
+    // on an NDC edge.
+    for (int i = 0; i < 8; i++) {
+        const Vec3 ndc = p.project(c[i]);
+        near_check(std::fabs(ndc.x), 1.0f, 2e-3f, "corner is on the x edge");
+        near_check(std::fabs(ndc.y), 1.0f, 2e-3f, "corner is on the y edge");
+    }
+
+    // THE ONE THAT MATTERS. Cut an oblique near plane in and the
+    // slice is unchanged, because with_oblique_near only replaces the
+    // third row.
+    const Plane clip(Vec3(0.3f, 0.2f, -0.9f).normalized(), -6.0f);
+    const Projection oblique = p.with_oblique_near(clip.as_vec4());
+    Vec3 o[8];
+    oblique.slice_corners(10.0f, 40.0f, o);
+    for (int i = 0; i < 8; i++) {
+        near_check(o[i].x, c[i].x, 1e-3f, "oblique near does not move x");
+        near_check(o[i].y, c[i].y, 1e-3f, "oblique near does not move y");
+        near_check(o[i].z, c[i].z, 1e-3f, "oblique near does not move z");
+    }
+
+    // An orthographic projection has the same box at every distance.
+    const Projection ortho = Projection::orthographic(-3, 5, -2, 7, 0.0f, 100.0f);
+    Vec3 b[8];
+    ortho.slice_corners(5.0f, 50.0f, b);
+    near_check(b[0].x, -3.0f, 1e-3f, "ortho left");
+    near_check(b[1].x, 5.0f, 1e-3f, "ortho right");
+    near_check(b[0].y, -2.0f, 1e-3f, "ortho bottom");
+    near_check(b[3].y, 7.0f, 1e-3f, "ortho top");
+    for (int i = 0; i < 4; i++) {
+        near_check(b[i + 4].x, b[i].x, 1e-3f, "ortho does not widen with distance");
+        near_check(b[i + 4].y, b[i].y, 1e-3f, "ortho does not heighten either");
+    }
+
+    // A shadow cascade's projection is reverse-Z like every other:
+    // the near plane is 1 and the far plane is 0.
+    near_check(ortho.project(Vec3(0, 0, 0.0f)).z, 1.0f, 1e-5f,
+               "ortho near maps to 1 (reverse-Z)");
+    near_check(ortho.project(Vec3(0, 0, -100.0f)).z, 0.0f, 1e-5f,
+               "ortho far maps to 0 (reverse-Z)");
+
+    // And an off-axis frustum's slice is off-axis too: the extents do
+    // not have to straddle the axis.
+    const Projection off = Projection::frustum(-0.1f, 0.4f, -0.2f, 0.1f, 0.1f, 100.0f);
+    Vec3 d[8];
+    off.slice_corners(1.0f, 2.0f, d);
+    check(std::fabs(d[1].x) > std::fabs(d[0].x) * 3.0f,
+          "an off-axis frustum keeps its offset");
+}
+
 int main() {
     std::srand(20260918);
     test_vectors();
@@ -478,6 +563,7 @@ int main() {
     test_projection_basics();
     test_oblique();
     test_frustum_planes();
+    test_slice_corners();
     std::printf("\n%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

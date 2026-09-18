@@ -179,7 +179,17 @@ void build_room(Node *parent, const Vec3 &centre, const Vec3 &size,
     Vec3 h = size * 0.5f;
     add_mesh(parent, "floor", Mesh::box({size.x, t, size.z}), floor_mat,
              centre + Vec3(0, -h.y, 0));
-    add_mesh(parent, "ceiling", Mesh::box({size.x, t, size.z}), wall_mat,
+    // THE CEILING DOES NOT CAST. A sealed box lit by a directional
+    // sun is, correctly, pitch dark inside -- which is a true
+    // rendering of a room with no windows and a useless demo of a
+    // shadow system. Taking the ceiling out of the shadow pass is
+    // what a level designer does here: the sun becomes the interior's
+    // key light, and everything in the room still casts onto the
+    // floor. Nothing about the shadow system is special-cased; one
+    // material says it does not cast.
+    Ref<Material> ceiling_mat = wall_mat->duplicate();
+    ceiling_mat->cast_shadows = false;
+    add_mesh(parent, "ceiling", Mesh::box({size.x, t, size.z}), ceiling_mat,
              centre + Vec3(0, h.y, 0));
     add_mesh(parent, "wall_w", Mesh::box({t, size.y, size.z}), wall_mat,
              centre + Vec3(-h.x, 0, 0));
@@ -482,6 +492,7 @@ int main(int argc, char **argv) {
     cfg.window.backend = rhi::Backend::Vulkan;
     std::string demo = "portals";
     std::string stub_path;
+    std::string shadow_dump;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -521,6 +532,16 @@ int main(int argc, char **argv) {
             cfg.startup_script = next("");
         } else if (a == "--script-path") {
             cfg.script_paths.push_back(next("."));
+        } else if (a == "--no-shadows") {
+            cfg.render.shadows = false;
+        } else if (a == "--shadow-size") {
+            cfg.render.shadow_map_size = uint32_t(std::stoul(next("2048")));
+        } else if (a == "--shadow-distance") {
+            cfg.render.shadow_distance = std::stof(next("120"));
+        } else if (a == "--shadow-cascades") {
+            cfg.render.shadow_cascades = std::stoi(next("4"));
+        } else if (a == "--shadow-dump") {
+            shadow_dump = next("shadows.png");
         } else if (a == "--stubs") {
             stub_path = next("manifold.pyi");
         } else if (a == "--no-python") {
@@ -556,6 +577,11 @@ int main(int argc, char **argv) {
                 "  --script-path DIR     add a directory to sys.path\n"
                 "  --no-python           do not start the interpreter\n"
                 "  --stubs FILE          write manifold.pyi and exit\n"
+                "  --no-shadows          turn the shadow pass off\n"
+                "  --shadow-size N       shadow map resolution (default 2048)\n"
+                "  --shadow-distance M   how far shadows reach (default 120)\n"
+                "  --shadow-cascades N   1 to 4 (default 4)\n"
+                "  --shadow-dump FILE    save the shadow cascades as a png\n"
                 "  --plugins DIR         where to look for plugins\n"
                 "  --no-plugins          do not load any\n"
                 "  --threads N           worker threads (0 = cores - 1)\n"
@@ -611,6 +637,7 @@ int main(int argc, char **argv) {
     };
     if (!engine.init(cfg)) return 1;
     int rc = engine.run();
+    if (!shadow_dump.empty()) engine.renderer()->dump_shadow_map(shadow_dump);
     {
         if (Node *t = engine.tree()->root()->find_by_class("VoxelTerrain3D")) {
             MF_INFO("%s", t->callv("report", {}).to_string().c_str());

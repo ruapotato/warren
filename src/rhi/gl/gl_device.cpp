@@ -1216,15 +1216,34 @@ void GlCommandList::end_rendering() {
 // which glClipControl does not change. The engine's rectangles are
 // y-down from the top, so both are turned over here.
 void GlCommandList::set_viewport(const Viewport &vp) {
-    GLint y = GLint(float(target_height_) - vp.y - vp.height);
-    glViewport(GLint(vp.x), y, GLsizei(vp.width), GLsizei(vp.height));
+    // No y flip -- for the reason spelled out on set_scissor below.
+    // glClipControl(GL_UPPER_LEFT) has already moved the window
+    // origin to the top, so a rectangle stated from the top-left is
+    // already in the right coordinates.
+    glViewport(GLint(vp.x), GLint(vp.y), GLsizei(vp.width), GLsizei(vp.height));
     glDepthRange(double(vp.min_depth), double(vp.max_depth));
 }
 
 void GlCommandList::set_scissor(const Rect &r) {
     glEnable(GL_SCISSOR_TEST);
-    GLint y = GLint(int32_t(target_height_) - r.y - int32_t(r.height));
-    glScissor(r.x, y, GLsizei(r.width), GLsizei(r.height));
+    // NO Y FLIP, AND THAT IS BECAUSE OF glClipControl.
+    //
+    // The instinct is to flip: OpenGL measures window coordinates from
+    // the bottom and the RHI states its rectangles from the top. But
+    // this backend runs with glClipControl(GL_UPPER_LEFT), which moves
+    // the origin of the window coordinate system itself to the upper
+    // left -- so a rectangle already given from the top-left needs no
+    // conversion, and flipping it puts the scissor at (height - y -
+    // h), which is the reflection of where it belongs.
+    //
+    // Nothing catches this until a scissor is ASYMMETRIC IN Y. A
+    // full-screen scissor is its own reflection, and so is a viewport
+    // covering the whole target, so the bug sat behind every test the
+    // engine had until one scissored a portal to part of the screen
+    // -- and then sliced its contents off. tests/test_backend_parity
+    // now scissors an off-centre rectangle and reads back where the
+    // pixels landed.
+    glScissor(r.x, r.y, GLsizei(r.width), GLsizei(r.height));
 }
 
 void GlCommandList::bind_pipeline(PipelineH h) {

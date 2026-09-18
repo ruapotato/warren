@@ -105,20 +105,33 @@ int pick_cascade(float view_depth) {
     return 3;
 }
 
-float sample_shadow(vec3 world, vec3 n, float view_depth) {
+float sample_shadow(vec3 world, vec3 n, vec3 l, float view_depth) {
+    if (frame.cascade_texel[3] <= 0.0) return 1.0;   // no shadow pass ran
     int c = pick_cascade(view_depth);
-    // Normal-offset bias: move the lookup along the surface normal
-    // rather than along the light, which removes peter-panning at
-    // grazing angles without the acne that a constant depth bias
-    // trades it for. The offset grows with the cascade's texel size.
-    float texel_world = frame.cascade_splits[3] * (float(c) + 1.0) * 0.0015;
-    vec3 p = world + n * texel_world * 1.5;
+
+    // NORMAL-OFFSET BIAS. Move the lookup along the surface normal
+    // rather than pushing the recorded depth, which is what removes
+    // acne at grazing angles without the peter-panning a depth bias
+    // large enough to do the same job would cause. One texel of the
+    // cascade being sampled, widened as the light gets more oblique,
+    // because that is exactly how far a texel's worth of surface can
+    // slope away underneath the sample.
+    float n_dot_l = clamp(dot(n, l), 0.0, 1.0);
+    float slope = clamp(1.0 - n_dot_l, 0.0, 1.0);
+    vec3 p = world + n * frame.cascade_texel[c] * (1.0 + 2.0 * slope) * 1.4142;
 
     vec4 lc = frame.sun_view_proj[c] * vec4(p, 1.0);
+    if (lc.w <= 0.0) return 1.0;
     lc /= lc.w;
-    vec2 uv = lc.xy * 0.5 + 0.5;
+    // SAMPLING A RENDER TARGET NEEDS V FLIPPED -- see the same note in
+    // tonemap.glsl. The shadow map is a render target like any other:
+    // texel row 0 is the TOP of it on both backends, while ndc.y = +1
+    // is the top of the picture, so the two run opposite ways.
+    vec2 uv = vec2(lc.x, -lc.y) * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))))
         return 1.0;
+    // Outside the cascade's depth range there is nothing recorded.
+    if (lc.z <= 0.0 || lc.z >= 1.0) return 1.0;
 
     // 3x3 PCF. The comparison is GREATER_EQUAL because the whole engine
     // is reverse-Z, the shadow map included.
@@ -173,7 +186,7 @@ void main() {
     vec3 l = normalize(frame.sun_direction.xyz);
     float view_depth = -(view.view * vec4(v_world, 1.0)).z;
 
-    float shadow = sample_shadow(v_world, n, view_depth);
+    float shadow = sample_shadow(v_world, n, l, view_depth);
     vec3 lit = brdf(n, v, l, base.rgb, metallic, rough) *
                frame.sun_colour.rgb * frame.sun_colour.a * shadow;
 

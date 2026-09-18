@@ -207,6 +207,16 @@ struct VkBufferRes {
 struct VkTextureRes {
     VkImage image = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
+    // ATTACHMENT VIEWS FOR ONE MIP AND ONE LAYER.
+    //
+    // `view` covers the whole image, which is what a shader samples
+    // and what a single-layer attachment happens to need too. An
+    // attachment naming a specific layer -- a shadow cascade in an
+    // array, a cube face -- cannot use it: a render pass writes
+    // through a view, so the view has to be the slice. Made on first
+    // use and kept, because the set of slices an engine renders to is
+    // small and fixed.
+    std::unordered_map<uint64_t, VkImageView> slices;
     Allocation memory;
     TextureDesc desc;
     VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -430,6 +440,9 @@ private:
     bool frame_open_ = false;
     VkCommandListImpl *cmd_ = nullptr;
     DeviceCaps caps_;
+    // The view a render pass writes through for one mip and one
+    // layer; the whole-image view where that is the same thing.
+    VkImageView attachment_view(VkTextureRes &t, int32_t layer, uint32_t mip);
     friend class VkCommandListImpl;
 };
 
@@ -1148,13 +1161,47 @@ void VkDeviceImpl::destroy(TextureH h) {
     if (!t || t->is_swapchain) return;
     VkImage img = t->owns_image ? t->image : VK_NULL_HANDLE;
     VkImageView view = t->view;
+    std::vector<VkImageView> slices;
+    for (const auto &kv : t->slices) slices.push_back(kv.second);
     Allocation mem = t->memory;
-    frames_[frame_index_].deletions.push_back([this, img, view, mem]() {
+    frames_[frame_index_].deletions.push_back([this, img, view, slices, mem]() {
+        for (VkImageView v : slices) vkDestroyImageView(device_, v, nullptr);
         if (view) vkDestroyImageView(device_, view, nullptr);
         if (img) vkDestroyImage(device_, img, nullptr);
         if (mem.valid()) alloc_.free(mem);
     });
     textures.destroy(h);
+}
+
+VkImageView VkDeviceImpl::attachment_view(VkTextureRes &t, int32_t layer,
+                                          uint32_t mip) {
+    // The whole-image view already is the right one for a plain 2D
+    // texture attached at mip zero, which is nearly every attachment.
+    if (layer < 0 && mip == 0 && t.desc.layers <= 1) return t.view;
+    const uint64_t key = (uint64_t(uint32_t(layer)) << 32) | mip;
+    auto it = t.slices.find(key);
+    if (it != t.slices.end()) return it->second;
+
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = t.image;
+    // A single layer is attached as a plain 2D view even when the
+    // image is an array; a whole array is attached as an array view,
+    // which is what a layered render pass would want.
+    vi.viewType = layer >= 0 ? VK_IMAGE_VIEW_TYPE_2D
+                  : t.desc.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                      : VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = vk_format(t.desc.format);
+    vi.subresourceRange = {aspect_of(t.desc.format), mip, 1,
+                           layer >= 0 ? uint32_t(layer) : 0,
+                           layer >= 0 ? 1u : t.desc.layers};
+    VkImageView v = VK_NULL_HANDLE;
+    if (vkCreateImageView(device_, &vi, nullptr, &v) != VK_SUCCESS) {
+        MF_ERROR("vk: could not make an attachment view for layer %d mip %u",
+                 layer, mip);
+        return t.view;
+    }
+    t.slices[key] = v;
+    return v;
 }
 
 void VkDeviceImpl::write_texture(TextureH h, const void *data, uint64_t size,
@@ -1984,7 +2031,7 @@ void VkCommandListImpl::begin_rendering(const RenderingInfo &info) {
         if (!t) continue;
         dev_->transition(cb, *t, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         VkRenderingAttachmentInfo a{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-        a.imageView = t->view;
+        a.imageView = dev_->attachment_view(*t, c.layer, c.mip);
         a.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         a.loadOp = c.load == LoadOp::Clear    ? VK_ATTACHMENT_LOAD_OP_CLEAR
                    : c.load == LoadOp::Load   ? VK_ATTACHMENT_LOAD_OP_LOAD
@@ -1997,7 +2044,7 @@ void VkCommandListImpl::begin_rendering(const RenderingInfo &info) {
             if (rt) {
                 dev_->transition(cb, *rt, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
                 a.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
-                a.resolveImageView = rt->view;
+                a.resolveImageView = dev_->attachment_view(*rt, c.layer, c.mip);
                 a.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             }
         }
@@ -2012,7 +2059,8 @@ void VkCommandListImpl::begin_rendering(const RenderingInfo &info) {
         if (t) {
             dev_->transition(cb, *t,
                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-            depth.imageView = t->view;
+            depth.imageView = dev_->attachment_view(*t, info.depth.layer,
+                                                    info.depth.mip);
             depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             depth.loadOp = info.depth.depth_load == LoadOp::Clear
                                ? VK_ATTACHMENT_LOAD_OP_CLEAR

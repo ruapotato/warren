@@ -32,6 +32,7 @@ layout(set = SET_FRAME, binding = B_FRAME(0), std140) uniform FrameData {
     vec4 fog_params;        // start, end, height falloff, unused
     mat4 sun_view_proj[4];  // shadow cascades
     vec4 cascade_splits;    // view-space distance at which each ends
+    vec4 cascade_texel;     // world size of one shadow texel, per cascade
     vec4 screen;            // width, height, 1/width, 1/height
 } frame;
 

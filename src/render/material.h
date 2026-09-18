@@ -78,6 +78,12 @@ public:
     static Ref<Material> make(const Color &albedo, float roughness = 0.8f,
                               float metallic = 0.0f);
 
+    // A copy of everything above, with its own GPU resources -- so a
+    // variant of a shared material (the same wall that does not cast
+    // a shadow, say) does not edit the original out from under every
+    // other user of it.
+    Ref<Material> duplicate() const;
+
 private:
     rhi::Device *device_ = nullptr;
     rhi::BufferH ubo_;

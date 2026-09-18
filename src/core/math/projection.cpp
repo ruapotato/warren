@@ -143,19 +143,48 @@ Projection Projection::with_oblique_near(const Vec4 &clip_plane) const {
 
 void Projection::get_extents_at(float z, float *left, float *right,
                                 float *bottom, float *top) const {
-    // Undo the projection at the two NDC edges. Works for any frustum,
-    // symmetric or not, and for orthographic.
-    Projection inv = inverse();
-    // Sampled at the NEAR plane (z_ndc = 1 under reverse-Z), which is
-    // always finite even when the far plane is not.
-    Vec3 a = inv.xform(Vec4(-1, -1, 1, 1)).homogenized();
-    Vec3 b = inv.xform(Vec4(1, 1, 1, 1)).homogenized();
-    float za = std::fabs(a.z) > EPS ? a.z : -1.0f;
-    float s = is_orthographic() ? 1.0f : z / -za;
-    if (left) *left = a.x * s;
-    if (right) *right = b.x * s;
-    if (bottom) *bottom = a.y * s;
-    if (top) *top = b.y * s;
+    // SOLVED FROM ROWS 0, 1 AND W -- NOT BY INVERTING THE MATRIX.
+    //
+    // Inverting and unprojecting an NDC corner is the obvious way and
+    // it is wrong here, because the inverse mixes in the third row --
+    // the one with_oblique_near replaces. A portal view has the same
+    // frustum as the camera it was warped from, with a tilted near
+    // clip; asking that projection how wide it is at 40 metres must
+    // give the camera's answer, or a shadow cascade fitted to it
+    // lurches every time the player's angle to the portal changes.
+    //
+    // The x row says   ndc_x * w = m00*x + m20*(-z) + m30
+    // and the w row    w         = m23*(-z) + m33
+    // (the engine never builds a projection with m03 or m13 set), so
+    //     x = (ndc_x * w - m30 + m20*z) / m00
+    // which reads only rows 0, 1 and w, all of which the oblique cut
+    // leaves alone. It covers perspective, off-axis and orthographic
+    // without a special case: for an orthographic one m23 is 0, so w
+    // is 1 and the answer does not depend on z, which is exactly
+    // right.
+    const float w = -m[2][3] * z + m[3][3];
+    const float mx = std::fabs(m[0][0]) > EPS ? m[0][0] : 1.0f;
+    const float my = std::fabs(m[1][1]) > EPS ? m[1][1] : 1.0f;
+    auto x_at = [&](float ndc) { return (ndc * w - m[3][0] + m[2][0] * z) / mx; };
+    auto y_at = [&](float ndc) { return (ndc * w - m[3][1] + m[2][1] * z) / my; };
+    if (left) *left = x_at(-1.0f);
+    if (right) *right = x_at(1.0f);
+    if (bottom) *bottom = y_at(-1.0f);
+    if (top) *top = y_at(1.0f);
+}
+
+void Projection::slice_corners(float z_near, float z_far, Vec3 out[8]) const {
+    const float z[2] = {z_near, z_far};
+    for (int i = 0; i < 2; i++) {
+        float l, r, b, t;
+        get_extents_at(z[i], &l, &r, &b, &t);
+        // View space looks down -Z, so a distance of z is at -z.
+        const float depth = -z[i];
+        out[i * 4 + 0] = Vec3(l, b, depth);
+        out[i * 4 + 1] = Vec3(r, b, depth);
+        out[i * 4 + 2] = Vec3(r, t, depth);
+        out[i * 4 + 3] = Vec3(l, t, depth);
+    }
 }
 
 float Projection::get_aspect() const {

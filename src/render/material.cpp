@@ -130,4 +130,34 @@ static void register_material_class() {
 }
 MF_REGISTER(register_material_class)
 
+Ref<Material> Material::duplicate() const {
+    Ref<Material> m = new Material();
+    m->albedo = albedo;
+    m->metallic = metallic;
+    m->roughness = roughness;
+    m->emissive = emissive;
+    m->emissive_strength = emissive_strength;
+    m->normal_scale = normal_scale;
+    m->occlusion_strength = occlusion_strength;
+    m->uv_scale = uv_scale;
+    m->uv_offset = uv_offset;
+    // The textures are shared, not copied: a texture is immutable
+    // once uploaded, and duplicating one to change a material flag
+    // would be a megabyte of waste per variant.
+    m->albedo_map = albedo_map;
+    m->normal_map = normal_map;
+    m->orm_map = orm_map;
+    m->emissive_map = emissive_map;
+    m->pass = pass;
+    m->alpha_cutoff = alpha_cutoff;
+    m->unlit = unlit;
+    m->double_sided = double_sided;
+    m->cast_shadows = cast_shadows;
+    m->shader = shader;
+    // Deliberately NOT copied: the uniform buffer and bind group.
+    // They belong to the original, and prepare() makes this one its
+    // own on first use.
+    return m;
+}
+
 }  // namespace mf

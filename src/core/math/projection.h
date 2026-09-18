@@ -123,6 +123,16 @@ struct Projection {
     // The near rectangle, in view space, at distance `z`.
     void get_extents_at(float z, float *left, float *right, float *bottom,
                         float *top) const;
+    // THE EIGHT CORNERS OF A DEPTH SLICE, in view space, near face
+    // first, each face ordered (-x,-y), (+x,-y), (+x,+y), (-x,+y).
+    //
+    // This is what a shadow cascade is fitted to. It reads the x and y
+    // extents rather than unprojecting the depth range, which matters
+    // because an OBLIQUE near plane changes only the projection's
+    // third row: the slice a portal view covers is still the ordinary
+    // frustum of the camera it was warped from, and fitting a cascade
+    // to it must not depend on where the oblique cut happens to fall.
+    void slice_corners(float z_near, float z_far, Vec3 out[8]) const;
 
     // --- using one ------------------------------------------------------
 

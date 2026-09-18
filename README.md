@@ -78,6 +78,16 @@ SPIR-V with `glslangValidator` for Vulkan and cross-compiled from that
 same SPIR-V to GLSL 460 with `spirv-cross` for OpenGL. The two backends
 cannot drift, because one is built from the other's output.
 
+**Shadow cascades know about portals.** Before anything is drawn the
+renderer walks the portal recursion without drawing it, and fits the
+cascades to the union of every view the frame will render. An engine
+that fits them to the main camera leaves everything seen through a
+portal either unshadowed or shadowed by a cascade meant for somewhere
+else — and in this engine that is most of what the player is looking
+at. The light is uploaded through the same uniform block a camera
+uses, so the matrix that rendered the map and the matrix that samples
+it cannot drift apart.
+
 **Physics knows about portals.** A swept capsule that crosses an
 aperture continues out of the far side with its velocity rotated and
 its length remaining — `PhysicsWorld::trace` returns the accumulated
@@ -200,7 +210,7 @@ src/app/           Engine: the loop that ties it together
 plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
-                   sequence, portal traversal, the Python bridge
+                   sequence, portal traversal, shadows, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -224,7 +234,7 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: shadows (the cascade plumbing is in, the pass is not), LOD for
-the terrain, audio, networking, and an editor.
+Not yet: LOD for the terrain, image-based lighting, point and spot
+lights, audio, networking, and an editor.
 
 See `docs/conventions.md` before touching the renderer.

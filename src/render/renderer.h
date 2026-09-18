@@ -20,6 +20,7 @@
 // a twentieth of a frame, not a frame.
 #pragma once
 
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +47,31 @@ struct RenderSettings {
     // Skip a portal covering less than this fraction of the screen.
     float portal_min_coverage = 0.0002f;
 
+    // SHADOWS.
+    //
+    // Cascades are fitted to every view the frame will draw, portal
+    // views included -- see Renderer::fit_cascades. An engine that
+    // fits them to the main camera alone leaves everything seen
+    // through a portal either unshadowed or shadowed by a cascade
+    // meant for somewhere else, and in this engine that is most of
+    // the interesting geometry.
+    bool shadows = true;
+    int shadow_cascades = 4;            // 1..4; the shader indexes four
+    uint32_t shadow_map_size = 2048;    // per cascade, square
+    float shadow_distance = 120.0f;     // beyond this, nothing is shadowed
+    // 0 is an even split by distance, 1 is logarithmic. Logarithmic is
+    // right for the texel density and wrong for the far cascades'
+    // size, so the practical answer is between the two.
+    float shadow_split_lambda = 0.75f;
+    // Slope-scaled, because acne is worst where the surface is nearly
+    // edge-on to the light and a constant bias there is either useless
+    // or large enough to detach the shadow.
+    float shadow_bias_constant = 1.25f;
+    float shadow_bias_slope = 2.75f;
+    // How far behind the cascade's slice the light starts drawing, so
+    // a caster outside the view still casts into it.
+    float shadow_caster_extrusion = 60.0f;
+
     int msaa = 4;
     float exposure = 1.0f;
     Color clear_colour = Color(0.05f, 0.06f, 0.08f, 1.0f);
@@ -60,6 +86,8 @@ struct RenderStats {
     uint32_t portals_culled = 0;
     uint32_t max_depth_reached = 0;
     uint32_t visible_meshes = 0;
+    uint32_t shadow_draws = 0;
+    uint32_t cascades = 0;
     double cpu_ms = 0.0;
 };
 
@@ -91,6 +119,13 @@ public:
     float fog_density = 0.004f;
     float fog_height_falloff = 0.0f;
 
+    // The cascade maps, side by side, as 8-bit grey: white is close
+    // to the light and black is the far plane (reverse-Z), so an
+    // empty cascade is black. Worth having permanently -- a shadow
+    // bug is otherwise diagnosed by staring at the lit result and
+    // guessing which of the fit, the pass and the lookup is wrong.
+    bool dump_shadow_map(const std::string &path) const;
+
     rhi::Device *device() const { return device_; }
     Material *default_material() const { return default_material_.get(); }
 
@@ -120,6 +155,17 @@ private:
         uint64_t key = 0;
     };
 
+    // Walks the portal recursion without drawing anything, so the
+    // shadow cascades can be fitted to every view the frame is about
+    // to render rather than only to the camera's.
+    void gather_views(const View &v, std::vector<View> *out) const;
+    // The one copy of "does this portal recurse from here, and with
+    // what camera" -- used by the gather walk and by the draw.
+    bool portal_child(const View &v, size_t portal_index, View *out,
+                      rhi::Rect *scissor) const;
+    void fit_cascades(const std::vector<View> &views);
+    void shadow_pass(rhi::CommandList *cmd);
+
     bool create_targets(uint32_t w, uint32_t h);
     void destroy_targets();
     bool create_pipelines();
@@ -146,10 +192,23 @@ private:
     rhi::TextureH colour_resolve_;
     rhi::TextureH depth_stencil_;
     rhi::TextureH shadow_map_;
+    // A one-texel stand-in bound in place of the real map while the
+    // real map is the thing being rendered into. Sampling a texture
+    // that is currently a depth attachment is a feedback loop; binding
+    // nothing at all is a validation error. This is neither.
+    rhi::TextureH shadow_dummy_;
+    uint32_t shadow_size_ = 0;
+    int cascade_count_ = 0;
+    Projection cascade_view_proj_[4];
+    Transform3D cascade_camera_[4];
+    Projection cascade_projection_[4];
+    Vec4 cascade_splits_{0, 0, 0, 0};
+    Vec4 cascade_texel_{0, 0, 0, 0};
 
     rhi::BindGroupLayoutH frame_layout_, view_layout_, material_layout_,
         portal_layout_, tonemap_layout_;
     rhi::BindGroupH frame_group_, view_group_, portal_group_, tonemap_group_;
+    rhi::BindGroupH frame_group_no_shadow_;
     rhi::BufferH frame_ubo_, view_ubo_, portal_ubo_;
     uint32_t view_stride_ = 0, portal_stride_ = 0;
     uint32_t view_cursor_ = 0, portal_cursor_ = 0;
@@ -164,6 +223,7 @@ private:
         rhi::PipelineH portal_restore;
         rhi::PipelineH portal_rim;
         rhi::PipelineH tonemap;
+        rhi::PipelineH shadow, shadow_ds;
     } pipe_;
 
     Ref<Mesh> portal_quad_;

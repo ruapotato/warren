@@ -10,6 +10,7 @@
 //
 // It runs headless on a hidden window, so it belongs in CI. On a
 // machine with no GPU at all, llvmpipe answers for both.
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -94,6 +95,18 @@ Scene build_quad() {
                   {{-0.05f, -0.85f, -1.0f}, Color(1, 1, 1, 1)},
                   {{-0.05f, -0.15f, -1.0f}, Color(1, 1, 1, 1)},
                   {{-0.85f, -0.15f, -1.0f}, Color(1, 1, 1, 1)}};
+    s.indices = {0, 1, 2, 0, 2, 3};
+    return s;
+}
+
+// EVERY NDC CORNER, so a scissor can be shown to keep exactly one of
+// them. Drawn last, over the top of everything.
+Scene build_full_quad() {
+    Scene s;
+    s.vertices = {{{-1.0f, -1.0f, -1.0f}, Color(1, 1, 1, 1)},
+                  {{1.0f, -1.0f, -1.0f}, Color(1, 1, 1, 1)},
+                  {{1.0f, 1.0f, -1.0f}, Color(1, 1, 1, 1)},
+                  {{-1.0f, 1.0f, -1.0f}, Color(1, 1, 1, 1)}};
     s.indices = {0, 1, 2, 0, 2, 3};
     return s;
 }
@@ -274,9 +287,19 @@ Rendered render_with(Backend backend, bool validation) {
     md.name = "parity stencil test";
     PipelineH stencil_read = dev->create_pipeline(md);
 
+    // No depth, no stencil, no blend: whatever it covers, it owns.
+    PipelineDesc fd = pd;
+    fd.depth_stencil.depth_test = false;
+    fd.depth_stencil.depth_write = false;
+    fd.depth_stencil.stencil_test = false;
+    fd.blend = {BlendState::opaque()};
+    fd.name = "parity scissor probe";
+    PipelineH scissor_probe = dev->create_pipeline(fd);
+
     // --- geometry
     Scene scene = build_scene();
     Scene quad = build_quad();
+    Scene full = build_full_quad();
     BufferDesc vbd;
     vbd.size = scene.vertices.size() * sizeof(Vertex);
     vbd.usage = BufferUsage::Vertex;
@@ -294,6 +317,13 @@ Rendered render_with(Backend backend, bool validation) {
     ibd.size = quad.indices.size() * sizeof(uint32_t);
     ibd.name = "quad indices";
     BufferH quad_ib = dev->create_buffer(ibd, quad.indices.data());
+
+    vbd.size = full.vertices.size() * sizeof(Vertex);
+    vbd.name = "full quad vertices";
+    BufferH full_vb = dev->create_buffer(vbd, full.vertices.data());
+    ibd.size = full.indices.size() * sizeof(uint32_t);
+    ibd.name = "full quad indices";
+    BufferH full_ib = dev->create_buffer(ibd, full.indices.data());
 
     // --- the frame
     CommandList *cmd = dev->begin_frame();
@@ -350,6 +380,59 @@ Rendered render_with(Backend backend, bool validation) {
     cmd->bind_vertex_buffer(0, quad_vb);
     cmd->bind_index_buffer(quad_ib, IndexType::U32);
     cmd->draw_indexed(uint32_t(quad.indices.size()));
+
+    // --- THE SCISSOR, which is a convention all of its own.
+    //
+    // A full-screen quad in magenta, scissored to a rectangle that is
+    // asymmetric in BOTH axes: x 16..80 and y 32..96 measured from the
+    // TOP-LEFT, which is the one convention the RHI states. A backend
+    // that measures y from the bottom, or that measures it from the
+    // wrong height, puts the magenta somewhere else -- and since the
+    // full-screen viewport is symmetric in y, nothing else in this
+    // test would ever catch it. The portal renderer scissors every
+    // recursion level, so getting this wrong shows up as a portal
+    // whose contents are sliced off.
+    cmd->push_debug_group("scissor");
+    cmd->set_scissor({16, 32, 64, 64});
+    pu.tint = Vec4(1, 0, 1, 1);
+    cmd->bind_pipeline(scissor_probe);
+    cmd->bind_group(0, frame_group);
+    cmd->bind_group(1, view_group);
+    cmd->push_constants(&pu, sizeof(pu));
+    cmd->bind_vertex_buffer(0, full_vb);
+    cmd->bind_index_buffer(full_ib, IndexType::U32);
+    cmd->draw_indexed(uint32_t(full.indices.size()));
+    cmd->set_scissor({0, 0, kWidth, kHeight});
+    cmd->pop_debug_group();
+
+    // --- THE VIEWPORT, which has exactly the same trap.
+    //
+    // Every viewport the renderer sets today covers the whole target,
+    // and a full-target viewport is its own reflection -- so a
+    // backend that measures viewport y from the wrong end looks
+    // perfect right up until something renders to part of a target.
+    // Same shape of check: an off-centre rectangle, and the whole
+    // NDC square squeezed into it.
+    cmd->push_debug_group("viewport");
+    Viewport sub;
+    sub.x = 160;
+    sub.y = 16;
+    sub.width = 48;
+    sub.height = 32;
+    cmd->set_viewport(sub);
+    pu.tint = Vec4(0, 0, 1, 1);
+    cmd->bind_pipeline(scissor_probe);
+    cmd->bind_group(0, frame_group);
+    cmd->bind_group(1, view_group);
+    cmd->push_constants(&pu, sizeof(pu));
+    cmd->bind_vertex_buffer(0, full_vb);
+    cmd->bind_index_buffer(full_ib, IndexType::U32);
+    cmd->draw_indexed(uint32_t(full.indices.size()));
+    Viewport whole;
+    whole.width = float(kWidth);
+    whole.height = float(kHeight);
+    cmd->set_viewport(whole);
+    cmd->pop_debug_group();
 
     cmd->pop_debug_group();
     cmd->end_rendering();
@@ -453,6 +536,65 @@ int check_conventions(const Rendered &r, const char *who) {
             if (c.g > 0.35f && c.b > 0.3f && c.r < 0.45f) any_teal = true;
         }
     if (!any_teal) fail("stencil masking drew nothing -- portals cannot work");
+
+    // The magenta probe must be exactly the scissor rectangle: x
+    // 16..79, y 32..95, top-left origin.
+    uint32_t mx0 = kWidth, my0 = kHeight, mx1 = 0, my1 = 0;
+    size_t magenta = 0;
+    for (uint32_t y = 0; y < kHeight; y++)
+        for (uint32_t x = 0; x < kWidth; x++) {
+            Color c = at(x, y);
+            if (c.r > 0.85f && c.b > 0.85f && c.g < 0.15f) {
+                magenta++;
+                mx0 = std::min(mx0, x);
+                my0 = std::min(my0, y);
+                mx1 = std::max(mx1, x);
+                my1 = std::max(my1, y);
+            }
+        }
+    if (magenta != 64 * 64) {
+        char b[160];
+        std::snprintf(b, sizeof(b),
+                      "the scissor kept %zu pixels, not %d", magenta, 64 * 64);
+        fail(b);
+    }
+    if (magenta && (mx0 != 16 || my0 != 32 || mx1 != 79 || my1 != 95)) {
+        char b[200];
+        std::snprintf(b, sizeof(b),
+                      "the scissor landed at x %u..%u y %u..%u, not x 16..79 "
+                      "y 32..95 -- y is measured from the TOP",
+                      mx0, mx1, my0, my1);
+        fail(b);
+    }
+
+    // And the blue probe must be exactly the viewport rectangle.
+    uint32_t bx0 = kWidth, by0 = kHeight, bx1 = 0, by1 = 0;
+    size_t blue = 0;
+    for (uint32_t y = 0; y < kHeight; y++)
+        for (uint32_t x = 0; x < kWidth; x++) {
+            Color c = at(x, y);
+            if (c.b > 0.85f && c.r < 0.15f && c.g < 0.15f) {
+                blue++;
+                bx0 = std::min(bx0, x);
+                by0 = std::min(by0, y);
+                bx1 = std::max(bx1, x);
+                by1 = std::max(by1, y);
+            }
+        }
+    if (blue != 48 * 32) {
+        char b[160];
+        std::snprintf(b, sizeof(b), "the viewport covered %zu pixels, not %d",
+                      blue, 48 * 32);
+        fail(b);
+    }
+    if (blue && (bx0 != 160 || by0 != 16 || bx1 != 207 || by1 != 47)) {
+        char b[200];
+        std::snprintf(b, sizeof(b),
+                      "the viewport landed at x %u..%u y %u..%u, not x 160..207 "
+                      "y 16..47 -- y is measured from the TOP",
+                      bx0, bx1, by0, by1);
+        fail(b);
+    }
 
     return failures;
 }

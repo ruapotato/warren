@@ -1,5 +1,7 @@
 #include "renderer.h"
 
+#include "stb/stb_image_write.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -23,6 +25,7 @@ struct FrameUniforms {
     Vec4 fog_params;
     Projection sun_view_proj[4];
     Vec4 cascade_splits;
+    Vec4 cascade_texel;
     Vec4 screen;
 };
 
@@ -132,17 +135,30 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     bd.name = "portal ring";
     portal_ubo_ = dev->create_buffer(bd);
 
-    // A one-pixel "everything is lit" shadow map until the shadow pass
-    // exists. Binding nothing would be a validation error on Vulkan and
-    // undefined sampling on OpenGL.
+    // THE SHADOW MAP IS ONE ARRAY, ONE LAYER PER CASCADE. An atlas in
+    // a single 2D texture would work too, but then every filter tap
+    // has to be clamped inside its tile by hand or a cascade bleeds
+    // into its neighbour at the seam; with an array the hardware's own
+    // clamp is per layer and the bleed cannot happen.
+    shadow_size_ = std::clamp(settings_.shadow_map_size, 256u, 8192u);
     TextureDesc sd;
-    sd.width = sd.height = 1;
+    sd.width = sd.height = shadow_size_;
     sd.layers = 4;
     sd.dim = TextureDim::Tex2DArray;
     sd.format = Format::D32F;
-    sd.usage = TextureUsage::Sampled | TextureUsage::DepthTarget;
+    // TransferSrc so dump_shadow_map can read it back; a debug path
+    // nobody can run is a debug path nobody has.
+    sd.usage = TextureUsage::Sampled | TextureUsage::DepthTarget |
+               TextureUsage::TransferSrc;
     sd.name = "shadow map";
     shadow_map_ = dev->create_texture(sd);
+
+    // A one-texel stand-in, bound while the real map is the depth
+    // attachment. See the note on the member.
+    TextureDesc dd = sd;
+    dd.width = dd.height = 1;
+    dd.name = "shadow map (stand-in)";
+    shadow_dummy_ = dev->create_texture(dd);
 
     BindGroupDesc fg;
     fg.layout = frame_layout_;
@@ -159,6 +175,12 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         fg.entries.push_back(t);
     }
     frame_group_ = dev->create_bind_group(fg);
+
+    // The same frame data with the stand-in in place of the real map,
+    // for the pass that renders the real map.
+    fg.entries[1].texture = shadow_dummy_;
+    fg.name = "frame (shadow pass)";
+    frame_group_no_shadow_ = dev->create_bind_group(fg);
 
     BindGroupDesc vg;
     vg.layout = view_layout_;
@@ -210,6 +232,7 @@ void Renderer::shutdown() {
     for (BufferH *b : {&frame_ubo_, &view_ubo_, &portal_ubo_})
         if (b->valid()) device_->destroy(*b);
     if (shadow_map_.valid()) device_->destroy(shadow_map_);
+    if (shadow_dummy_.valid()) device_->destroy(shadow_dummy_);
     for (BindGroupLayoutH *l : {&frame_layout_, &view_layout_, &material_layout_,
                                 &portal_layout_, &tonemap_layout_})
         if (l->valid()) device_->destroy(*l);
@@ -305,6 +328,8 @@ bool Renderer::create_pipelines() {
     ShaderH portal_fs = shader("portal", ShaderStage::Fragment);
     ShaderH full_vs = shader("fullscreen", ShaderStage::Vertex);
     ShaderH full_fs = shader("fullscreen", ShaderStage::Fragment);
+    ShaderH shadow_vs = shader("shadow", ShaderStage::Vertex);
+    ShaderH shadow_fs = shader("shadow", ShaderStage::Fragment);
     if (!mesh_vs.valid() || !portal_vs.valid() || !full_vs.valid()) return false;
 
     // EVERY PIPELINE TESTS THE STENCIL. There is no "outside a portal"
@@ -331,6 +356,57 @@ bool Renderer::create_pipelines() {
     base.depth_stencil.front = test_equal;
     base.depth_stencil.back = test_equal;
     base.blend = {BlendState::opaque()};
+
+    // ------------------------------------------------------- shadows
+    //
+    // No colour attachment, no stencil, no MSAA, and a depth format
+    // without a stencil aspect: a shadow map is depth and nothing
+    // else. The bias is slope-scaled -- see the note in
+    // RenderSettings.
+    if (shadow_vs.valid() && shadow_fs.valid()) {
+        PipelineDesc sp;
+        sp.vertex = shadow_vs;
+        sp.fragment = shadow_fs;
+        sp.vertex_layout = standard_vertex_layout();
+        sp.colour_formats = {};
+        sp.depth_format = Format::D32F;
+        sp.samples = 1;
+        sp.bind_group_layouts = {frame_layout_, view_layout_, material_layout_};
+        sp.push_constant_size = sizeof(PushUniforms);
+        sp.depth_stencil.depth_test = true;
+        sp.depth_stencil.depth_write = true;
+        sp.depth_stencil.stencil_test = false;
+        sp.depth_stencil.depth_bias_enable = true;
+        // Reverse-Z inverts which way "further from the light" is, so
+        // the bias that pushes a caster away has to invert with it.
+        sp.depth_stencil.depth_bias_constant = -settings_.shadow_bias_constant;
+        sp.depth_stencil.depth_bias_slope = -settings_.shadow_bias_slope;
+        // BACK FACES CULLED, the same as the camera pass, and that is
+        // not the obvious choice.
+        //
+        // The usual advice is to cull FRONT faces when rendering a
+        // shadow map: recording the far side of each object puts the
+        // stored depth behind the surface being lit, and the acne
+        // goes away without any bias at all. It works beautifully on
+        // closed, outward-facing, watertight geometry -- and a room
+        // is none of those. A room is a box turned inside out, so
+        // every one of its faces is wound the other way, and culling
+        // front faces records the CEILING across the room's whole
+        // footprint. Every floor pixel then sits metres behind the
+        // recorded depth and the entire room goes black; the only
+        // lit surface left is the ceiling itself.
+        //
+        // So: cull the same faces the camera culls, and deal with
+        // acne where acne is actually solvable -- the normal-offset
+        // bias in mesh.glsl, which moves the LOOKUP rather than the
+        // stored depth and so cannot detach a shadow from its caster.
+        sp.raster.cull = CullMode::Back;
+        sp.name = "shadow";
+        pipe_.shadow = device_->create_pipeline(sp);
+        sp.raster.cull = CullMode::None;
+        sp.name = "shadow (two sided)";
+        pipe_.shadow_ds = device_->create_pipeline(sp);
+    }
 
     base.name = "mesh opaque";
     pipe_.mesh_opaque = device_->create_pipeline(base);
@@ -489,8 +565,18 @@ void Renderer::upload_frame() {
     f.ambient = Vec4(ambient.rgb(), ambient_energy);
     f.fog = Vec4(fog_colour.rgb(), fog_density);
     f.fog_params = Vec4(0.0f, 0.0f, fog_height_falloff, 0.0f);
-    for (int i = 0; i < 4; i++) f.sun_view_proj[i] = Projection::identity();
-    f.cascade_splits = Vec4(1e9f, 1e9f, 1e9f, 1e9f);
+    if (settings_.shadows && cascade_count_ > 0) {
+        for (int i = 0; i < 4; i++) f.sun_view_proj[i] = cascade_view_proj_[i];
+        f.cascade_splits = cascade_splits_;
+        f.cascade_texel = cascade_texel_;
+    } else {
+        // Splits past any possible view depth put every fragment in
+        // the last cascade, whose matrix is the identity -- so the
+        // lookup lands outside [0,1] and sample_shadow returns lit.
+        for (int i = 0; i < 4; i++) f.sun_view_proj[i] = Projection::identity();
+        f.cascade_splits = Vec4(1e9f, 1e9f, 1e9f, 1e9f);
+        f.cascade_texel = Vec4(0, 0, 0, 0);
+    }
     f.screen = Vec4(float(width_), float(height_),
                     width_ ? 1.0f / float(width_) : 0.0f,
                     height_ ? 1.0f / float(height_) : 0.0f);
@@ -708,65 +794,14 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
     const int limit = settings_.max_portal_depth;
     if (v.depth < limit) {
         for (size_t pi = 0; pi < portals_.size(); pi++) {
-            Portal3D *p = portals_[pi];
-            Portal3D *q = p->link();
-            if (!q || !q->active) continue;
-            stats_.portals_considered++;
-
-            // A portal is a hole seen from the front. From behind it is
-            // the back of a hole, which is nothing.
-            if (!p->faces(v.camera.origin)) {
-                stats_.portals_culled++;
-                continue;
-            }
-            // Its own recursion limit, if it set one.
-            int own = p->max_recursion > 0 ? p->max_recursion : limit;
-            if (v.depth >= own) {
-                stats_.portals_culled++;
-                continue;
-            }
-            // Never recurse straight back into the portal we came out
-            // of: that is the same room again, one level down, and it
-            // doubles the cost of every level for nothing.
-            if (v.portal_id == int(pi)) continue;
-
-            Transform3D cam_ortho2 = v.camera;
-            cam_ortho2.basis = cam_ortho2.basis.orthonormalized();
-            Rect2 rect;
-            if (!p->screen_rect(cam_ortho2.inverse_orthonormal(), v.projection,
-                                &rect)) {
-                stats_.portals_culled++;
-                continue;
-            }
-            if (rect.area() < settings_.portal_min_coverage) {
-                stats_.portals_culled++;
-                continue;
-            }
-            // Intersect with the parent's scissor: a portal seen
-            // through a portal cannot be wider than the hole it is
-            // seen through.
+            View inner;
             rhi::Rect scissor;
-            {
-                int x0 = int(rect.position.x * float(width_));
-                int y0 = int(rect.position.y * float(height_));
-                int x1 = int(std::ceil((rect.position.x + rect.size.x) * float(width_)));
-                int y1 = int(std::ceil((rect.position.y + rect.size.y) * float(height_)));
-                if (v.has_scissor) {
-                    x0 = std::max(x0, v.scissor.x);
-                    y0 = std::max(y0, v.scissor.y);
-                    x1 = std::min(x1, v.scissor.x + int(v.scissor.width));
-                    y1 = std::min(y1, v.scissor.y + int(v.scissor.height));
-                }
-                x0 = std::max(0, x0);
-                y0 = std::max(0, y0);
-                x1 = std::min(int(width_), x1);
-                y1 = std::min(int(height_), y1);
-                if (x1 <= x0 || y1 <= y0) {
-                    stats_.portals_culled++;
-                    continue;
-                }
-                scissor = {x0, y0, uint32_t(x1 - x0), uint32_t(y1 - y0)};
+            stats_.portals_considered++;
+            if (!portal_child(v, pi, &inner, &scissor)) {
+                stats_.portals_culled++;
+                continue;
             }
+            Portal3D *p = portals_[pi];
 
             char label[64];
             std::snprintf(label, sizeof(label), "portal %zu depth %d", pi,
@@ -812,26 +847,8 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
             stats_.draw_calls++;
 
             // 3. RECURSE, with the warped camera and the destination
-            //    aperture as the near plane.
-            View inner;
-            inner.camera = Portal3D::warp(p, q) * v.camera;
-            inner.projection = v.projection;
-            // If the eye is nearly in the destination plane the oblique
-            // clip degenerates, and the wall it would have removed is
-            // edge-on and invisible anyway.
-            Plane qp = q->plane();
-            if (std::fabs(qp.distance_to(inner.camera.origin)) > 1e-3f) {
-                inner.has_clip = true;
-                inner.clip = qp;
-            }
-            inner.has_scissor = true;
-            inner.scissor = scissor;
-            inner.depth = v.depth + 1;
-            // Remembered so the inner view does not immediately look
-            // back through the portal it came out of.
-            inner.portal_id = -1;
-            for (size_t k = 0; k < portals_.size(); k++)
-                if (portals_[k] == q) inner.portal_id = int(k);
+            //    aperture as the near plane -- both worked out by
+            //    portal_child above.
             render_view(cmd, inner, stencil_ref + 1);
 
             // 4. RESTORE. The portal's own depth goes back, and the
@@ -881,6 +898,306 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
     draw_geometry(cmd, v, stencil_ref, MaterialPass::Transparent, frustum);
 }
 
+
+// ------------------------------------------------------- portal traversal
+
+// THE ONE COPY OF THE RULE.
+//
+// Whether a portal recurses from a given view, and with what camera,
+// projection and scissor, is decided here and nowhere else. Two
+// callers need the answer: the draw, and the walk that fits the shadow
+// cascades. Two copies of a rule this fiddly would disagree within a
+// week, and the symptom would be shadows that are subtly wrong only
+// inside portals -- which is exactly the bug nobody finds.
+bool Renderer::portal_child(const View &v, size_t pi, View *out,
+                            rhi::Rect *scissor_out) const {
+    if (pi >= portals_.size()) return false;
+    Portal3D *p = portals_[pi];
+    Portal3D *q = p->link();
+    if (!q || !q->active) return false;
+
+    // A portal is a hole seen from the front. From behind it is the
+    // back of a hole, which is nothing.
+    if (!p->faces(v.camera.origin)) return false;
+
+    const int limit = settings_.max_portal_depth;
+    int own = p->max_recursion > 0 ? p->max_recursion : limit;
+    if (v.depth >= own || v.depth >= limit) return false;
+
+    // Never recurse straight back into the portal we came out of: that
+    // is the same room again, one level down, and it doubles the cost
+    // of every level for nothing.
+    if (v.portal_id == int(pi)) return false;
+
+    Transform3D cam_ortho = v.camera;
+    cam_ortho.basis = cam_ortho.basis.orthonormalized();
+    Rect2 rect;
+    if (!p->screen_rect(cam_ortho.inverse_orthonormal(), v.projection, &rect))
+        return false;
+    if (rect.area() < settings_.portal_min_coverage) return false;
+
+    // Intersect with the parent's scissor: a portal seen through a
+    // portal cannot be wider than the hole it is seen through.
+    int x0 = int(rect.position.x * float(width_));
+    int y0 = int(rect.position.y * float(height_));
+    int x1 = int(std::ceil((rect.position.x + rect.size.x) * float(width_)));
+    int y1 = int(std::ceil((rect.position.y + rect.size.y) * float(height_)));
+    if (v.has_scissor) {
+        x0 = std::max(x0, v.scissor.x);
+        y0 = std::max(y0, v.scissor.y);
+        x1 = std::min(x1, v.scissor.x + int(v.scissor.width));
+        y1 = std::min(y1, v.scissor.y + int(v.scissor.height));
+    }
+    x0 = std::max(0, x0);
+    y0 = std::max(0, y0);
+    x1 = std::min(int(width_), x1);
+    y1 = std::min(int(height_), y1);
+    if (x1 <= x0 || y1 <= y0) return false;
+
+    rhi::Rect scissor = {x0, y0, uint32_t(x1 - x0), uint32_t(y1 - y0)};
+    if (scissor_out) *scissor_out = scissor;
+
+    View inner;
+    inner.camera = Portal3D::warp(p, q) * v.camera;
+    inner.projection = v.projection;
+    // If the eye is nearly in the destination plane the oblique clip
+    // degenerates, and the wall it would have removed is edge-on and
+    // invisible anyway.
+    Plane qp = q->plane();
+    if (std::fabs(qp.distance_to(inner.camera.origin)) > 1e-3f) {
+        inner.has_clip = true;
+        inner.clip = qp;
+    }
+    inner.has_scissor = true;
+    inner.scissor = scissor;
+    inner.depth = v.depth + 1;
+    // Remembered so the inner view does not immediately look back
+    // through the portal it came out of.
+    inner.portal_id = -1;
+    for (size_t k = 0; k < portals_.size(); k++)
+        if (portals_[k] == q) inner.portal_id = int(k);
+    *out = inner;
+    return true;
+}
+
+void Renderer::gather_views(const View &v, std::vector<View> *out) const {
+    out->push_back(v);
+    // A hard cap independent of the depth limit: the recursion is over
+    // pairs of portals and a scene with many of them can branch wider
+    // than it goes deep.
+    if (out->size() >= kViewRing) return;
+    if (v.depth >= settings_.max_portal_depth) return;
+    for (size_t pi = 0; pi < portals_.size(); pi++) {
+        View inner;
+        if (portal_child(v, pi, &inner, nullptr)) gather_views(inner, out);
+    }
+}
+
+// ------------------------------------------------------------- cascades
+
+void Renderer::fit_cascades(const std::vector<View> &views) {
+    const int n = std::clamp(settings_.shadow_cascades, 1, 4);
+    cascade_count_ = n;
+    const float near = 0.1f;
+    const float far = std::max(settings_.shadow_distance, near + 1.0f);
+
+    // THE PRACTICAL SPLIT SCHEME. A logarithmic split gives every
+    // cascade the same texel density and a uniform one gives them all
+    // the same size; neither is right on its own, and the useful
+    // answer is a blend of the two with lambda near three quarters.
+    float split[5];
+    split[0] = near;
+    for (int i = 1; i <= n; i++) {
+        const float f = float(i) / float(n);
+        const float log_split = near * std::pow(far / near, f);
+        const float uniform = near + (far - near) * f;
+        split[i] = settings_.shadow_split_lambda * log_split +
+                   (1.0f - settings_.shadow_split_lambda) * uniform;
+    }
+
+    // The light's orientation. Only the rotation matters for an
+    // orthographic projection; the position is chosen per cascade.
+    const Vec3 dir = sun_direction.normalized();
+    Vec3 up = std::fabs(dir.y) > 0.95f ? Vec3(0, 0, 1) : Vec3(0, 1, 0);
+    const Basis light_basis = Basis::looking_at(dir, up);
+    const Basis to_light = light_basis.transposed();  // orthonormal inverse
+
+    for (int c = 0; c < 4; c++) {
+        if (c >= n) {
+            cascade_view_proj_[c] = cascade_view_proj_[n - 1];
+            cascade_camera_[c] = cascade_camera_[n - 1];
+            cascade_projection_[c] = cascade_projection_[n - 1];
+            cascade_texel_[c] = cascade_texel_[n - 1];
+            continue;
+        }
+
+        // EVERY VIEW, NOT JUST THE CAMERA'S. A portal view looks at a
+        // part of the world the camera cannot see directly, and the
+        // player is looking straight at it.
+        Vec3 corners[8];
+        std::vector<Vec3> all;
+        all.reserve(views.size() * 8);
+        for (const View &v : views) {
+            Transform3D cam = v.camera;
+            cam.basis = cam.basis.orthonormalized();
+            v.projection.slice_corners(split[c], split[c + 1], corners);
+            for (int k = 0; k < 8; k++) all.push_back(cam.xform(corners[k]));
+        }
+        if (all.empty()) {
+            cascade_view_proj_[c] = Projection::identity();
+            continue;
+        }
+
+        // A BOUNDING SPHERE, NOT A BOX, and that is what stops the
+        // shadows shimmering. A box fitted to the corners changes size
+        // as the camera turns, so every texel lands somewhere new each
+        // frame and the edges crawl. A sphere is the same size from
+        // every angle, so the only thing left to stabilise is where
+        // its centre falls -- and that is a snap to the texel grid.
+        Vec3 centre(0, 0, 0);
+        for (const Vec3 &p : all) centre = centre + p;
+        centre = centre * (1.0f / float(all.size()));
+        float radius = 0.0f;
+        for (const Vec3 &p : all)
+            radius = std::max(radius, (p - centre).length());
+        radius = std::max(radius, 0.5f);
+        // Rounded up, so a radius that wobbles by a fraction of a
+        // texel does not change the projection at all.
+        radius = std::ceil(radius * 16.0f) / 16.0f;
+
+        const float texels = float(shadow_size_ ? shadow_size_ : 1);
+        const float world_per_texel = 2.0f * radius / texels;
+
+        Vec3 centre_l = to_light.xform(centre);
+        centre_l.x = std::floor(centre_l.x / world_per_texel) * world_per_texel;
+        centre_l.y = std::floor(centre_l.y / world_per_texel) * world_per_texel;
+        centre = light_basis.xform(centre_l);
+
+        // The light sits behind the sphere by the extrusion distance,
+        // so geometry outside the view still casts into it.
+        const float back = radius + std::max(settings_.shadow_caster_extrusion, 0.0f);
+        Transform3D light_xf(light_basis, centre - dir * back);
+        Projection proj = Projection::orthographic(-radius, radius, -radius,
+                                                   radius, 0.0f, back + radius);
+
+        cascade_camera_[c] = light_xf;
+        cascade_projection_[c] = proj;
+        cascade_texel_[c] = world_per_texel;
+        cascade_view_proj_[c] = proj * to_projection(light_xf.inverse_orthonormal());
+    }
+
+    cascade_splits_ = Vec4(split[std::min(1, n)], split[std::min(2, n)],
+                           split[std::min(3, n)], split[n]);
+    stats_.cascades = uint32_t(n);
+}
+
+void Renderer::shadow_pass(rhi::CommandList *cmd) {
+    if (!pipe_.shadow.valid() || !shadow_map_.valid()) return;
+    MF_GPU_SCOPE(cmd, "shadows");
+
+    for (int c = 0; c < cascade_count_; c++) {
+        RenderingInfo ri;
+        ri.has_depth = true;
+        ri.depth.texture = shadow_map_;
+        ri.depth.layer = c;
+        ri.depth.depth_load = LoadOp::Clear;
+        ri.depth.clear_depth = 0.0f;  // reverse-Z: the far plane
+        ri.depth.stencil_load = LoadOp::DontCare;
+        ri.width = shadow_size_;
+        ri.height = shadow_size_;
+        ri.name = "shadow cascade";
+        cmd->begin_rendering(ri);
+
+        Viewport vp;
+        vp.width = float(shadow_size_);
+        vp.height = float(shadow_size_);
+        cmd->set_viewport(vp);
+        cmd->set_scissor({0, 0, shadow_size_, shadow_size_});
+
+        // The cascade is uploaded as an ordinary view, which is why
+        // the shadow shader needs no block of its own.
+        View lv;
+        lv.camera = cascade_camera_[c];
+        lv.projection = cascade_projection_[c];
+        uint32_t offset = upload_view(lv);
+
+        Plane frustum[6];
+        cascade_projection_[c].frustum_planes(cascade_camera_[c], frustum);
+
+        // THE PIPELINE FIRST. Vulkan invalidates the bound descriptor
+        // sets when a pipeline with a different layout comes in, so
+        // binding the groups before the first pipeline binds them to
+        // nothing. Both shadow pipelines share a layout, so the
+        // switch to the two-sided one inside the loop is free.
+        cmd->bind_pipeline(pipe_.shadow);
+        cmd->bind_group(0, frame_group_no_shadow_);
+        cmd->bind_group(1, view_group_, &offset, 1);
+
+        PipelineH last = pipe_.shadow;
+        BindGroupH last_group;
+        for (const Renderable &r : renderables_) {
+            if (!r.material->cast_shadows) continue;
+            if (r.material->pass == MaterialPass::Transparent) continue;
+            if (!visible_in(frustum, r.bounds)) continue;
+
+            PipelineH pipeline =
+                r.material->double_sided ? pipe_.shadow_ds : pipe_.shadow;
+            if (pipeline != last) {
+                cmd->bind_pipeline(pipeline);
+                last = pipeline;
+                last_group = {};
+            }
+            BindGroupH mg = r.material->bind_group();
+            if (mg != last_group) {
+                cmd->bind_group(2, mg);
+                last_group = mg;
+            }
+            PushUniforms pu{};
+            pu.model = to_projection(r.model);
+            pu.tint = Vec4(1, 1, 1, 1);
+            cmd->push_constants(&pu, sizeof(pu));
+            cmd->bind_vertex_buffer(0, r.mesh->vertex_buffer());
+            cmd->bind_index_buffer(r.mesh->index_buffer(), IndexType::U32);
+            cmd->draw_indexed(r.sub->index_count, 1, r.sub->first_index);
+            stats_.shadow_draws++;
+            stats_.triangles += r.sub->index_count / 3;
+        }
+        cmd->end_rendering();
+    }
+
+    cmd->texture_barrier(shadow_map_, TextureUsage::DepthTarget,
+                         TextureUsage::Sampled);
+}
+
+bool Renderer::dump_shadow_map(const std::string &path) const {
+    if (!device_ || !shadow_map_.valid() || cascade_count_ <= 0) return false;
+    device_->wait_idle();
+    const uint32_t n = uint32_t(cascade_count_);
+    const size_t texels = size_t(shadow_size_) * shadow_size_;
+    std::vector<float> depth(texels);
+    std::vector<uint8_t> out(texels * n);
+    for (uint32_t c = 0; c < n; c++) {
+        const size_t got = device_->read_texture(
+            shadow_map_, depth.data(), depth.size() * sizeof(float), 0, c);
+        if (got != depth.size() * sizeof(float)) {
+            MF_ERROR("shadow dump: could not read cascade %u", c);
+            return false;
+        }
+        for (uint32_t y = 0; y < shadow_size_; y++)
+            for (uint32_t x = 0; x < shadow_size_; x++)
+                out[size_t(y) * shadow_size_ * n + c * shadow_size_ + x] =
+                    uint8_t(std::clamp(depth[size_t(y) * shadow_size_ + x], 0.0f,
+                                       1.0f) * 255.0f);
+    }
+    if (!stbi_write_png(path.c_str(), int(shadow_size_ * n), int(shadow_size_), 1,
+                        out.data(), int(shadow_size_ * n))) {
+        MF_ERROR("shadow dump: could not write '%s'", path.c_str());
+        return false;
+    }
+    MF_INFO("shadow dump: %s (%u cascades at %u)", path.c_str(), n, shadow_size_);
+    return true;
+}
+
 // ------------------------------------------------------------- the frame
 
 void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
@@ -896,7 +1213,6 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     if (td.width != width_ || td.height != height_)
         if (!create_targets(td.width, td.height)) return;
 
-    upload_frame();
     collect(tree, camera->cull_mask());
 
     float aspect = height_ ? float(width_) / float(height_) : 1.0f;
@@ -904,6 +1220,22 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     root.camera = camera->global_transform();
     root.projection = camera->projection(aspect);
     root.depth = 0;
+
+    // THE CASCADES ARE FITTED BEFORE ANYTHING IS DRAWN, and to every
+    // view -- the camera's and every portal view the frame will
+    // recurse into. Walking the recursion twice costs a few hundred
+    // microseconds of frustum arithmetic and no draws; not doing it
+    // leaves the world beyond a portal lit by a cascade fitted to
+    // somewhere else, which is most of what the player is looking at.
+    cascade_count_ = 0;
+    if (settings_.shadows && pipe_.shadow.valid()) {
+        std::vector<View> views;
+        views.reserve(16);
+        gather_views(root, &views);
+        fit_cascades(views);
+    }
+    upload_frame();
+    if (cascade_count_ > 0) shadow_pass(cmd);
 
     // --- the scene, into the HDR target
     {

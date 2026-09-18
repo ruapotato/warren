@@ -100,3 +100,61 @@ own 3×3 with the scale divided out.
 do not agree natively — OpenGL stores bottom-up, Vulkan top-down — so
 the OpenGL backend flips on the way out. One stated order, or a
 screenshot is upside down on one renderer.
+
+## Viewports and scissors
+
+Stated **from the top-left**, y increasing downwards, height positive.
+That matches the screen rectangles the renderer computes for portals
+and the row order `read_texture` returns.
+
+Neither backend takes it in that form naively, and the conversions are
+not the ones you would guess:
+
+* **Vulkan** gets a **negative height** viewport, which is what puts
+  +Y up. Its scissor is already top-left.
+* **OpenGL** gets both **unchanged**. The instinct is to flip y —
+  OpenGL measures window coordinates from the bottom — but this
+  backend runs with `glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE)`,
+  which moves the origin of the window coordinate system itself. A
+  rectangle already given from the top-left is already correct, and
+  flipping it puts the scissor at `height - y - h`: its reflection.
+
+**Nothing catches a wrong flip until a rectangle is asymmetric in y.**
+A full-screen viewport is its own reflection, and so is a full-screen
+scissor, so every test the engine had passed while both backends
+flipped rectangles they should not have — until the portal renderer
+scissored a recursion to part of the screen and its contents were
+sliced off. `tests/test_backend_parity` now sets an off-centre
+viewport and an off-centre scissor and reads back which pixels they
+kept.
+
+## Shadows
+
+A shadow map is a depth buffer, so it has the depth buffer's
+conventions and no others: reverse-Z, cleared to **0**, compared with
+**GREATER_EQUAL**. The comparison sampler in `SamplerCache::shadow` is
+set the same way.
+
+It is also a **render target**, so sampling it needs v flipped —
+`uv = vec2(ndc.x, -ndc.y) * 0.5 + 0.5` — for the same reason the
+tonemap pass flips when it samples the HDR target: row 0 of a target
+is its top, while `ndc.y = +1` is the top of the picture.
+
+Three things follow from the engine being a portal engine:
+
+* **Cascades are fitted to every view the frame will draw**, not to
+  the camera alone. `Renderer::gather_views` walks the portal
+  recursion first, without drawing, and the cascade boxes cover the
+  union. Fit them to the main frustum and everything seen through a
+  portal is lit by a cascade meant for somewhere else.
+* **The light is uploaded as an ordinary view.** A cascade goes
+  through the same `ViewData` block a camera uses, so the matrix that
+  rendered the map and the matrix that samples it are the same object
+  and cannot drift.
+* **Back faces are culled, not front faces.** The usual advice is the
+  opposite, and it is right for closed watertight geometry and wrong
+  for a room, which is a box turned inside out. Culling front faces
+  there records the ceiling across the room's whole footprint and the
+  interior goes black. Acne is handled by the normal-offset bias in
+  `mesh.glsl`, which moves the lookup rather than the stored depth and
+  so cannot detach a shadow from its caster.
