@@ -31,7 +31,10 @@
 #include "core/json.h"
 #include "core/log.h"
 #include "render/material.h"
+#include "anim/clip.h"
+#include "anim/skeleton.h"
 #include "render/mesh.h"
+#include "scene/animated.h"
 #include "render/texture.h"
 #include "resource/packed_scene.h"
 #include "resource/resource.h"
@@ -341,6 +344,20 @@ struct BuiltMesh {
     std::vector<Ref<Material>> materials;
 };
 
+// A glTF SKIN is a list of nodes that act as bones plus the matrices
+// that take the mesh into each of their spaces. It is a separate
+// object from the node hierarchy, which is what makes it possible for
+// two meshes to share one skeleton and for a skeleton's bones to be
+// ordinary nodes with children of their own.
+struct BuiltSkin {
+    Ref<Skeleton> skeleton;
+    // glTF node index -> bone index, for the animation importer.
+    std::unordered_map<int, int> node_to_bone;
+    // Old bone index -> new, when the joints had to be reordered so
+    // that parents come first. Empty when they already did.
+    std::vector<int> remap;
+};
+
 BuiltMesh build_mesh(const Gltf &g, int index,
                      std::unordered_map<int, Ref<Material>> *material_cache) {
     BuiltMesh out;
@@ -376,6 +393,25 @@ BuiltMesh build_mesh(const Gltf &g, int index,
         read_accessor(g, attrs["TEXCOORD_0"].integer(-1), &uvs, &uv_comps);
         int colour_comps = 4;
         read_accessor(g, attrs["COLOR_0"].integer(-1), &colours, &colour_comps);
+        // WHICH BONES MOVE THIS VERTEX, AND HOW MUCH.
+        //
+        // Read through the same float path as everything else, which
+        // matters more here than anywhere: joints arrive as unsigned
+        // bytes on a rig under 256 bones and unsigned shorts on one
+        // over, and weights as bytes, shorts or floats, normalised or
+        // not. Eight spellings of one attribute is eight bugs in a
+        // reader that special-cases them.
+        std::vector<float> joints, weights;
+        int joint_comps = 0, weight_comps = 0;
+        read_accessor(g, attrs["JOINTS_0"].integer(-1), &joints, &joint_comps);
+        read_accessor(g, attrs["WEIGHTS_0"].integer(-1), &weights, &weight_comps);
+        const bool skinned = joints.size() >= count * 4 && weights.size() >= count * 4;
+        if (skinned && out.mesh->skin.size() < out.mesh->vertices.size()) {
+            // A mesh whose first primitive was unskinned and whose
+            // second is: pad the ones already in so the streams stay
+            // the same length.
+            out.mesh->skin.resize(out.mesh->vertices.size());
+        }
 
         const uint32_t base_vertex = uint32_t(out.mesh->vertices.size());
         for (size_t i = 0; i < count; i++) {
@@ -404,6 +440,28 @@ BuiltMesh build_mesh(const Gltf &g, int index,
                 }
             }
             out.mesh->vertices.push_back(v);
+
+            if (skinned) {
+                SkinVertex sv;
+                // NORMALISED HERE, NOT IN THE SHADER. Exporters are
+                // casual about this -- weights that sum to 0.999 or to
+                // 1.004 are both common -- and a vertex whose weights
+                // do not sum to one is a vertex that shrinks towards
+                // the origin when the skeleton moves.
+                float total = 0.0f;
+                for (int k = 0; k < 4; k++) total += weights[i * 4 + size_t(k)];
+                const float inv = total > 1e-6f ? 1.0f / total : 0.0f;
+                for (int k = 0; k < 4; k++) {
+                    const float jf = joints[i * 4 + size_t(k)];
+                    sv.joints[k] = uint8_t(std::clamp(jf, 0.0f, 255.0f));
+                    sv.weights[k] = uint8_t(
+                            std::clamp(weights[i * 4 + size_t(k)] * inv, 0.0f, 1.0f)
+                                    * 255.0f + 0.5f);
+                }
+                out.mesh->skin.push_back(sv);
+            } else if (!out.mesh->skin.empty()) {
+                out.mesh->skin.push_back(SkinVertex());
+            }
         }
 
         SubMesh sm;
@@ -488,9 +546,170 @@ Transform3D node_transform(const Json &n) {
     return Transform3D(b, translation);
 }
 
+// ------------------------------------------------------------- skeletons
+
+// EVERY BONE'S PARENT, FOUND BY WALKING THE SCENE BACKWARDS.
+//
+// glTF's skin lists its joints as node indices and says nothing about
+// how they are related; the relationship is in the node tree, where a
+// bone is an ordinary node with children. So the parent of joint J is
+// whichever node has J in its `children` -- and that node is only a
+// bone if it is in the joint list too, which is how the skeleton's
+// root stops at the rig rather than running up into the scene.
+void build_child_map(const Gltf &g, std::unordered_map<int, int> *parent_of) {
+    const Json &nodes = g.doc["nodes"];
+    for (size_t i = 0; i < nodes.size(); i++) {
+        const Json &kids = nodes[i]["children"];
+        for (size_t k = 0; k < kids.size(); k++)
+            (*parent_of)[kids[k].integer(-1)] = int(i);
+    }
+}
+
+BuiltSkin build_skin(const Gltf &g, int index) {
+    BuiltSkin out;
+    const Json &src = g.doc["skins"][size_t(index)];
+    if (src.is_null()) return out;
+    const Json &joints = src["joints"];
+    if (joints.size() == 0) return out;
+
+    std::unordered_map<int, int> parent_of;
+    build_child_map(g, &parent_of);
+
+    std::unordered_map<int, int> joint_slot;   // node -> its index in `joints`
+    for (size_t i = 0; i < joints.size(); i++)
+        joint_slot[joints[i].integer(-1)] = int(i);
+
+    out.skeleton = Ref<Skeleton>(new Skeleton());
+    out.skeleton->set_resource_name(src["name"].string());
+    out.skeleton->bones.resize(joints.size());
+    for (size_t i = 0; i < joints.size(); i++) {
+        const int node = joints[i].integer(-1);
+        const Json &n = g.doc["nodes"][size_t(node)];
+        Skeleton::Bone &b = out.skeleton->bones[i];
+        b.name = n["name"].string();
+        if (b.name.empty()) b.name = "bone" + std::to_string(i);
+        b.rest = node_transform(n);
+        const auto p = parent_of.find(node);
+        b.parent = -1;
+        if (p != parent_of.end()) {
+            const auto slot = joint_slot.find(p->second);
+            if (slot != joint_slot.end()) b.parent = slot->second;
+        }
+        out.node_to_bone[node] = int(i);
+    }
+
+    // THE INVERSE BIND MATRICES, WHICH ARE NOT THE RESTS INVERTED.
+    //
+    // They usually are, and relying on that is a trap: a file may bind
+    // its mesh in a pose that is not the rest pose, and several
+    // exporters do. The accessor is authoritative where it exists.
+    std::vector<float> ibm;
+    int comps = 0;
+    if (read_accessor(g, src["inverseBindMatrices"].integer(-1), &ibm, &comps)
+            && comps == 16 && ibm.size() >= joints.size() * 16) {
+        for (size_t i = 0; i < joints.size(); i++) {
+            const float *m = &ibm[i * 16];
+            // Column-major, as everywhere in glTF.
+            Transform3D t;
+            t.basis = Basis(Vec3(m[0], m[1], m[2]), Vec3(m[4], m[5], m[6]),
+                            Vec3(m[8], m[9], m[10]));
+            t.origin = Vec3(m[12], m[13], m[14]);
+            out.skeleton->bones[i].inverse_bind = t;
+        }
+    } else {
+        out.skeleton->compute_inverse_binds();
+    }
+
+    // The pose resolver walks forward once and needs every parent to
+    // come first; most exporters already do that and none promise it.
+    if (!out.skeleton->ordered()) {
+        const std::vector<int> remap = out.skeleton->sort_hierarchically();
+        for (auto &kv : out.node_to_bone) kv.second = remap[size_t(kv.second)];
+        out.remap = remap;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------ animations
+
+Ref<AnimationClip> build_clip(const Gltf &g, int index, const BuiltSkin &skin) {
+    const Json &src = g.doc["animations"][size_t(index)];
+    if (src.is_null()) return {};
+    Ref<AnimationClip> clip(new AnimationClip());
+    clip->name = src["name"].string();
+    if (clip->name.empty()) clip->name = "clip" + std::to_string(index);
+    clip->set_resource_name(clip->name);
+
+    const Json &channels = src["channels"];
+    const Json &samplers = src["samplers"];
+    // One track per bone, made on demand: a clip touches a fraction of
+    // a rig and an array of empty tracks per bone is mostly nothing.
+    std::unordered_map<int, size_t> track_of;
+
+    for (size_t c = 0; c < channels.size(); c++) {
+        const Json &ch = channels[c];
+        const int node = ch["target"]["node"].integer(-1);
+        const std::string path = ch["target"]["path"].string();
+        const auto bone = skin.node_to_bone.find(node);
+        if (bone == skin.node_to_bone.end()) continue;   // not part of this rig
+
+        const Json &sm = samplers[size_t(ch["sampler"].integer(-1))];
+        if (sm.is_null()) continue;
+        std::vector<float> times, values;
+        int tc = 0, vc = 0;
+        if (!read_accessor(g, sm["input"].integer(-1), &times, &tc)) continue;
+        if (!read_accessor(g, sm["output"].integer(-1), &values, &vc)) continue;
+        // CUBICSPLINE stores three values per key -- in tangent, value,
+        // out tangent -- and taking them as one value each plays the
+        // tangents as keyframes, which looks like a body having a fit.
+        // Read the middle of each triple and interpolate it linearly.
+        const bool cubic = sm["interpolation"].string() == "CUBICSPLINE";
+        const size_t stride = cubic ? 3u : 1u;
+
+        auto it = track_of.find(bone->second);
+        if (it == track_of.end()) {
+            AnimationClip::BoneTrack tr;
+            tr.bone = bone->second;
+            tr.bone_name = skin.skeleton->bones[size_t(bone->second)].name;
+            clip->tracks.push_back(tr);
+            it = track_of.emplace(bone->second, clip->tracks.size() - 1).first;
+        }
+        AnimationClip::BoneTrack &tr = clip->tracks[it->second];
+
+        const size_t n = times.size();
+        if (path == "rotation") {
+            if (values.size() < n * 4 * stride) continue;
+            tr.rotation.times = times;
+            tr.rotation.values.reserve(n);
+            for (size_t i = 0; i < n; i++) {
+                const size_t at = (i * stride + (cubic ? 1u : 0u)) * 4;
+                tr.rotation.values.push_back(Quat(values[at], values[at + 1],
+                                                  values[at + 2], values[at + 3])
+                                                     .normalized());
+            }
+        } else if (path == "translation" || path == "scale") {
+            if (values.size() < n * 3 * stride) continue;
+            AnimationClip::Vec3Track &dst =
+                    path == "scale" ? tr.scale : tr.position;
+            dst.times = times;
+            dst.values.reserve(n);
+            for (size_t i = 0; i < n; i++) {
+                const size_t at = (i * stride + (cubic ? 1u : 0u)) * 3;
+                dst.values.push_back(Vec3(values[at], values[at + 1], values[at + 2]));
+            }
+        }
+        // "weights" is morph-target animation, which this engine does
+        // not have; skipped rather than half-read.
+    }
+    clip->compute_duration();
+    return clip;
+}
+
 Node3D *build_node(const Gltf &g, int index,
                    std::unordered_map<int, BuiltMesh> *mesh_cache,
                    std::unordered_map<int, Ref<Material>> *material_cache,
+                   std::unordered_map<int, BuiltSkin> *skin_cache,
+                   const std::vector<Ref<AnimationClip>> *clips,
                    int depth) {
     if (depth > 64) return nullptr;
     const Json &src = g.doc["nodes"][size_t(index)];
@@ -504,7 +723,35 @@ Node3D *build_node(const Gltf &g, int index,
             it = mesh_cache->emplace(mesh_index,
                                      build_mesh(g, mesh_index, material_cache))
                      .first;
-        MeshInstance3D *mi = new MeshInstance3D();
+        // A NODE WITH A SKIN IS A DIFFERENT NODE.
+        //
+        // Skinned3D carries a skeleton and a pose and is what the
+        // renderer skins; a plain MeshInstance3D has neither and
+        // costs nothing for the ninety percent of a world that does
+        // not move. Choosing here, once, is what keeps the renderer
+        // from having to ask every draw whether it has bones.
+        const int skin_index = src["skin"].integer(-1);
+        MeshInstance3D *mi = nullptr;
+        if (skin_index >= 0 && skin_cache) {
+            auto sk = skin_cache->find(skin_index);
+            if (sk == skin_cache->end())
+                sk = skin_cache->emplace(skin_index, build_skin(g, skin_index)).first;
+            if (sk->second.skeleton) {
+                Skinned3D *s3 = new Skinned3D();
+                s3->set_skeleton(sk->second.skeleton);
+                mi = s3;
+                // The clips this rig can play hang off the body that
+                // plays them, so an instance of a character arrives
+                // able to walk.
+                if (clips && !clips->empty()) {
+                    AnimationPlayer *ap = new AnimationPlayer();
+                    ap->set_name("Animation");
+                    for (const Ref<AnimationClip> &c : *clips) ap->add_clip(c);
+                    s3->add_child(ap);
+                }
+            }
+        }
+        if (!mi) mi = new MeshInstance3D();
         mi->mesh = it->second.mesh;
         for (size_t s = 0; s < it->second.materials.size(); s++)
             mi->set_material(int(s), it->second.materials[s].get());
@@ -525,7 +772,7 @@ Node3D *build_node(const Gltf &g, int index,
     const Json &children = src["children"];
     for (size_t i = 0; i < children.size(); i++) {
         Node3D *child = build_node(g, children[i].integer(-1), mesh_cache,
-                                   material_cache, depth + 1);
+                                   material_cache, skin_cache, clips, depth + 1);
         if (child) node->add_child(child);
     }
     return node;
@@ -601,6 +848,31 @@ Ref<Resource> load_gltf(const std::string &path) {
 
     std::unordered_map<int, BuiltMesh> mesh_cache;
     std::unordered_map<int, Ref<Material>> material_cache;
+    std::unordered_map<int, BuiltSkin> skin_cache;
+
+    // THE SKINS FIRST, BECAUSE THE CLIPS NEED THEM.
+    //
+    // An animation channel targets a NODE, and turning that into a
+    // bone index needs the skin's joint list. Building them up front
+    // also means a file whose two meshes share one skeleton gets one
+    // Skeleton resource rather than two identical ones.
+    const Json &skins = g.doc["skins"];
+    for (size_t i = 0; i < skins.size(); i++)
+        skin_cache.emplace(int(i), build_skin(g, int(i)));
+
+    std::vector<Ref<AnimationClip>> clips;
+    const Json &anims = g.doc["animations"];
+    if (anims.size() > 0 && !skin_cache.empty()) {
+        // Clips are resolved against the FIRST skin. A file with two
+        // rigs and animations for both is a file this importer does
+        // not try to be clever about: the clip keeps its bone NAMES,
+        // and AnimationPlayer re-resolves them against whatever
+        // skeleton it is actually played on.
+        const BuiltSkin &first = skin_cache.begin()->second;
+        for (size_t i = 0; i < anims.size(); i++)
+            if (Ref<AnimationClip> c = build_clip(g, int(i), first))
+                clips.push_back(c);
+    }
 
     const int scene_index = g.doc["scene"].integer(0);
     const Json &scene = g.doc["scenes"][size_t(scene_index)];
@@ -608,7 +880,7 @@ Ref<Resource> load_gltf(const std::string &path) {
         const Json &roots = scene["nodes"];
         for (size_t i = 0; i < roots.size(); i++)
             if (Node3D *n = build_node(g, roots[i].integer(-1), &mesh_cache,
-                                       &material_cache, 0))
+                                       &material_cache, &skin_cache, &clips, 0))
                 root->add_child(n);
     } else {
         // No scene at all: take every node with no parent.
@@ -623,7 +895,7 @@ Ref<Resource> load_gltf(const std::string &path) {
         for (size_t i = 0; i < is_child.size(); i++)
             if (!is_child[i])
                 if (Node3D *n = build_node(g, int(i), &mesh_cache,
-                                           &material_cache, 0))
+                                           &material_cache, &skin_cache, &clips, 0))
                     root->add_child(n);
     }
 

@@ -33,6 +33,16 @@ static_assert(sizeof(Vertex) == 52, "the vertex format is part of the ABI");
 
 rhi::VertexLayout standard_vertex_layout();
 
+// THE SAME LAYOUT PLUS A SECOND STREAM.
+//
+// Joints and weights live in their own buffer rather than in Vertex,
+// because most of the world is static: putting eight bytes of skin on
+// every vertex of a town costs that town a fifth of its memory and
+// its vertex fetch bandwidth for eight bytes of zero. A skinned mesh
+// binds two buffers; a static one binds one and uses a pipeline that
+// does not know the second exists.
+rhi::VertexLayout skinned_vertex_layout();
+
 // A second stream, present only on skinned meshes.
 struct SkinVertex {
     uint8_t joints[4] = {0, 0, 0, 0};
@@ -147,6 +157,12 @@ public:
     uint32_t index_count() const { return uint32_t(indices.size()); }
     uint32_t vertex_count() const { return uint32_t(vertices.size()); }
     uint32_t triangle_count() const { return uint32_t(indices.size() / 3); }
+    // A mesh with a skin stream as long as its vertices is one the
+    // skinned pipeline can draw; a partly-filled stream is a mesh
+    // that was assembled from both kinds and is not.
+    bool skinned() const {
+        return !skin.empty() && skin.size() == vertices.size();
+    }
 
     // --- primitives ---------------------------------------------------------
     //

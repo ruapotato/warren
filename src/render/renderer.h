@@ -124,6 +124,7 @@ struct RenderStats {
     uint32_t shadow_draws = 0;
     uint32_t cascades = 0;
     uint32_t lights = 0;            // punctual, after culling
+    uint32_t skinned_bones = 0;     // bone matrices uploaded this frame
     uint32_t shadow_casting_lights = 0;
     uint32_t punctual_shadow_draws = 0;
     bool punctual_shadows_reused = false;
@@ -206,11 +207,19 @@ private:
         AABB bounds;
         Color tint;
         uint64_t key = 0;
+        // WHERE THIS BODY'S BONES START in the frame's one bone
+        // buffer, or -1 for a mesh that has none. Every skinned body
+        // in the frame writes its matrices end to end into that
+        // buffer and the draw passes its own offset as a push
+        // constant, so twenty characters cost one upload and no
+        // per-draw binding.
+        int bone_base = -1;
     };
 
     // Walks the portal recursion without drawing anything, so the
     // shadow cascades can be fitted to every view the frame is about
     // to render rather than only to the camera's.
+    void upload_bones();
     void gather_views(const View &v, std::vector<View> *out) const;
     // The one copy of "does this portal recurse from here, and with
     // what camera" -- used by the gather walk and by the draw.
@@ -281,6 +290,13 @@ private:
     rhi::BindGroupH frame_group_, view_group_, portal_group_, tonemap_group_;
     rhi::BindGroupH frame_group_no_shadow_;
     rhi::BufferH light_buffer_, cluster_buffer_, light_index_buffer_;
+    // Every skinned body in the frame, end to end: three rows per
+    // bone, one upload, one bind. See Renderable::bone_base.
+    rhi::BufferH bone_buffer_;
+    rhi::BindGroupH bone_group_;
+    rhi::BindGroupLayoutH bone_layout_;
+    std::vector<Vec4> bone_rows_;
+    uint32_t bone_capacity_ = 0;
     rhi::TextureH env_cube_, env_irradiance_, env_specular_;
     rhi::TextureH shadow_atlas_, shadow_atlas_dummy_;
     uint32_t atlas_tiles_per_row_ = 0;
@@ -303,6 +319,7 @@ private:
 
     struct Pipelines {
         rhi::PipelineH mesh_opaque, mesh_opaque_ds;
+        rhi::PipelineH mesh_skinned, mesh_skinned_ds;
         rhi::PipelineH mesh_cutout, mesh_cutout_ds;
         rhi::PipelineH mesh_blend, mesh_blend_ds;
         rhi::PipelineH sky;

@@ -7,6 +7,9 @@
 #include <string>
 
 #include "agent/agent.h"
+#include "anim/clip.h"
+#include "anim/skeleton.h"
+#include "scene/animated.h"
 #include "app/engine.h"
 #if WARREN_PYTHON
 #include "script/python.h"
@@ -495,6 +498,134 @@ void build_portal_demo(Engine &e) {
 // shared library is loaded. Everything below goes through ClassDB by
 // name, which is exactly what a script would do, and is the honest
 // test of whether the plugin interface is any good.
+// A BODY WITH BONES IN IT, BENDING.
+//
+// The smallest thing that proves the whole skinning chain end to
+// end and can be looked at: a four-bone tentacle built in code,
+// skinned by hand, with a clip that waves it. If the bones are
+// wrong it is a straight bar; if the weights are wrong it is a
+// fan of triangles; if the upload is wrong it is not there.
+void build_skin_demo(Engine &e) {
+    Node3D *root = new Node3D();
+    root->set_name("SkinDemo");
+    e.tree()->root()->add_child(root);
+
+    Camera3D *cam = new Camera3D();
+    cam->set_name("Camera");
+    cam->set_transform(Transform3D::looking_at(Vec3(0, 3.0f, 7.5f),
+                                               Vec3(0, 2.2f, 0)));
+    root->add_child(cam);
+    cam->make_current();
+
+    DirectionalLight3D *sun = new DirectionalLight3D();
+    sun->set_name("Sun");
+    sun->set_transform(Transform3D::looking_at(Vec3(4, 8, 6), Vec3::zero()));
+    sun->energy = 3.0f;
+    root->add_child(sun);
+    // The default fog is tuned for a town seen down a street and
+    // turns a close-up of one object into a white card.
+    e.renderer()->fog_density = 0.0006f;
+
+    // The floor, so the thing has somewhere to stand and something
+    // to cast a shadow on.
+    MeshInstance3D *ground = new MeshInstance3D();
+    ground->set_name("Ground");
+    ground->mesh = Mesh::plane(Vec2(30, 30), 1);
+    Ref<Material> gm(new Material());
+    gm->albedo = Color::hex(0x35383c);
+    gm->roughness = 0.95f;
+    ground->set_material(0, gm.get());
+    root->add_child(ground);
+
+    const int kSegments = 4;
+    const float kLength = 1.1f;
+
+    // The rig: a chain straight up, each bone a segment above the
+    // last.
+    Ref<Skeleton> skel(new Skeleton());
+    skel->set_resource_name("tentacle");
+    for (int i = 0; i < kSegments; i++)
+        skel->add("seg" + std::to_string(i), i - 1,
+                  Transform3D(Basis(), Vec3(0, i == 0 ? 0.35f : kLength, 0)));
+    skel->compute_inverse_binds();
+
+    // The mesh: a box per segment, every vertex of it bound rigidly
+    // to that segment. Rigid rather than smooth on purpose -- a
+    // smooth weight hides a wrong bone index behind a plausible
+    // bulge, and this is here to show wrong bones.
+    Ref<Mesh> mesh(new Mesh());
+    for (int i = 0; i < kSegments; i++) {
+        const float w = 0.42f - 0.06f * float(i);
+        Ref<Mesh> part = Mesh::box(Vec3(w, kLength, w));
+        const uint32_t base = uint32_t(mesh->vertices.size());
+        for (Vertex v : part->vertices) {
+            // Into the bone's own space: the box sits astride the
+            // segment above its joint.
+            v.position.y += kLength * 0.5f;
+            v.position = skel->global_rest(i).xform(v.position);
+            mesh->vertices.push_back(v);
+            SkinVertex sv;
+            sv.joints[0] = uint8_t(i);
+            sv.weights[0] = 255;
+            mesh->skin.push_back(sv);
+        }
+        for (uint32_t idx : part->indices) mesh->indices.push_back(base + idx);
+    }
+    SubMesh sm;
+    sm.first_index = 0;
+    sm.index_count = uint32_t(mesh->indices.size());
+    sm.name = "tentacle";
+    mesh->submeshes.push_back(sm);
+    mesh->compute_normals();
+    mesh->compute_tangents();
+    mesh->compute_bounds();
+    // A CHARACTER'S BOUNDS ARE ITS REST BOUNDS, and it moves outside
+    // them: grown so a waving limb is not culled when the camera
+    // turns away from where it was standing still.
+    mesh->set_bounds(AABB(Vec3(-3, -1, -3), Vec3(3, 7, 3)));
+
+    Skinned3D *body = new Skinned3D();
+    body->set_name("Tentacle");
+    body->mesh = mesh;
+    body->set_skeleton(skel);
+    Ref<Material> bm(new Material());
+    bm->albedo = Color::hex(0x7ac0a0);
+    bm->roughness = 0.45f;
+    body->set_material(0, bm.get());
+    root->add_child(body);
+
+    // The clip: each segment leans a little more than the one below
+    // and a beat later, which is what makes a chain read as a wave
+    // rather than as a hinge.
+    Ref<AnimationClip> wave(new AnimationClip());
+    wave->name = "wave";
+    wave->loops = true;
+    for (int i = 0; i < kSegments; i++) {
+        AnimationClip::BoneTrack tr;
+        tr.bone_name = "seg" + std::to_string(i);
+        const float lag = float(i) * 0.28f;
+        const float amp = deg2rad(14.0f + 5.0f * float(i));
+        for (int k = 0; k <= 24; k++) {
+            const float t = float(k) / 24.0f * 2.4f;
+            tr.rotation.times.push_back(t);
+            const float a = std::sin((t / 2.4f) * 6.2831853f - lag) * amp;
+            tr.rotation.values.push_back(
+                    Quat::from_axis_angle(Vec3(0, 0, 1), a));
+        }
+        wave->tracks.push_back(tr);
+    }
+    wave->compute_duration();
+
+    AnimationPlayer *player = new AnimationPlayer();
+    player->set_name("Animation");
+    player->add_clip(wave);
+    body->add_child(player);
+    player->play("wave", 0.0f);
+
+    WR_INFO("skin demo: %d bones, %u vertices, one clip",
+            skel->count(), mesh->vertex_count());
+}
+
 void build_terrain_demo(Engine &e) {
     SceneTree *tree = e.tree();
     g_world = e.physics();
@@ -743,7 +874,7 @@ int main(int argc, char **argv) {
             std::printf(
                 "warren [options]\n"
                 "  --backend vulkan|gl   which renderer (default vulkan)\n"
-                "  --demo portals        which scene\n"
+                "  --demo portals        which scene (portals, terrain, fly, skin)\n"
                 "  --shot FILE           save a png and carry on\n"
                 "  --shot-frame N        which frame to save (default 8)\n"
                 "  --frames N            stop after N frames (fixed 1/60s step)\n"
@@ -846,6 +977,7 @@ int main(int argc, char **argv) {
         if (demo == "portals") build_portal_demo(e);
         else if (demo == "fly") build_flythrough(e);
         else if (demo == "terrain") build_terrain_demo(e);
+        else if (demo == "skin") build_skin_demo(e);
         else WR_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;

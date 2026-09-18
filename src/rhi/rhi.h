@@ -75,6 +75,10 @@ enum class Format : uint16_t {
     R32F, RG32F, RGB32F, RGBA32F,
     RGB10A2, RG11B10F,
     R8UI, R16UI, R32UI,
+    // FOUR BYTES AS INTEGERS, NOT NORMALISED. RGBA8 is the same four
+    // bytes read as 0..1, which is right for a colour and wrong for a
+    // bone index: joint 3 of 19 must arrive as 3 and not as 0.0118.
+    RGBA8UI,
     // THE depth-stencil format. Float depth because the engine is
     // reverse-Z, stencil because it does portals, and this is the only
     // format that is both.

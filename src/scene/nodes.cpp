@@ -148,6 +148,8 @@ static void register_scene_nodes() {
 
     ClassBuilder<MeshInstance3D>()
         .prop("mesh", &MeshInstance3D::get_mesh, &MeshInstance3D::set_mesh)
+        .prop("materials", &MeshInstance3D::get_materials,
+              &MeshInstance3D::set_materials)
         // Slot zero, as a property, so a scene file and an inspector
         // can reach the common case. A mesh with several material
         // slots still needs set_material, and a scene saving only

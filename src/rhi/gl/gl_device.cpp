@@ -121,6 +121,7 @@ GlFormat gl_format(Format f) {
         case Format::R8UI: return {GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE, false};
         case Format::R16UI: return {GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT, false};
         case Format::R32UI: return {GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, false};
+        case Format::RGBA8UI: return {GL_RGBA8UI, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE, false};
         case Format::D32F_S8:
             return {GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL, GL_FLOAT_32_UNSIGNED_INT_24_8_REV, false};
         case Format::D32F: return {GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, false};
@@ -148,6 +149,7 @@ void gl_attrib_format(Format f, GLint *size, GLenum *type, GLboolean *norm,
         case Format::RG16F: *size = 2; *type = GL_HALF_FLOAT; return;
         case Format::RGBA16F: *size = 4; *type = GL_HALF_FLOAT; return;
         case Format::R32UI: *size = 1; *type = GL_UNSIGNED_INT; *integer = true; return;
+        case Format::RGBA8UI: *size = 4; *type = GL_UNSIGNED_BYTE; *integer = true; return;
         default: *size = 3; *type = GL_FLOAT; return;
     }
 }

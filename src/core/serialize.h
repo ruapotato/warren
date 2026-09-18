@@ -32,6 +32,20 @@ public:
     void i64(int64_t v) { raw(&v, 8); }
     void f32(float v) { raw(&v, 4); }
     void str(const std::string &s);
+    // TWELVE FLOATS, NOT A TAGGED VARIANT. A transform written
+    // through `variant` carries a type byte, which is worth having
+    // for a property whose type could change and is pure overhead
+    // for an array of ten thousand bone rests that could not.
+    void xform(const Transform3D &t) {
+        for (int c = 0; c < 3; c++) {
+            f32(t.basis.col[c].x);
+            f32(t.basis.col[c].y);
+            f32(t.basis.col[c].z);
+        }
+        f32(t.origin.x);
+        f32(t.origin.y);
+        f32(t.origin.z);
+    }
     // Tag and payload. Object references are written as a zero,
     // because a pointer means nothing to the other end -- whatever
     // needs to send one has to send an id it agreed on instead.
@@ -53,7 +67,20 @@ public:
     int32_t i32() { int32_t v = 0; raw(&v, 4); return v; }
     int64_t i64() { int64_t v = 0; raw(&v, 8); return v; }
     float f32() { float v = 0; raw(&v, 4); return v; }
+    Transform3D xform() {
+        Transform3D t;
+        for (int c = 0; c < 3; c++) {
+            t.basis.col[c].x = f32();
+            t.basis.col[c].y = f32();
+            t.basis.col[c].z = f32();
+        }
+        t.origin.x = f32();
+        t.origin.y = f32();
+        t.origin.z = f32();
+        return t;
+    }
     std::string str();
+
     Variant variant();
 
     // False once anything has run off the end. A truncated or

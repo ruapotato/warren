@@ -41,6 +41,7 @@ static const FormatEntry k_formats[] = {
     {Format::R8UI, "R8UI", 1, false, false, false},
     {Format::R16UI, "R16UI", 2, false, false, false},
     {Format::R32UI, "R32UI", 4, false, false, false},
+    {Format::RGBA8UI, "RGBA8UI", 4, false, false, false},
     {Format::D32F_S8, "D32F_S8", 8, true, true, false},
     {Format::D32F, "D32F", 4, true, false, false},
     {Format::D24_S8, "D24_S8", 4, true, true, false},

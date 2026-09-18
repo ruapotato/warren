@@ -133,6 +133,23 @@ public:
 
     void set_mesh(Mesh *m) { mesh = Ref<Mesh>(m); }
     Mesh *get_mesh() const { return mesh.get(); }
+    // The material list, as an Array of objects, so the scene format
+    // and the script bindings can both see it. See
+    // PackedScene's is_resource_array.
+    Array get_materials() const {
+        Array a;
+        a.reserve(materials.size());
+        for (const Ref<Material> &m : materials) a.push_back(Variant(m.get()));
+        return a;
+    }
+    void set_materials(const Array &a) {
+        materials.clear();
+        materials.reserve(a.size());
+        for (const Variant &v : a) {
+            Object *o = v.to_object();
+            materials.push_back(Ref<Material>(o ? o->cast_to<Material>() : nullptr));
+        }
+    }
     void set_material(int slot, Material *m);
     Material *first_material() const {
         return materials.empty() ? nullptr : materials[0].get();

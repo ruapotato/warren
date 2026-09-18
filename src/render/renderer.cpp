@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "platform/window.h"
 #include "render/shaders/generated/shaders.h"
+#include "scene/animated.h"
 #include "scene/scene_tree.h"
 
 namespace wr {
@@ -128,6 +129,14 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     // The bake's own set: one cubemap in, one face out. It borrows
     // the material slot so the prefilter shaders can be written
     // against a binding the standard layout already defines.
+    // THE BONES. One storage buffer holding every skinned body in the
+    // frame; a draw says where its own run starts through a push
+    // constant. See mesh_skinned.glsl.
+    BindGroupLayoutDesc bl;
+    bl.entries.push_back({24, BindingType::StorageBuffer, true, false, false, 1});
+    bl.name = "bones";
+    bone_layout_ = dev->create_bind_group_layout(bl);
+
     BindGroupLayoutDesc el;
     el.entries.push_back({17, BindingType::SampledTexture, false, true, false, 1});
     el.name = "environment source";
@@ -475,6 +484,7 @@ bool Renderer::create_pipelines() {
 
     ShaderH mesh_vs = shader("mesh", ShaderStage::Vertex);
     ShaderH mesh_fs = shader("mesh", ShaderStage::Fragment);
+    ShaderH skin_vs = shader("mesh_skinned", ShaderStage::Vertex);
     ShaderH sky_vs = shader("sky", ShaderStage::Vertex);
     ShaderH sky_fs = shader("sky", ShaderStage::Fragment);
     ShaderH portal_vs = shader("portal", ShaderStage::Vertex);
@@ -623,6 +633,23 @@ bool Renderer::create_pipelines() {
 
     base.name = "mesh opaque";
     pipe_.mesh_opaque = device_->create_pipeline(base);
+
+    // THE SKINNED VARIANT: the same state, a second vertex stream and
+    // a fourth bind group. It shares every line of its shading with
+    // the static one -- see mesh_shade.glsl -- so the two cannot
+    // drift apart, which two copies of a lighting model always do.
+    if (skin_vs.valid()) {
+        PipelineDesc sk = base;
+        sk.vertex = skin_vs;
+        sk.vertex_layout = skinned_vertex_layout();
+        sk.bind_group_layouts = {frame_layout_, view_layout_, material_layout_,
+                                 bone_layout_};
+        sk.name = "mesh skinned";
+        pipe_.mesh_skinned = device_->create_pipeline(sk);
+        sk.raster.cull = CullMode::None;
+        sk.name = "mesh skinned (two sided)";
+        pipe_.mesh_skinned_ds = device_->create_pipeline(sk);
+    }
     base.raster.cull = CullMode::None;
     base.name = "mesh opaque (two sided)";
     pipe_.mesh_opaque_ds = device_->create_pipeline(base);
@@ -858,6 +885,7 @@ uint32_t Renderer::upload_portal(const Portal3D *p) {
 
 void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
     renderables_.clear();
+    bone_rows_.clear();
     portals_.clear();
     lights_.clear();
     // The renderer's own sun fields are the default, not the law: a
@@ -915,6 +943,30 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
         Mesh *mesh = mi->mesh.get();
         if (!mesh->uploaded() && !mesh->upload(device_, mi->name().c_str())) continue;
 
+        // A SKINNED BODY WRITES ITS BONES INTO THE FRAME'S ONE BUFFER
+        // and remembers where. Done here rather than at draw time
+        // because a body is drawn once per submesh and once per
+        // portal view, and its pose is the same every time.
+        int bone_base = -1;
+        if (Skinned3D *sk = mi->cast_to<Skinned3D>()) {
+            const Pose &pose = sk->pose();
+            if (pose.valid() && mesh->skinned()) {
+                bone_base = int(bone_rows_.size() / 3);
+                for (const Transform3D &m : pose.skin) {
+                    // Three rows of four. The fourth row of a bone
+                    // matrix is always (0,0,0,1) and storing it costs
+                    // a quarter of the bandwidth for nothing.
+                    const Basis &b = m.basis;
+                    bone_rows_.push_back(Vec4(b.col[0].x, b.col[1].x, b.col[2].x,
+                                              m.origin.x));
+                    bone_rows_.push_back(Vec4(b.col[0].y, b.col[1].y, b.col[2].y,
+                                              m.origin.y));
+                    bone_rows_.push_back(Vec4(b.col[0].z, b.col[1].z, b.col[2].z,
+                                              m.origin.z));
+                }
+            }
+        }
+
         Transform3D model = mi->global_transform();
         for (const SubMesh &sm : mesh->submeshes) {
             Renderable r;
@@ -927,11 +979,50 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
             r.bounds = sm.bounds.transformed(model);
             r.tint = mi->tint;
             r.key = r.material->sort_key();
+            r.bone_base = bone_base;
             renderables_.push_back(r);
         }
     }
     stats_.visible_meshes = uint32_t(renderables_.size());
     stats_.lights = uint32_t(lights_.size());
+    stats_.skinned_bones = uint32_t(bone_rows_.size() / 3);
+    upload_bones();
+}
+
+
+// EVERY BODY'S BONES, ONCE A FRAME.
+//
+// The buffer grows and never shrinks: a round with thirty shamblers
+// in it is followed by another one, and freeing the storage between
+// them to reallocate it a second later is work for no reason. It is
+// three vec4s per bone -- thirty bodies on a nineteen-bone rig is
+// twenty-seven kilobytes.
+void Renderer::upload_bones() {
+    if (bone_rows_.empty()) return;
+    const uint32_t need = uint32_t(bone_rows_.size());
+    if (need > bone_capacity_) {
+        if (bone_buffer_.valid()) device_->destroy(bone_buffer_);
+        if (bone_group_.valid()) device_->destroy(bone_group_);
+        // Rounded up generously, so a crowd that grows by one body
+        // does not reallocate.
+        bone_capacity_ = std::max(need * 2u, 3u * 256u);
+        rhi::BufferDesc bd;
+        bd.size = uint64_t(bone_capacity_) * sizeof(Vec4);
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.access = rhi::MemoryAccess::CpuToGpu;
+        bd.name = "bones";
+        bone_buffer_ = device_->create_buffer(bd);
+        rhi::BindGroupDesc gd;
+        gd.layout = bone_layout_;
+        rhi::BindGroupEntry e;
+        e.binding = 24;
+        e.buffer = bone_buffer_;
+        gd.entries.push_back(e);
+        gd.name = "bones";
+        bone_group_ = device_->create_bind_group(gd);
+    }
+    device_->write_buffer(bone_buffer_, bone_rows_.data(),
+                          uint64_t(need) * sizeof(Vec4));
 }
 
 // --------------------------------------------------------------- drawing
@@ -974,12 +1065,23 @@ void Renderer::draw_geometry(rhi::CommandList *cmd, const View &view,
     for (const Item &it : items) {
         const Renderable &r = *it.r;
         bool ds = r.material->double_sided;
+        // A SKINNED BODY IS A DIFFERENT PIPELINE, not a flag.
+        //
+        // It has a second vertex stream and a fourth bind group, and
+        // both of those are baked into a pipeline. Only the opaque
+        // and cutout passes have a skinned variant -- a transparent
+        // character is not a thing this engine needs and pretending
+        // otherwise would be two more pipelines that are never used.
+        const bool skinned = r.bone_base >= 0 && pipe_.mesh_skinned.valid()
+                && pass != MaterialPass::Transparent;
         switch (pass) {
             case MaterialPass::Opaque:
-                pipeline = ds ? pipe_.mesh_opaque_ds : pipe_.mesh_opaque;
+                pipeline = skinned ? (ds ? pipe_.mesh_skinned_ds : pipe_.mesh_skinned)
+                                   : (ds ? pipe_.mesh_opaque_ds : pipe_.mesh_opaque);
                 break;
             case MaterialPass::AlphaCutout:
-                pipeline = ds ? pipe_.mesh_cutout_ds : pipe_.mesh_cutout;
+                pipeline = skinned ? (ds ? pipe_.mesh_skinned_ds : pipe_.mesh_skinned)
+                                   : (ds ? pipe_.mesh_cutout_ds : pipe_.mesh_cutout);
                 break;
             case MaterialPass::Transparent:
                 pipeline = ds ? pipe_.mesh_blend_ds : pipe_.mesh_blend;
@@ -1000,8 +1102,14 @@ void Renderer::draw_geometry(rhi::CommandList *cmd, const View &view,
         PushUniforms pu{};
         pu.model = to_projection(r.model);
         pu.tint = r.tint.rgba();
+        // Where this body's bones begin in the frame's one buffer.
+        if (skinned) pu.params.x = float(r.bone_base);
         cmd->push_constants(&pu, sizeof(pu));
         cmd->bind_vertex_buffer(0, r.mesh->vertex_buffer());
+        if (skinned) {
+            cmd->bind_vertex_buffer(1, r.mesh->skin_buffer());
+            cmd->bind_group(3, bone_group_);
+        }
         cmd->bind_index_buffer(r.mesh->index_buffer(), IndexType::U32);
         cmd->draw_indexed(r.sub->index_count, 1, r.sub->first_index);
         stats_.draw_calls++;

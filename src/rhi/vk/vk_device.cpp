@@ -73,6 +73,7 @@ VkFormat vk_format(Format f) {
         case Format::R8UI: return VK_FORMAT_R8_UINT;
         case Format::R16UI: return VK_FORMAT_R16_UINT;
         case Format::R32UI: return VK_FORMAT_R32_UINT;
+        case Format::RGBA8UI: return VK_FORMAT_R8G8B8A8_UINT;
         case Format::D32F_S8: return VK_FORMAT_D32_SFLOAT_S8_UINT;
         case Format::D32F: return VK_FORMAT_D32_SFLOAT;
         case Format::D24_S8: return VK_FORMAT_D24_UNORM_S8_UINT;

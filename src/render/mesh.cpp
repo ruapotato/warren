@@ -25,6 +25,19 @@ rhi::VertexLayout standard_vertex_layout() {
     return vl;
 }
 
+rhi::VertexLayout skinned_vertex_layout() {
+    using namespace rhi;
+    VertexLayout vl = standard_vertex_layout();
+    vl.bindings.push_back({1, uint32_t(sizeof(SkinVertex)), false});
+    // Unsigned bytes read as floats: a rig of up to 256 bones, which
+    // is four times what anything in this engine has, and the shader
+    // wants them as floats to index with anyway.
+    vl.attributes.push_back({5, 1, Format::RGBA8UI, offsetof(SkinVertex, joints)});
+    // Normalised: the importer already scaled them to sum to one.
+    vl.attributes.push_back({6, 1, Format::RGBA8, offsetof(SkinVertex, weights)});
+    return vl;
+}
+
 Mesh::~Mesh() {
     if (owner_) release(owner_);
 }
