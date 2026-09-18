@@ -673,6 +673,23 @@ public:
     // --- diagnostics ---------------------------------------------------------------
     // Human-readable dump of every live resource, for a leak hunt.
     virtual std::string resource_report() const = 0;
+
+    // HOW MANY DESTROYED RESOURCES ARE STILL WAITING FOR THE GPU.
+    //
+    // A backend that records command buffers ahead of the GPU cannot
+    // free a resource the moment destroy() is called -- a frame that
+    // is still executing may be reading it. So destruction is
+    // deferred until the fence of the last frame that could reference
+    // it has been waited on.
+    //
+    // This counts what is outstanding. It is a diagnostic, and it is
+    // also the only way to TEST the deferral without depending on how
+    // fast the GPU happens to be: the rule is that a resource
+    // destroyed between frames survives at least one more begin_frame,
+    // and that is checkable exactly.
+    //
+    // An immediate backend has nothing to defer and reports zero.
+    virtual size_t pending_deletions() const = 0;
 };
 
 // Creates the requested backend, or returns null with the reason

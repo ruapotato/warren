@@ -23,7 +23,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <vector>
 
 #include "render/material.h"
 #include "render/mesh.h"
@@ -249,6 +248,7 @@ private:
     bool create_targets(uint32_t w, uint32_t h);
     void destroy_targets();
     bool create_pipelines();
+    rhi::PipelineH tonemap_for(rhi::Format format);
     void collect(SceneTree *tree, uint32_t cull_mask);
     void render_view(rhi::CommandList *cmd, const View &view, uint32_t stencil_ref);
     void draw_geometry(rhi::CommandList *cmd, const View &view, uint32_t stencil_ref,
@@ -327,7 +327,14 @@ private:
         rhi::PipelineH portal_depth_clear;
         rhi::PipelineH portal_restore;
         rhi::PipelineH portal_rim;
-        rhi::PipelineH tonemap;
+        // ONE PER TARGET FORMAT. The tonemap is the only pass that
+        // writes to a texture the caller chose, and a graphics
+        // pipeline is compiled against the format it writes to. A
+        // renderer that only ever drew to the swapchain got away with
+        // a single pipeline; rendering to an offscreen target of any
+        // other format is invalid, silently on a release driver and
+        // loudly under validation.
+        std::unordered_map<int, rhi::PipelineH> tonemap;
         rhi::PipelineH shadow, shadow_ds;
         rhi::PipelineH punctual, punctual_ds;
         rhi::PipelineH skycube, irradiance, prefilter;

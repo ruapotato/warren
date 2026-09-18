@@ -349,6 +349,7 @@ public:
     void wait_idle() override { if (device_) vkDeviceWaitIdle(device_); }
     const FrameStats &stats() const override { return stats_; }
     std::string resource_report() const override;
+    size_t pending_deletions() const override;
 
     // --- used by the command list ----------------------------------------
     HandlePool<VkBufferRes, BufferH> buffers;
@@ -419,6 +420,10 @@ private:
         uint64_t staging_used = 0;
         std::vector<std::function<void()>> deletions;
     };
+
+    // The frame a deferred deletion should ride on; see the comment
+    // on the definition, which is where the bug was.
+    Frame &retiring_frame();
 
     SDL_Window *window_ = nullptr;
     VkInstance instance_ = VK_NULL_HANDLE;
@@ -1032,6 +1037,32 @@ BufferH VkDeviceImpl::create_buffer(const BufferDesc &d, const void *initial) {
     return h;
 }
 
+// WHERE A DEFERRED DELETION GOES.
+//
+// Not `frames_[frame_index_]`, which is what this used to do and is
+// wrong half the time. end_frame ADVANCES frame_index_, so between
+// frames it names the slot that will be recorded NEXT -- and that
+// slot's fence is from frames_in_flight ago and is already signalled.
+// A resource destroyed between frames was therefore freed at the very
+// next begin_frame, while the frame that had just been submitted was
+// still reading it.
+//
+// That is not a subtle corruption. A game frees things in its update
+// -- a corpse is removed, a weapon is swapped -- and an update runs
+// between frames, because that is when a script runs. So buffers and
+// descriptor sets were destroyed out from under the GPU, the
+// validation layer said so in a flood, and some seconds later the
+// frame loop came apart: fences in use, command buffers in use, and
+// vkQueueSubmit2 failing outright.
+//
+// The correct slot is the one whose fence is waited LAST among
+// everything that could still be running: the frame being recorded if
+// there is one, otherwise the frame just submitted.
+VkDeviceImpl::Frame &VkDeviceImpl::retiring_frame() {
+    if (frame_open_) return frames_[frame_index_];
+    return frames_[(frame_index_ + frames_in_flight_ - 1) % frames_in_flight_];
+}
+
 void VkDeviceImpl::destroy(BufferH h) {
     VkBufferRes *b = buffers.get(h);
     if (!b) return;
@@ -1039,7 +1070,7 @@ void VkDeviceImpl::destroy(BufferH h) {
     // frames_in_flight - 1 more.
     VkBuffer buf = b->buffer;
     Allocation mem = b->memory;
-    frames_[frame_index_].deletions.push_back([this, buf, mem]() {
+    retiring_frame().deletions.push_back([this, buf, mem]() {
         if (buf) vkDestroyBuffer(device_, buf, nullptr);
         if (mem.valid()) alloc_.free(mem);
     });
@@ -1174,7 +1205,7 @@ void VkDeviceImpl::destroy(TextureH h) {
     std::vector<VkImageView> slices;
     for (const auto &kv : t->slices) slices.push_back(kv.second);
     Allocation mem = t->memory;
-    frames_[frame_index_].deletions.push_back([this, img, view, slices, mem]() {
+    retiring_frame().deletions.push_back([this, img, view, slices, mem]() {
         for (VkImageView v : slices) vkDestroyImageView(device_, v, nullptr);
         if (view) vkDestroyImageView(device_, view, nullptr);
         if (img) vkDestroyImage(device_, img, nullptr);
@@ -1307,9 +1338,10 @@ size_t VkDeviceImpl::read_texture(TextureH h, void *out, size_t capacity,
     std::memcpy(out, sb->memory.mapped, need);
     destroy(staging);
     // The deferred delete would otherwise wait a frame that may never
-    // come in a headless test.
-    for (auto &fn : frames_[frame_index_].deletions) fn();
-    frames_[frame_index_].deletions.clear();
+    // come in a headless test. Safe here: the queue was just waited
+    // idle, so nothing is still reading anything.
+    for (auto &fn : retiring_frame().deletions) fn();
+    retiring_frame().deletions.clear();
     return need;
 }
 
@@ -1355,7 +1387,7 @@ SamplerH VkDeviceImpl::create_sampler(const SamplerDesc &d) {
 void VkDeviceImpl::destroy(SamplerH h) {
     if (VkSamplerRes *s = samplers.get(h)) {
         VkSampler sm = s->sampler;
-        frames_[frame_index_].deletions.push_back(
+        retiring_frame().deletions.push_back(
             [this, sm]() { if (sm) vkDestroySampler(device_, sm, nullptr); });
     }
     samplers.destroy(h);
@@ -1442,7 +1474,7 @@ BindGroupH VkDeviceImpl::create_bind_group(const BindGroupDesc &d) {
 void VkDeviceImpl::destroy(BindGroupH h) {
     if (VkGroupRes *g = groups.get(h)) {
         VkDescriptorSet set = g->set;
-        frames_[frame_index_].deletions.push_back([this, set]() {
+        retiring_frame().deletions.push_back([this, set]() {
             if (set) vkFreeDescriptorSets(device_, descriptor_pool_, 1, &set);
         });
     }
@@ -2122,6 +2154,12 @@ void VkDeviceImpl::end_frame() {
         create_swapchain(uint32_t(w), uint32_t(h));
     }
     frame_index_ = (frame_index_ + 1) % frames_in_flight_;
+}
+
+size_t VkDeviceImpl::pending_deletions() const {
+    size_t n = 0;
+    for (const Frame &f : frames_) n += f.deletions.size();
+    return n;
 }
 
 std::string VkDeviceImpl::resource_report() const {

@@ -889,31 +889,42 @@ std::vector<uint8_t> serialise_tree(Node *root) {
     return std::move(w.bytes);
 }
 
-Node *deserialise_tree(const uint8_t *data, size_t size) {
-    ByteReader r(data, size);
-    if (r.u32() != kSceneMagic) {
-        WR_ERROR("scene: not a Warren scene file");
-        return nullptr;
+Node *deserialise_tree(const uint8_t *data, size_t size,
+                       SceneResources *shared) {
+    SceneResources own;
+    SceneResources &res = shared ? *shared : own;
+
+    if (res.node_offset == 0) {
+        ByteReader r(data, size);
+        if (r.u32() != kSceneMagic) {
+            WR_ERROR("scene: not a Warren scene file");
+            return nullptr;
+        }
+        const uint32_t version = r.u32();
+        if (version != kSceneVersion) {
+            WR_ERROR("scene: version %u, this build reads %u", version,
+                     kSceneVersion);
+            return nullptr;
+        }
+        const uint32_t resource_count = r.u32();
+        if (!r.ok() || resource_count > 1u << 20) {
+            WR_ERROR("scene: an implausible resource count");
+            return nullptr;
+        }
+        res.table.reserve(resource_count);
+        for (uint32_t i = 0; i < resource_count && r.ok(); i++)
+            res.table.push_back(read_resource(r, res.table));
+        if (!r.ok()) {
+            WR_ERROR("scene: the resource table is truncated");
+            return nullptr;
+        }
+        // Where the nodes start. Recorded so the next instance can
+        // begin here and keep the table above.
+        res.node_offset = size - r.left();
     }
-    const uint32_t version = r.u32();
-    if (version != kSceneVersion) {
-        WR_ERROR("scene: version %u, this build reads %u", version,
-                 kSceneVersion);
-        return nullptr;
-    }
-    const uint32_t resource_count = r.u32();
-    if (!r.ok() || resource_count > 1u << 20) {
-        WR_ERROR("scene: an implausible resource count");
-        return nullptr;
-    }
-    std::vector<Ref<Object>> resources;
-    resources.reserve(resource_count);
-    for (uint32_t i = 0; i < resource_count && r.ok(); i++)
-        resources.push_back(read_resource(r, resources));
-    if (!r.ok()) {
-        WR_ERROR("scene: the resource table is truncated");
-        return nullptr;
-    }
+
+    const std::vector<Ref<Object>> &resources = res.table;
+    ByteReader r(data + res.node_offset, size - res.node_offset);
     if (r.u32() == 0) return nullptr;
 
     std::vector<PendingLink> links;
@@ -958,7 +969,7 @@ bool PackedScene::pack(Node *root) {
 
 Node *PackedScene::instantiate() const {
     if (bytes.empty()) return nullptr;
-    Node *n = deserialise_tree(bytes.data(), bytes.size());
+    Node *n = deserialise_tree(bytes.data(), bytes.size(), &shared_);
     if (!n) return nullptr;
     // EVERYTHING INSIDE BELONGS TO THIS INSTANCE. That is what makes
     // a tree containing it write one line instead of a copy.

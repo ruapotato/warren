@@ -377,8 +377,10 @@ void Renderer::shutdown() {
     for (PipelineH *p : {&pipe_.mesh_opaque, &pipe_.mesh_opaque_ds, &pipe_.mesh_cutout,
                          &pipe_.mesh_cutout_ds, &pipe_.mesh_blend, &pipe_.mesh_blend_ds,
                          &pipe_.sky, &pipe_.portal_mark, &pipe_.portal_depth_clear,
-                         &pipe_.portal_restore, &pipe_.portal_rim, &pipe_.tonemap})
+                         &pipe_.portal_restore, &pipe_.portal_rim})
         if (p->valid()) device_->destroy(*p);
+    for (auto &kv : pipe_.tonemap)
+        if (kv.second.valid()) device_->destroy(kv.second);
     pipe_ = Pipelines();
     for (BindGroupH *g : {&frame_group_, &view_group_, &portal_group_, &tonemap_group_})
         if (g->valid()) device_->destroy(*g);
@@ -471,6 +473,58 @@ void Renderer::resize(uint32_t w, uint32_t h) {
 }
 
 // ------------------------------------------------------------ pipelines
+
+// THE LAST PASS, COMPILED FOR WHATEVER IT IS WRITING TO.
+//
+// Everything before it draws into the renderer's own HDR target,
+// whose format the renderer chose. The tonemap writes to the texture
+// the CALLER passed, and a graphics pipeline is compiled against the
+// format of its colour attachment -- so one pipeline serves one
+// format. Only ever drawing to the swapchain hid that; an offscreen
+// RGBA8 target, which is what a test, a thumbnail or a
+// render-to-texture uses, is a mismatch the driver may do anything
+// with and which only the validation layer complains about.
+//
+// Kept in a map rather than rebuilt: a process has one or two.
+//
+// ITS OWN VERTEX STAGE, not the shared full-screen one.
+// fullscreen.glsl writes push.params.x into gl_Position.z, because
+// the portal pass needs a triangle at a chosen depth to clear depth
+// inside a stencil, and the tonemap's fragment stage reads that same
+// push slot as the exposure. Sharing the vertex shader made the
+// exposure the clip-space Z as well, so anything above 1.0 put the
+// triangle outside the clip volume and deleted the frame. See
+// docs/known-issues.md.
+PipelineH Renderer::tonemap_for(Format format) {
+    auto it = pipe_.tonemap.find(int(format));
+    if (it != pipe_.tonemap.end()) return it->second;
+
+    auto shader = [&](const char *name, ShaderStage stage) -> ShaderH {
+        const shaders::Blob *b = shaders::find(name, stage);
+        if (!b) {
+            WR_ERROR("renderer: shader '%s' is missing from the build", name);
+            return {};
+        }
+        return device_->create_shader(shaders::desc(*b));
+    };
+
+    PipelineDesc t;
+    t.vertex = shader("tonemap", ShaderStage::Vertex);
+    t.fragment = shader("tonemap", ShaderStage::Fragment);
+    t.colour_formats = {format};
+    t.depth_format = Format::Undefined;
+    t.samples = 1;
+    t.bind_group_layouts = {frame_layout_, view_layout_, tonemap_layout_};
+    t.push_constant_size = sizeof(PushUniforms);
+    t.raster.cull = CullMode::None;
+    t.depth_stencil.depth_test = false;
+    t.depth_stencil.depth_write = false;
+    t.blend = {BlendState::opaque()};
+    t.name = "tonemap";
+    const PipelineH made = device_->create_pipeline(t);
+    pipe_.tonemap[int(format)] = made;
+    return made;
+}
 
 bool Renderer::create_pipelines() {
     auto shader = [&](const char *name, ShaderStage stage) -> ShaderH {
@@ -774,35 +828,13 @@ bool Renderer::create_pipelines() {
         d.name = "portal depth clear";
         pipe_.portal_depth_clear = device_->create_pipeline(d);
 
-        // --- tonemap, straight to the swapchain
-        //
-        // ITS OWN VERTEX STAGE, not the shared full-screen one.
-        // fullscreen.glsl writes push.params.x into gl_Position.z,
-        // because the portal pass needs a triangle at a chosen depth
-        // to clear depth inside a stencil. The tonemap's fragment
-        // stage reads that same push slot as the exposure. Sharing
-        // the vertex shader therefore made the exposure the
-        // clip-space Z as well, and anything above 1.0 put the
-        // triangle outside the clip volume and deleted the frame.
-        // See docs/known-issues.md for the hunt.
-        PipelineDesc t;
-        t.vertex = shader("tonemap", ShaderStage::Vertex);
-        t.fragment = shader("tonemap", ShaderStage::Fragment);
-        t.colour_formats = {device_->swapchain_format()};
-        t.depth_format = Format::Undefined;
-        t.samples = 1;
-        t.bind_group_layouts = {frame_layout_, view_layout_, tonemap_layout_};
-        t.push_constant_size = sizeof(PushUniforms);
-        t.raster.cull = CullMode::None;
-        t.depth_stencil.depth_test = false;
-        t.depth_stencil.depth_write = false;
-        t.blend = {BlendState::opaque()};
-        t.name = "tonemap";
-        pipe_.tonemap = device_->create_pipeline(t);
+        // The tonemap pipeline is built on demand, once per
+        // target format -- see tonemap_for.
     }
 
     return pipe_.mesh_opaque.valid() && pipe_.portal_mark.valid() &&
-           pipe_.portal_restore.valid() && pipe_.tonemap.valid();
+           pipe_.portal_restore.valid() &&
+           tonemap_for(device_->swapchain_format()).valid();
 }
 
 // ------------------------------------------------------------ uniforms
@@ -2177,7 +2209,7 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
         ri.name = "tonemap";
         cmd->begin_rendering(ri);
         cmd->set_scissor({0, 0, td.width, td.height});
-        cmd->bind_pipeline(pipe_.tonemap);
+        cmd->bind_pipeline(tonemap_for(td.format));
         cmd->bind_group(0, frame_group_);
         uint32_t zero = 0;
         cmd->bind_group(1, view_group_, &zero, 1);

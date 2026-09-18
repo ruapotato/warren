@@ -35,6 +35,25 @@
 
 namespace wr {
 
+// THE RESOURCES A SCENE'S INSTANCES SHARE.
+//
+// A scene file carries its meshes, materials and textures in a table
+// at the front. Re-reading that table for every instance means every
+// zombie in a horde decodes its own copy of the same six textures and
+// uploads six more megabytes -- which is what happened, and what
+// filled the staging ring frame after frame.
+//
+// So the table is read once and kept. `node_offset` is where the node
+// data begins, recorded on that first read so later instances can
+// skip straight to it.
+struct SceneResources {
+    std::vector<Ref<Object>> table;
+    size_t node_offset = 0;      // 0 until the table has been read
+};
+
+// `shared` is optional; without it the table is read fresh, which is
+// what a one-off load of a file wants.
+
 class PackedScene : public Resource {
     WR_CLASS(PackedScene, Resource)
 
@@ -53,8 +72,17 @@ public:
     // Build a new tree from it. Every node's `owner` is set to the
     // returned root, so saving the result again writes it as one
     // instance line rather than as a copy of everything inside.
+    // MATERIALS AND TEXTURES ARE SHARED BETWEEN INSTANCES, and
+    // meshes with them. Two instances of one scene point at the same
+    // Material; changing it changes both, which is the same bargain
+    // every engine makes and the reason a crowd is affordable. A
+    // caller that wants its own takes a copy.
     Node *instantiate() const;
     bool valid() const { return !bytes.empty(); }
+    // Drop the shared table, so the next instance reads it again.
+    // For a hot reload, and for a test that must not see the last
+    // case's resources.
+    void forget_resources() const { shared_ = SceneResources(); }
 
     // Capture a tree. Nodes whose owner is not `root` -- the
     // contents of scenes instanced inside it -- are written as
@@ -62,8 +90,13 @@ public:
     bool pack(Node *root);
 
     static Ref<PackedScene> load(const std::string &path);
+
     bool save(const std::string &path);
 
+private:
+    mutable SceneResources shared_;
+
+public:
     // How a scene file names another scene. Resolved through this,
     // so a game can redirect it -- a pak file, a hot-reload cache --
     // without the serialiser knowing.
@@ -75,6 +108,9 @@ public:
 // Serialising a tree without going through a PackedScene, for
 // anything that wants the bytes: the network, an undo stack, a test.
 std::vector<uint8_t> serialise_tree(Node *root);
-Node *deserialise_tree(const uint8_t *data, size_t size);
+
+
+Node *deserialise_tree(const uint8_t *data, size_t size,
+                       SceneResources *shared = nullptr);
 
 }  // namespace wr

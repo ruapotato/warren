@@ -325,6 +325,9 @@ public:
     void wait_idle() override { glFinish(); }
     const FrameStats &stats() const override { return stats_; }
     std::string resource_report() const override;
+    // Immediate: a GL call is ordered against everything before it,
+    // so a delete needs no deferral and nothing is ever outstanding.
+    size_t pending_deletions() const override { return 0; }
 
     // --- used by the command list -----------------------------------------
     HandlePool<GlBuffer, BufferH> buffers;
