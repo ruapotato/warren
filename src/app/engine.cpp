@@ -226,6 +226,40 @@ bool Engine::step() {
 
     const bool want_shot = !config_.screenshot_path.empty() &&
                            frames_ + 1 == config_.screenshot_frame;
+    // THE GAME'S UI, before the editor's: the editor draws over the
+    // game, including over the game's interface, which is what a
+    // tool should do.
+    {
+        UiSystem::Frame uf;
+        const Vec2i drawable = window_.drawable_size();
+        uf.width = float(drawable.x);
+        uf.height = float(drawable.y);
+        const Vec2 mouse = Input::mouse_position();
+        uf.mouse = mouse;
+        uf.mouse_down = Input::mouse_down(MouseButton::Left);
+        uf.mouse_right = Input::mouse_down(MouseButton::Right);
+        uf.wheel = Input::wheel();
+        uf.text = Input::text_typed();
+        uf.ctrl = Input::key_down(Key::LeftCtrl) ||
+                  Input::key_down(Key::RightCtrl);
+        uf.shift = Input::key_down(Key::LeftShift) ||
+                   Input::key_down(Key::RightShift);
+        for (int code : {int(Key::Backspace), int(Key::Return),
+                         int(Key::Delete), int(Key::Left), int(Key::Right),
+                         int(Key::Tab), int(Key::Escape)})
+            if (Input::key_just_pressed(Key(code))) uf.keys_pressed.push_back(code);
+        // While the editor has the pointer, the game's UI does not
+        // see it -- otherwise clicking a panel also clicks whatever
+        // is behind it.
+        if (config_.enable_editor && editor_.enabled() &&
+            editor_.captures_mouse()) {
+            uf.mouse_down = false;
+            uf.text.clear();
+            uf.keys_pressed.clear();
+        }
+        ui_system_.update(tree_.get(), uf, dt);
+    }
+
     // THE EDITOR IS BUILT BEFORE THE FRAME IS RECORDED, so that a
     // panel that changes a property changes it for the frame the
     // player is about to see rather than the one after. It is a
@@ -265,8 +299,12 @@ bool Engine::step() {
         // a panel through the scene's tonemap makes it change
         // brightness when the player walks into a dark room, which
         // is the one thing a tool must not do.
-        if (config_.enable_editor && editor_.enabled() && ui_ready_ &&
-            !ui_.draw_data().empty()) {
+        const bool draw_game_ui =
+            ui_ready_ && !ui_system_.draw_list().data.empty();
+        const bool draw_editor_ui = config_.enable_editor &&
+                                    editor_.enabled() && ui_ready_ &&
+                                    !ui_.draw_data().empty();
+        if (draw_game_ui || draw_editor_ui) {
             rhi::TextureH target = device_->swapchain_texture();
             rhi::TextureDesc td = device_->texture_desc(target);
             rhi::RenderingInfo ri;
@@ -282,7 +320,11 @@ bool Engine::step() {
             vp.width = float(td.width);
             vp.height = float(td.height);
             cmd->set_viewport(vp);
-            ui_renderer_.draw(cmd, ui_.draw_data(), td.width, td.height);
+            if (draw_game_ui)
+                ui_renderer_.draw(cmd, ui_system_.draw_list().data, td.width,
+                                  td.height);
+            if (draw_editor_ui)
+                ui_renderer_.draw(cmd, ui_.draw_data(), td.width, td.height);
             cmd->end_rendering();
         }
         if (want_shot) device_->request_capture();

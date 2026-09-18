@@ -13,6 +13,7 @@
 #include "editor/editor.h"
 #include "render/renderer.h"
 #include "scene/audio_nodes.h"
+#include "scene/ui_system.h"
 #include "ui/ui.h"
 #include "ui/ui_renderer.h"
 #include "scene/scene_tree.h"
@@ -84,6 +85,7 @@ public:
     AudioServer *audio() { return &audio_; }
     AudioSystem *audio_system() { return &audio_system_; }
     Editor *editor() { return &editor_; }
+    UiSystem *ui_system() { return &ui_system_; }
     ui::Context *ui() { return &ui_; }
     const Clock &clock() const { return clock_; }
     uint64_t frames() const { return frames_; }
@@ -124,6 +126,7 @@ private:
     AudioServer audio_;
     AudioSystem audio_system_;
     Editor editor_;
+    UiSystem ui_system_;
     ui::Context ui_;
     ui::Renderer ui_renderer_;
     bool ui_ready_ = false;

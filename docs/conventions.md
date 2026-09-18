@@ -398,3 +398,72 @@ expected something. `Node::find_path` is the quiet one, for a lookup
 that is allowed to fail — resolving a saved path, probing for an
 optional child. A "not found" that is a normal answer should never
 be logged as an error.
+
+## Two user interfaces, on purpose
+
+A **game's** UI is content: authored in the editor, themed, saved in
+a scene file, instanced. That has to be a tree of nodes, because
+none of those verbs apply to something that exists only for the
+duration of a function call. `Control` and its subclasses.
+
+A **tool's** UI is a view of state that changes underneath it. A
+retained widget tree has to be told when a node was added, renamed,
+deleted or re-parented, and every one of those messages is a chance
+to be out of date; a UI rebuilt from the scene every frame cannot
+be. `ui::Context`.
+
+They share `ui::DrawList`, the font, and one renderer.
+
+### Colour, and the two errors that cancelled
+
+`Color` is **linear**. `Color::hex` converts on the way in, because
+a hex literal is how a person writes an sRGB colour.
+
+A vertex colour is packed as **sRGB bytes**, the shader decodes it,
+and the sRGB swapchain encodes it again on write. Quantising a
+linear value into a byte instead spends nearly all of its precision
+on highlights: the theme's panel colour, `0x262A30`, becomes 5/255
+and the whole dark end of the palette collapses onto a handful of
+levels.
+
+The first version skipped the encode when packing *and* decoded in
+the shader. Those cancel, so the colour on screen was exactly right
+and nothing looked wrong — the only symptom was three bits of
+precision in every dark shade. It took writing a known constant
+through the pipeline and measuring the result to tell the two apart,
+because reasoning about it produced a consistent and wrong answer
+twice.
+
+### Anchors
+
+A control's rectangle is derived every frame from four anchors
+(fractions of the parent) and four offsets (pixels from those
+anchors). Anchor all four to 0 and the offsets are a fixed box;
+anchor left and right to 0 and 1 and it stretches; anchor all four to
+0.5 and it stays centred at a fixed size.
+
+**Use the presets.** Setting two anchors by hand and leaving the
+other offsets at their defaults gives a control a hundred pixels
+wider than its parent, and it reads as the anchor being broken.
+`set_anchors_preset` zeroes what it must.
+
+A **container overrides its children's anchors**. That is what
+putting something in a box means, and it is the one thing about a
+node UI that surprises people.
+
+### Hit testing goes backwards
+
+Later siblings draw on top, so the topmost control at a point is the
+last one that contains it. Walking forwards means the first button
+in a stack takes every click in the overlap while the second draws
+over it -- which reads as the second button not working.
+
+A click is the **release over the control that was pressed**, which
+is what lets someone change their mind by dragging off it.
+
+### Globals that name a node must be cleared by the node
+
+The active camera, the audio listener and the focused control are
+each one pointer, and a node freed with its scene leaves it
+dangling. All three crashed exactly once. Each clears itself in
+`on_exit_tree`, because only the node knows every way it can leave.

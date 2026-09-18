@@ -225,6 +225,33 @@ classes are in there too. `tests/test_python` compiles the result and
 checks it covers every registered class, which is what keeps it from
 rotting.
 
+## Scenes and UI, the way Godot does them
+
+A scene is a file you can **instance**. A door is a scene, a corridor
+is eight instances of it, and editing the door changes all eight —
+except the one somebody deliberately made different. Measured: one
+door is 1581 bytes and a corridor of eight is **632**, because it is
+eight references and a handful of overrides.
+
+A **UI is made of nodes**, so a health bar is a scene and a party of
+four is four instances of it. `Control` has Godot's anchors-and-
+offsets model: four fractions of the parent and four pixel offsets,
+which covers pinning, stretching and centring with one mechanism and
+no separate docking concept. `HBoxContainer`, `VBoxContainer`,
+`GridContainer`, `MarginContainer`, `CenterContainer` and
+`PanelContainer` arrange their children and override their anchors,
+which is what putting something in a box means. `Label`, `Button`,
+`CheckBox`, `LineEdit`, `Slider`, `ProgressBar`, `Panel` and
+`ColorRect` emit signals — `pressed`, `value_changed`,
+`text_submitted` — so a button knows nothing about what it does.
+
+**The engine has two user interfaces on purpose.** A game's UI is
+content: authored, themed, saved in a file, instanced. A tool's UI is
+a view of state that changes underneath it, and is better rebuilt
+every frame than told about every change. So the editor is immediate
+mode and the game's is a node tree, and they share a font, a draw
+list and one renderer.
+
 ## The editor
 
 `--editor` starts with it open; **F1** toggles it. A scene tree, an
@@ -294,7 +321,8 @@ src/scene/         node tree, cameras, lights, Portal3D, bodies
 src/physics/       shapes, BVH, sweeps, portal-aware tracing
 src/audio/         the mixer and clip loading
 src/net/           sockets, reliability, replication
-src/ui/            immediate-mode widgets and a 5x7 font
+src/ui/            the draw list, a 5x7 font, immediate-mode widgets
+src/resource/      PackedScene: saving, loading and instancing
 src/editor/        the scene tree, inspector, console and scene files
 src/script/        the Python bridge and the stub generator
 src/plugin/        the plugin ABI and host
@@ -305,7 +333,8 @@ tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
                    lights, image-based lighting, punctual shadows,
                    the plugin ABI and terrain LOD, audio,
-                   networking, the UI, the editor, Python
+                   networking, the UI, controls, scenes, the
+                   editor, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -330,6 +359,7 @@ streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
 Not yet: a resource system (scenes store meshes inline), scripts in
-scene files, transform gizmos, and an asset importer.
+scene files, transform gizmos, an asset importer, and text wrapping
+in `Label`.
 
 See `docs/conventions.md` before touching the renderer.

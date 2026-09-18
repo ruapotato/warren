@@ -42,7 +42,7 @@ Context::Window *Context::current() {
 }
 
 bool Context::mouse_in(const Rect &r) const {
-    return r.clipped(active_clip_).contains(input_.mouse_x, input_.mouse_y);
+    return r.clipped(draw_.clip()).contains(input_.mouse_x, input_.mouse_y);
 }
 
 // ------------------------------------------------------------ the frame
@@ -54,10 +54,8 @@ void Context::begin_frame(float width, float height, const Input &input,
     width_ = width;
     height_ = height;
     dt_ = dt;
-    draw_.clear();
-    clip_stack_.clear();
-    active_clip_ = {0, 0, width, height};
-    command_start_ = 0;
+    draw_.begin(width, height);
+    draw_.text_scale = theme.scale;
     current_window_ = -1;
     hot_ = 0;
     wants_mouse_ = false;
@@ -66,7 +64,7 @@ void Context::begin_frame(float width, float height, const Input &input,
 }
 
 void Context::end_frame() {
-    flush_command();
+    draw_.end();
     // THE ACTIVE WIDGET IS RELEASED AT THE END, NOT THE START.
     //
     // A click is the release over the control that was pressed --
@@ -79,115 +77,38 @@ void Context::end_frame() {
     if (!input_.mouse_down) active_ = 0;
 }
 
-void Context::flush_command() {
-    const uint32_t end = uint32_t(draw_.indices.size());
-    if (end == command_start_) return;
-    DrawCommand c;
-    c.clip = active_clip_;
-    c.first_index = command_start_;
-    c.index_count = end - command_start_;
-    draw_.commands.push_back(c);
-    command_start_ = end;
-}
-
-void Context::push_clip(const Rect &r) {
-    flush_command();
-    clip_stack_.push_back(active_clip_);
-    active_clip_ = active_clip_.clipped(r);
-}
-
-void Context::pop_clip() {
-    flush_command();
-    if (clip_stack_.empty()) {
-        active_clip_ = {0, 0, width_, height_};
-        return;
-    }
-    active_clip_ = clip_stack_.back();
-    clip_stack_.pop_back();
-}
-
 // ------------------------------------------------------------- drawing
+//
+// All of it is DrawList's now, shared with the Control tree. These
+// stay as one-liners because the widget code below reads better
+// saying ui.rect(...) than ui.draw_list().rect(...).
 
 void Context::push_rect(const Rect &r, uint32_t colour) {
-    if (r.empty()) return;
-    const uint32_t base = uint32_t(draw_.vertices.size());
-    // A single white texel at the bottom-right of the font atlas, so
-    // a solid rectangle and a glyph share one texture and one draw.
-    const Vec2 white(1.0f, 1.0f);
-    draw_.vertices.push_back({{r.x, r.y}, white, colour});
-    draw_.vertices.push_back({{r.right(), r.y}, white, colour});
-    draw_.vertices.push_back({{r.right(), r.bottom()}, white, colour});
-    draw_.vertices.push_back({{r.x, r.bottom()}, white, colour});
-    const uint32_t idx[6] = {base, base + 1, base + 2, base, base + 2, base + 3};
-    draw_.indices.insert(draw_.indices.end(), idx, idx + 6);
+    draw_.rect(r, colour);
 }
 
-void Context::rect(const Rect &r, uint32_t colour) { push_rect(r, colour); }
+void Context::rect(const Rect &r, uint32_t colour) { draw_.rect(r, colour); }
 
 void Context::rect_outline(const Rect &r, uint32_t colour, float t) {
-    push_rect({r.x, r.y, r.w, t}, colour);
-    push_rect({r.x, r.bottom() - t, r.w, t}, colour);
-    push_rect({r.x, r.y + t, t, r.h - t * 2}, colour);
-    push_rect({r.right() - t, r.y + t, t, r.h - t * 2}, colour);
+    draw_.rect_outline(r, colour, t);
 }
 
 void Context::line(Vec2 a, Vec2 b, uint32_t colour, float thickness) {
-    const Vec2 d(b.x - a.x, b.y - a.y);
-    const float len = std::sqrt(d.x * d.x + d.y * d.y);
-    if (len < 1e-4f) return;
-    const Vec2 n(-d.y / len * thickness * 0.5f, d.x / len * thickness * 0.5f);
-    const uint32_t base = uint32_t(draw_.vertices.size());
-    const Vec2 white(1.0f, 1.0f);
-    draw_.vertices.push_back({{a.x + n.x, a.y + n.y}, white, colour});
-    draw_.vertices.push_back({{b.x + n.x, b.y + n.y}, white, colour});
-    draw_.vertices.push_back({{b.x - n.x, b.y - n.y}, white, colour});
-    draw_.vertices.push_back({{a.x - n.x, a.y - n.y}, white, colour});
-    const uint32_t idx[6] = {base, base + 1, base + 2, base, base + 2, base + 3};
-    draw_.indices.insert(draw_.indices.end(), idx, idx + 6);
+    draw_.line(a, b, colour, thickness);
 }
 
 float Context::text_width(const char *s) const {
-    if (!s) return 0.0f;
-    const char *end = visible_end(s);
-    return float(end - s) * float(kGlyphAdvance) * theme.scale;
+    return s ? draw_.text_width(std::string(s, visible_end(s))) : 0.0f;
 }
 
-float Context::text_height() const {
-    return float(kGlyphHeight) * theme.scale;
-}
+float Context::text_height() const { return draw_.text_height(); }
 
 void Context::draw_text(Vec2 at, const char *s, uint32_t colour) {
-    if (!s) return;
-    const float dot = theme.scale;
-    const char *end = visible_end(s);
-    float x = at.x;
-    for (const char *p = s; p < end; p++) {
-        const uint8_t *cols = glyph_columns(uint8_t(*p));
-        for (int c = 0; c < kGlyphWidth; c++) {
-            const uint8_t bits = cols[c];
-            if (!bits) continue;
-            // Runs of set bits become one rectangle rather than one
-            // per dot: a word of text is a few dozen quads instead
-            // of a few hundred, and the draw list is what the GPU
-            // has to chew through every frame.
-            int row = 0;
-            while (row < kGlyphHeight) {
-                if (!(bits & (1u << row))) {
-                    row++;
-                    continue;
-                }
-                int run = 0;
-                while (row + run < kGlyphHeight && (bits & (1u << (row + run))))
-                    run++;
-                push_rect({x + float(c) * dot, at.y + float(row) * dot, dot,
-                           float(run) * dot},
-                          colour);
-                row += run;
-            }
-        }
-        x += float(kGlyphAdvance) * dot;
-    }
+    if (s) draw_.text(at, std::string(s, visible_end(s)), colour);
 }
+
+void Context::push_clip(const Rect &r) { draw_.push_clip(r); }
+void Context::pop_clip() { draw_.pop_clip(); }
 
 // ------------------------------------------------------------- windows
 

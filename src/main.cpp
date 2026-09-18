@@ -16,6 +16,7 @@
 #include "plugin/host.h"
 #include "script/stubs.h"
 #include "scene/bodies.h"
+#include "scene/controls.h"
 #include "scene/portal.h"
 
 using namespace mf;
@@ -400,6 +401,81 @@ void build_portal_demo(Engine &e) {
         hum->reference_distance = 2.0f;
         hum->set_position(far_centre + Vec3(-12.0f, -5.0f, -6.0f));
         large->add_child(hum);
+    }
+
+    // A GAME UI, MADE OF NODES. Anchored to the screen, arranged by
+    // containers, and no different from any other part of the scene
+    // -- it could be saved as its own file and instanced, which is
+    // the whole reason it is built this way.
+    {
+        Control *hud = new Control();
+        hud->set_name("HUD");
+        hud->set_anchors_preset(Control::Preset::FullRect);
+        hud->mouse_filter = Control::MouseFilter::Ignore;
+        scene->add_child(hud);
+
+        PanelContainer *card = new PanelContainer();
+        card->set_name("Card");
+        card->set_anchors_preset(Control::Preset::BottomLeft);
+        card->offset_left = 16;
+        card->offset_top = -132;
+        card->offset_right = 276;
+        card->offset_bottom = -16;
+        hud->add_child(card);
+
+        VBoxContainer *rows = new VBoxContainer();
+        rows->set_name("Rows");
+        card->add_child(rows);
+
+        Label *title = new Label();
+        title->set_name("Title");
+        title->text = "MANIFOLD";
+        title->size_flags_vertical = Control::SizeShrinkCentre;
+        rows->add_child(title);
+
+        Label *hint = new Label();
+        hint->set_name("Hint");
+        hint->text = "F1 editor  .  right drag looks";
+        hint->use_theme_colour = false;
+        hint->colour = Color::hex(0x8C929C);
+        hint->size_flags_vertical = Control::SizeShrinkCentre;
+        rows->add_child(hint);
+
+        ProgressBar *bar = new ProgressBar();
+        bar->set_name("Size");
+        bar->min_value = 0.16f;
+        bar->max_value = 6.0f;
+        bar->value = 1.0f;
+        bar->show_percentage = false;
+        bar->size_flags_vertical = Control::SizeShrinkCentre;
+        rows->add_child(bar);
+
+        HBoxContainer *buttons = new HBoxContainer();
+        buttons->set_name("Buttons");
+        buttons->size_flags_vertical = Control::SizeShrinkEnd;
+        rows->add_child(buttons);
+
+        Button *shrink = new Button();
+        shrink->set_name("Shrink");
+        shrink->text = "smaller";
+        shrink->size_flags_horizontal = Control::SizeFill | Control::SizeExpand;
+        buttons->add_child(shrink);
+
+        Button *grow = new Button();
+        grow->set_name("Grow");
+        grow->text = "bigger";
+        grow->size_flags_horizontal = Control::SizeFill | Control::SizeExpand;
+        buttons->add_child(grow);
+
+        // Signals, wired the way a game would: the button knows
+        // nothing about the player.
+        CharacterBody3D *body = player;
+        shrink->connect("pressed", shrink, [body](const Variant *, int) {
+            if (body) body->set_size(body->get_size() * 0.8f);
+        });
+        grow->connect("pressed", grow, [body](const Variant *, int) {
+            if (body) body->set_size(body->get_size() * 1.25f);
+        });
     }
 
     Renderer *r = e.renderer();

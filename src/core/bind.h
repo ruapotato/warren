@@ -218,8 +218,17 @@ public:
     // registry and its methods are inherited, but nothing can make one.
     explicit ClassBuilder(bool constructible = true) {
         ci_ = C::class_info_static();
-        if (constructible)
-            ci_->construct = []() -> Object * { return new C(); };
+        // `if constexpr`, not `if`. A runtime branch still compiles
+        // the lambda, and `new C()` on a class with a pure virtual
+        // is a hard error however unreachable it is -- so an
+        // abstract class could be registered only by never
+        // mentioning it here at all.
+        if constexpr (!std::is_abstract_v<C>) {
+            if (constructible)
+                ci_->construct = []() -> Object * { return new C(); };
+        } else {
+            (void)constructible;
+        }
     }
 
     ClassInfo *info() const { return ci_; }

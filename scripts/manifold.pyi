@@ -108,6 +108,11 @@ class Projection(_Value):
 class Object:
     pass
 
+class AudioClip(Object):
+    def __init__(self) -> None: ...
+    def duration(self) -> float: ...
+    def frames(self) -> int: ...
+
 class Material(Object):
     albedo: Color
     metallic: float  # range:0,1
@@ -143,6 +148,7 @@ class Mesh(Object):
     def transform(self, transform: Transform3D) -> None: ...
 
 class Node(Object):
+    scene_path: str
     process: bool
     physics_process: bool
 
@@ -154,10 +160,13 @@ class Node(Object):
     def remove_child(self, child: Node | None) -> None: ...
     def queue_free(self) -> None: ...
     def get_parent(self) -> Node | None: ...
+    def get_owner(self) -> Node | None: ...
+    def set_owner(self, owner: Node | None) -> None: ...
     def get_child_count(self) -> int: ...
     def get_child(self, index: int) -> Node | None: ...
     def find_child(self, name: str) -> Node | None: ...
     def get_node(self, path: str) -> Node | None: ...
+    def find_path(self, path: str) -> Node | None: ...
     def find_by_class(self, class_name: str) -> Node | None: ...
     def add_to_group(self, group: str) -> None: ...
     def remove_from_group(self, group: str) -> None: ...
@@ -165,6 +174,13 @@ class Node(Object):
     def is_inside_tree(self) -> bool: ...
     def print_tree(self, indent: int = 0) -> str: ...
     # signals: tree_entered, tree_exiting
+
+class PackedScene(Object):
+    path: str
+
+    def __init__(self) -> None: ...
+    def instantiate(self) -> Node | None: ...
+    def is_valid(self) -> bool: ...
 
 class PhysicsWorld(Object):
     max_portal_hops: int
@@ -188,6 +204,66 @@ class Texture(Object):
     path: str
     valid: bool
 
+class Theme(Object):
+    background: Color
+    panel: Color
+    text: Color
+    text_dim: Color
+    accent: Color
+    control: Color
+    control_hover: Color
+    control_pressed: Color
+    border: Color
+    corner_radius: float  # range:0,16
+    padding: float  # range:0,32
+    separation: float  # range:0,32
+    font_scale: float  # range:1,6
+    border_width: float  # range:0,8
+    def __init__(self) -> None: ...
+
+class AudioPlayer(Node):
+    volume: float  # range:0,4
+    pitch: float  # range:0.25,4
+    loop: bool
+    autoplay: bool
+
+    def __init__(self) -> None: ...
+    def play(self) -> None: ...
+    def stop(self) -> None: ...
+    def is_playing(self) -> bool: ...
+
+class Control(Node):
+    anchor_left: float  # range:0,1
+    anchor_top: float  # range:0,1
+    anchor_right: float  # range:0,1
+    anchor_bottom: float  # range:0,1
+    offset_left: float
+    offset_top: float
+    offset_right: float
+    offset_bottom: float
+    size_flags_horizontal: int
+    size_flags_vertical: int
+    stretch_ratio: float  # range:0,8
+    custom_minimum_size: Vec2
+    visible: bool
+    opacity: float  # range:0,1
+    clip_contents: bool
+
+    def __init__(self) -> None: ...
+    def grab_focus(self) -> None: ...
+    def release_focus(self) -> None: ...
+    def has_focus(self) -> bool: ...
+    def is_hovered(self) -> bool: ...
+    # signals: mouse_entered, mouse_exited, resized
+
+class NetSync(Node):
+    net_id: int
+    spawn_class: str
+    interpolate: bool
+
+    def __init__(self) -> None: ...
+    def add_property(self, name: str) -> None: ...
+
 class Node3D(Node):
     transform: Transform3D
     global_transform: Transform3D
@@ -208,6 +284,40 @@ class Node3D(Node):
     def up(self) -> Vec3: ...
     def right(self) -> Vec3: ...
     def is_visible_in_tree(self) -> bool: ...
+
+class AudioListener3D(Node3D):
+    def __init__(self) -> None: ...
+    def make_current(self) -> None: ...
+    def is_current(self) -> bool: ...
+
+class AudioPlayer3D(Node3D):
+    volume: float  # range:0,4
+    pitch: float  # range:0.25,4
+    loop: bool
+    autoplay: bool
+    max_distance: float  # range:1,500
+    reference_distance: float  # range:0.1,20
+    panning: float  # range:0,1
+    doppler: float  # range:0,4
+    portal_hops: int  # range:0,3
+    portal_transmission: float  # range:0,1
+
+    def __init__(self) -> None: ...
+    def play(self) -> None: ...
+    def stop(self) -> None: ...
+    def is_playing(self) -> bool: ...
+    def playback_position(self) -> float: ...
+    def effective_distance(self) -> float: ...
+    def effective_direction(self) -> Vec3: ...
+    def portals_used(self) -> int: ...
+
+class Button(Control):
+    text: str
+    toggle_mode: bool
+    pressed: bool
+    disabled: bool
+    def __init__(self) -> None: ...
+    # signals: pressed, toggled
 
 class Camera3D(Node3D):
     fov: float  # range:1,179
@@ -252,6 +362,21 @@ class CharacterBody3D(Node3D):
     def portals_traversed(self) -> int: ...
     # signals: portal_traversed
 
+class ColorRect(Control):
+    colour: Color
+    def __init__(self) -> None: ...
+
+class Container(Control):
+    pass
+
+class Label(Control):
+    text: str
+    use_theme_colour: bool
+    colour: Color
+    align: int  # range:0,2
+    vertical_centre: bool
+    def __init__(self) -> None: ...
+
 class Light3D(Node3D):
     colour: Color
     energy: float  # range:0,64
@@ -259,8 +384,17 @@ class Light3D(Node3D):
     shadow_bias: float
     shadow_normal_bias: float
 
+class LineEdit(Control):
+    text: str
+    placeholder: str
+    secret: bool
+    max_length: int
+    def __init__(self) -> None: ...
+    # signals: text_changed, text_submitted
+
 class MeshInstance3D(Node3D):
     mesh: Mesh | None
+    material: Material | None
     cast_shadows: bool
     receive_shadows: bool
     tint: Color
@@ -271,6 +405,12 @@ class MeshInstance3D(Node3D):
     def get_material_count(self) -> int: ...
     def get_world_bounds(self) -> AABB: ...
 
+class Panel(Control):
+    use_theme_colour: bool
+    colour: Color
+    border: bool
+    def __init__(self) -> None: ...
+
 class Portal3D(Node3D):
     width: float  # range:0.05,64
     height: float  # range:0.05,64
@@ -279,6 +419,7 @@ class Portal3D(Node3D):
     edge_colour: Color
     edge_width: float  # range:0,0.5
     open: float  # range:0,1
+    link: Portal3D | None
 
     def __init__(self) -> None: ...
     def link_to(self, other: Portal3D | None) -> None: ...
@@ -297,15 +438,43 @@ class Portal3D(Node3D):
     def faces(self, point: Vec3) -> bool: ...
     # signals: traversed
 
+class ProgressBar(Control):
+    value: float
+    min_value: float
+    max_value: float
+    show_percentage: bool
+
+    def __init__(self) -> None: ...
+    def fraction(self) -> float: ...
+
+class Slider(Control):
+    min_value: float
+    max_value: float
+    step: float
+    vertical: bool
+
+    def __init__(self) -> None: ...
+    def set_value(self, value: float) -> None: ...
+    # signals: value_changed
+
 class StaticBody3D(Node3D):
     def __init__(self) -> None: ...
     def build_from_mesh(self, world: PhysicsWorld | None, mesh: Mesh | None, layer: int = 1) -> None: ...
     def release(self) -> None: ...
 
+class TextureRect(Control):
+    modulate: Color
+    def __init__(self) -> None: ...
+
+class ThemeProvider(Control):
+    def __init__(self) -> None: ...
+
 class VoxelTerrain3D(Node3D):
     chunk_resolution: int  # range:8,64
     cell_size: float  # range:0.1,8
-    view_distance: float  # range:32,2048
+    view_distance: float  # range:32,4096
+    max_lod: int  # range:0,7
+    lod_distance: float  # range:8,512
     queue_per_frame: int  # range:1,64
     max_in_flight: int  # range:0,256
     upload_per_frame: int  # range:1,32
@@ -323,9 +492,23 @@ class VoxelTerrain3D(Node3D):
     def wait_for_chunks(self) -> None: ...
     def height_at(self, x: float, z: float) -> float: ...
     def distance_at(self, point: Vec3) -> float: ...
+    def is_loaded(self, point: Vec3) -> bool: ...
+    def lod_at(self, distance: float) -> int: ...
+    def lod_range(self, lod: int) -> float: ...
+    def loaded_lod(self, point: Vec3) -> int: ...
     def material_at(self, point: Vec3) -> int: ...
     def set_material(self, material: Material | None) -> None: ...
     def report(self) -> str: ...
+
+class BoxContainer(Container):
+    vertical: bool
+    separation: float
+
+class CenterContainer(Container):
+    def __init__(self) -> None: ...
+
+class CheckBox(Button):
+    def __init__(self) -> None: ...
 
 class DirectionalLight3D(Light3D):
     shadow_distance: float
@@ -335,15 +518,38 @@ class DirectionalLight3D(Light3D):
     def __init__(self) -> None: ...
     def direction(self) -> Vec3: ...
 
+class GridContainer(Container):
+    columns: int  # range:1,16
+    separation: float
+    def __init__(self) -> None: ...
+
+class MarginContainer(Container):
+    margin_left: float
+    margin_top: float
+    margin_right: float
+    margin_bottom: float
+    def __init__(self) -> None: ...
+
 class OmniLight3D(Light3D):
     range: float
     attenuation: float
     radius: float
     def __init__(self) -> None: ...
 
+class PanelContainer(Container):
+    use_theme_colour: bool
+    colour: Color
+    def __init__(self) -> None: ...
+
+class HBoxContainer(BoxContainer):
+    def __init__(self) -> None: ...
+
 class SpotLight3D(OmniLight3D):
     angle: float
     angle_softness: float
+    def __init__(self) -> None: ...
+
+class VBoxContainer(BoxContainer):
     def __init__(self) -> None: ...
 
 # --------------------------------------------------------- the module

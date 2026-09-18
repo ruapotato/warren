@@ -20,58 +20,9 @@
 #include <vector>
 
 #include "core/math/vector.h"
+#include "ui/draw_list.h"
 
 namespace mf::ui {
-
-struct Rect {
-    float x = 0, y = 0, w = 0, h = 0;
-    float right() const { return x + w; }
-    float bottom() const { return y + h; }
-    bool contains(float px, float py) const {
-        return px >= x && py >= y && px < x + w && py < y + h;
-    }
-    Rect inset(float m) const { return {x + m, y + m, w - m * 2, h - m * 2}; }
-    Rect clipped(const Rect &o) const {
-        const float x0 = std::max(x, o.x), y0 = std::max(y, o.y);
-        const float x1 = std::min(right(), o.right());
-        const float y1 = std::min(bottom(), o.bottom());
-        return {x0, y0, std::max(0.0f, x1 - x0), std::max(0.0f, y1 - y0)};
-    }
-    bool empty() const { return w <= 0.0f || h <= 0.0f; }
-};
-
-struct Vertex {
-    Vec2 position;
-    Vec2 uv;
-    uint32_t colour = 0xFFFFFFFFu;
-};
-
-// One run of triangles sharing a scissor rectangle.
-struct DrawCommand {
-    Rect clip;
-    uint32_t first_index = 0;
-    uint32_t index_count = 0;
-};
-
-// Everything a frame of UI turned into. Handed to the renderer and
-// then cleared.
-struct DrawData {
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    std::vector<DrawCommand> commands;
-    void clear() {
-        vertices.clear();
-        indices.clear();
-        commands.clear();
-    }
-    bool empty() const { return indices.empty(); }
-};
-
-// A colour as 0xAABBGGRR, which is what the vertex format wants.
-constexpr uint32_t rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
-    return uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) |
-           (uint32_t(a) << 24);
-}
 
 struct Theme {
     uint32_t window = rgba(28, 30, 34, 242);
@@ -119,7 +70,8 @@ public:
 
     void begin_frame(float width, float height, const Input &input, float dt);
     void end_frame();
-    const DrawData &draw_data() const { return draw_; }
+    const DrawData &draw_data() const { return draw_.data; }
+    DrawList &draw_list() { return draw_; }
     // True when the pointer is over any window, so the game should
     // not also act on the click.
     bool wants_mouse() const { return wants_mouse_; }
@@ -191,14 +143,12 @@ private:
     Rect next_row(float height);
     bool mouse_in(const Rect &r) const;
     void push_rect(const Rect &r, uint32_t colour);
-    void flush_command();
 
-    DrawData draw_;
+    // The same primitives the Control tree draws with. Two user
+    // interfaces, one triangle buffer, one renderer.
+    DrawList draw_;
     std::vector<Window> windows_;
     int current_window_ = -1;
-    std::vector<Rect> clip_stack_;
-    Rect active_clip_;
-    uint32_t command_start_ = 0;
 
     Input input_;
     Input previous_;
