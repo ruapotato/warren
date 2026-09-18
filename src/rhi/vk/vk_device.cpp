@@ -15,6 +15,7 @@
 #include <SDL2/SDL_vulkan.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <map>
@@ -324,6 +325,7 @@ public:
     PipelineH create_compute_pipeline(const ComputePipelineDesc &d) override;
     void destroy(PipelineH h) override;
 
+    void request_capture() override {}
     CommandList *begin_frame() override;
     void end_frame() override;
     TextureH swapchain_texture() const override { return swapchain_handle_; }
@@ -359,13 +361,35 @@ private:
     void destroy_swapchain();
     void flush_uploads(VkCommandBuffer cb);
 
-    struct Upload {
-        BufferH staging;
+    // STAGED WRITES THAT HAVE NOT BEEN RECORDED YET.
+    //
+    // They carry their own bytes rather than an offset into the ring,
+    // because the ring is bump-allocated per frame and reset at
+    // begin_frame: anything written into it before the copy is
+    // RECORDED can be overwritten by a later write in the same frame,
+    // and the copy would then read whatever landed there instead.
+    //
+    // That is not a theoretical hazard. It is what happens to every
+    // resource uploaded before the first frame: the copy is recorded
+    // at the top of frame 0, the frame then loads the rest of the
+    // scene through the same ring, and the first resource silently
+    // receives the last one's bytes. OpenGL never sees it, because it
+    // has no staging.
+    struct Pending {
+        std::vector<uint8_t> bytes;
         BufferH dst_buffer;
         TextureH dst_texture;
-        uint64_t src_offset = 0, dst_offset = 0, size = 0;
+        uint64_t dst_offset = 0;
         uint32_t mip = 0, layer = 0, width = 0, height = 0;
     };
+
+    // Reserve `size` bytes of this frame's staging ring, aligned, and
+    // return where they went. -1 when the ring is full.
+    int64_t stage(const void *data, uint64_t size, uint64_t alignment);
+    // Record one staged copy straight into the open command buffer.
+    void record_copy(VkCommandBuffer cb, uint64_t src_offset, const Pending &p);
+    std::vector<Pending> pending_uploads_;
+    bool inside_render_pass_ = false;
 
     struct Frame {
         VkCommandPool pool = VK_NULL_HANDLE;
@@ -376,7 +400,6 @@ private:
         // A ring of host-visible memory for this frame's uploads.
         BufferH staging;
         uint64_t staging_used = 0;
-        std::vector<Upload> uploads;
         std::vector<std::function<void()>> deletions;
     };
 
@@ -399,6 +422,7 @@ private:
     TextureH swapchain_handle_;      // aliases the current image
     uint32_t image_index_ = 0;
 
+    std::vector<TextureH> pending_initial_layout_;
     std::vector<Frame> frames_;
     uint32_t frame_index_ = 0;
     uint32_t frames_in_flight_ = 2;
@@ -745,7 +769,11 @@ bool VkDeviceImpl::create_swapchain(uint32_t w, uint32_t h) {
     ci.imageColorSpace = chosen.colorSpace;
     ci.imageExtent = extent_;
     ci.imageArrayLayers = 1;
-    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // TRANSFER_SRC as well, so a screenshot can copy the presented
+    // image straight out of it.
+    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform = sc.currentTransform;
     ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -1023,27 +1051,25 @@ void VkDeviceImpl::write_buffer(BufferH h, const void *data, uint64_t size,
         std::memcpy((char *)b->memory.mapped + offset, data, size);
         return;
     }
-    // Device local: park it in this frame's staging ring and record the
-    // copy at the top of the next command buffer.
-    Frame &f = frames_[frame_index_];
-    VkBufferRes *stage = buffers.get(f.staging);
-    if (!stage || !stage->memory.mapped) return;
-    uint64_t aligned = (f.staging_used + 15) & ~15ull;
-    if (aligned + size > stage->size) {
-        MF_ERROR("vk: frame staging buffer is full (%llu bytes); "
-                 "the upload of '%s' was dropped",
-                 (unsigned long long)stage->size, b->name.c_str());
-        return;
+    // Device local: it has to go through a staging copy.
+    Pending p;
+    p.bytes.assign((const uint8_t *)data, (const uint8_t *)data + size);
+    p.dst_buffer = h;
+    p.dst_offset = offset;
+    // If a command buffer is open and we are not inside a render pass,
+    // the copy can be recorded now and the bytes consumed in order.
+    // Otherwise it waits for the next one.
+    if (frame_open_ && !inside_render_pass_) {
+        int64_t at = stage(p.bytes.data(), p.bytes.size(), 16);
+        if (at >= 0) {
+            record_copy(frames_[frame_index_].cb, uint64_t(at), p);
+            return;
+        }
+        MF_WARN("vk: staging ring full mid-frame; deferring an upload of %llu "
+                "bytes to the next frame",
+                (unsigned long long)size);
     }
-    std::memcpy((char *)stage->memory.mapped + aligned, data, size);
-    f.staging_used = aligned + size;
-    Upload u;
-    u.staging = f.staging;
-    u.dst_buffer = h;
-    u.src_offset = aligned;
-    u.dst_offset = offset;
-    u.size = size;
-    f.uploads.push_back(u);
+    pending_uploads_.push_back(std::move(p));
 }
 
 TextureH VkDeviceImpl::create_texture(const TextureDesc &d, const void *initial) {
@@ -1107,6 +1133,9 @@ TextureH VkDeviceImpl::create_texture(const TextureDesc &d, const void *initial)
     vi.subresourceRange = {aspect_of(d.format), 0, mips, 0, ci.arrayLayers};
     VK_CHECK(vkCreateImageView(device_, &vi, nullptr, &t->view), "image view");
     name_object(uint64_t(t->image), VK_OBJECT_TYPE_IMAGE, d.name);
+    // Sampled textures that are never written still have to leave
+    // UNDEFINED before anything reads them.
+    if (d.usage & TextureUsage::Sampled) pending_initial_layout_.push_back(h);
     if (initial) {
         uint64_t bytes = uint64_t(d.width) * d.height * format_block_size(d.format);
         write_texture(h, initial, bytes, 0, 0);
@@ -1132,27 +1161,21 @@ void VkDeviceImpl::write_texture(TextureH h, const void *data, uint64_t size,
                                  uint32_t mip, uint32_t layer) {
     VkTextureRes *t = textures.get_checked(h, "texture");
     if (!t || !data || !size) return;
-    Frame &f = frames_[frame_index_];
-    VkBufferRes *stage = buffers.get(f.staging);
-    if (!stage || !stage->memory.mapped) return;
-    uint64_t aligned = (f.staging_used + 255) & ~255ull;
-    if (aligned + size > stage->size) {
-        MF_ERROR("vk: staging buffer full; texture upload of %llu bytes dropped",
-                 (unsigned long long)size);
-        return;
+    Pending p;
+    p.bytes.assign((const uint8_t *)data, (const uint8_t *)data + size);
+    p.dst_texture = h;
+    p.mip = mip;
+    p.layer = layer;
+    p.width = std::max(1u, t->desc.width >> mip);
+    p.height = std::max(1u, t->desc.height >> mip);
+    if (frame_open_ && !inside_render_pass_) {
+        int64_t at = stage(p.bytes.data(), p.bytes.size(), 256);
+        if (at >= 0) {
+            record_copy(frames_[frame_index_].cb, uint64_t(at), p);
+            return;
+        }
     }
-    std::memcpy((char *)stage->memory.mapped + aligned, data, size);
-    f.staging_used = aligned + size;
-    Upload u;
-    u.staging = f.staging;
-    u.dst_texture = h;
-    u.src_offset = aligned;
-    u.size = size;
-    u.mip = mip;
-    u.layer = layer;
-    u.width = std::max(1u, t->desc.width >> mip);
-    u.height = std::max(1u, t->desc.height >> mip);
-    f.uploads.push_back(u);
+    pending_uploads_.push_back(std::move(p));
 }
 
 TextureDesc VkDeviceImpl::texture_desc(TextureH h) const {
@@ -1621,6 +1644,22 @@ PipelineH VkDeviceImpl::create_pipeline(const PipelineDesc &d) {
     gi.layout = p->layout;
     gi.renderPass = VK_NULL_HANDLE;
 
+    // MANIFOLD_DUMP_PIPELINES=1 prints the depth, stencil and blend
+    // state of every pipeline as it is created. Two backends that
+    // disagree about a picture almost always disagree about one of
+    // these first, and reading them back is faster than bisecting.
+    if (getenv("MANIFOLD_DUMP_PIPELINES"))
+        MF_INFO("vk pipeline '%s': stencil=%d front(cmp=%d ref-dyn fail=%d "
+                "dfail=%d pass=%d cmask=0x%02x wmask=0x%02x) depth(test=%d "
+                "write=%d cmp=%d) cull=%d colourmask=0x%x fmt(depth=%d stencil=%d)",
+                d.name ? d.name : "?", int(ds.stencilTestEnable),
+                int(ds.front.compareOp), int(ds.front.failOp),
+                int(ds.front.depthFailOp), int(ds.front.passOp),
+                ds.front.compareMask, ds.front.writeMask,
+                int(ds.depthTestEnable), int(ds.depthWriteEnable),
+                int(ds.depthCompareOp), int(rs.cullMode),
+                blends.empty() ? 0u : unsigned(blends[0].colorWriteMask),
+                int(ri.depthAttachmentFormat), int(ri.stencilAttachmentFormat));
     if (vkCreateGraphicsPipelines(device_, pipeline_cache_, 1, &gi, nullptr,
                                   &p->pipeline) != VK_SUCCESS) {
         MF_ERROR("vk: pipeline '%s' could not be created", d.name ? d.name : "?");
@@ -1756,45 +1795,72 @@ void VkDeviceImpl::transition(VkCommandBuffer cb, VkTextureRes &t,
     t.layout = to;
 }
 
-void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
+int64_t VkDeviceImpl::stage(const void *data, uint64_t size, uint64_t alignment) {
     Frame &f = frames_[frame_index_];
-    if (f.uploads.empty()) return;
-    for (const Upload &u : f.uploads) {
-        const VkBufferRes *src = buffers.get(u.staging);
-        if (!src) continue;
-        if (u.dst_buffer.valid()) {
-            const VkBufferRes *dst = buffers.get(u.dst_buffer);
-            if (!dst) continue;
-            VkBufferCopy2 region{VK_STRUCTURE_TYPE_BUFFER_COPY_2};
-            region.srcOffset = u.src_offset;
-            region.dstOffset = u.dst_offset;
-            region.size = u.size;
-            VkCopyBufferInfo2 ci{VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2};
-            ci.srcBuffer = src->buffer;
-            ci.dstBuffer = dst->buffer;
-            ci.regionCount = 1;
-            ci.pRegions = &region;
-            vkCmdCopyBuffer2(cb, &ci);
-        } else if (u.dst_texture.valid()) {
-            VkTextureRes *dst = textures.get(u.dst_texture);
-            if (!dst) continue;
-            transition(cb, *dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            VkBufferImageCopy2 region{VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2};
-            region.bufferOffset = u.src_offset;
-            region.imageSubresource = {aspect_of(dst->desc.format), u.mip, u.layer, 1};
-            region.imageExtent = {u.width, u.height, 1};
-            VkCopyBufferToImageInfo2 ci{
-                VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2};
-            ci.srcBuffer = src->buffer;
-            ci.dstImage = dst->image;
-            ci.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            ci.regionCount = 1;
-            ci.pRegions = &region;
-            vkCmdCopyBufferToImage2(cb, &ci);
-            transition(cb, *dst, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        }
+    VkBufferRes *sb = buffers.get(f.staging);
+    if (!sb || !sb->memory.mapped) return -1;
+    uint64_t at = (f.staging_used + alignment - 1) / alignment * alignment;
+    if (at + size > sb->size) return -1;
+    std::memcpy((char *)sb->memory.mapped + at, data, size);
+    f.staging_used = at + size;
+    return int64_t(at);
+}
+
+void VkDeviceImpl::record_copy(VkCommandBuffer cb, uint64_t src_offset,
+                               const Pending &p) {
+    Frame &f = frames_[frame_index_];
+    const VkBufferRes *src = buffers.get(f.staging);
+    if (!src) return;
+    if (p.dst_buffer.valid()) {
+        const VkBufferRes *dst = buffers.get(p.dst_buffer);
+        if (!dst) return;
+        VkBufferCopy2 region{VK_STRUCTURE_TYPE_BUFFER_COPY_2};
+        region.srcOffset = src_offset;
+        region.dstOffset = p.dst_offset;
+        region.size = p.bytes.size();
+        VkCopyBufferInfo2 ci{VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2};
+        ci.srcBuffer = src->buffer;
+        ci.dstBuffer = dst->buffer;
+        ci.regionCount = 1;
+        ci.pRegions = &region;
+        vkCmdCopyBuffer2(cb, &ci);
+    } else if (p.dst_texture.valid()) {
+        VkTextureRes *dst = textures.get(p.dst_texture);
+        if (!dst) return;
+        transition(cb, *dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        VkBufferImageCopy2 region{VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2};
+        region.bufferOffset = src_offset;
+        region.imageSubresource = {aspect_of(dst->desc.format), p.mip, p.layer, 1};
+        region.imageExtent = {p.width, p.height, 1};
+        VkCopyBufferToImageInfo2 ci{VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2};
+        ci.srcBuffer = src->buffer;
+        ci.dstImage = dst->image;
+        ci.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        ci.regionCount = 1;
+        ci.pRegions = &region;
+        vkCmdCopyBufferToImage2(cb, &ci);
+        transition(cb, *dst, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
-    f.uploads.clear();
+}
+
+// Everything written while no command buffer was open, staged and
+// copied now that one is. Called immediately after vkBeginCommandBuffer
+// and before anything else, so the copies land before the first draw
+// that could read them.
+void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
+    if (pending_uploads_.empty()) return;
+    std::vector<Pending> batch;
+    batch.swap(pending_uploads_);
+    for (const Pending &p : batch) {
+        int64_t at = stage(p.bytes.data(), p.bytes.size(),
+                           p.dst_texture.valid() ? 256 : 16);
+        if (at < 0) {
+            MF_ERROR("vk: staging ring full; an upload of %zu bytes was dropped",
+                     p.bytes.size());
+            continue;
+        }
+        record_copy(cb, uint64_t(at), p);
+    }
 }
 
 // ------------------------------------------------------------- the frame
@@ -1834,6 +1900,18 @@ CommandList *VkDeviceImpl::begin_frame() {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.cb, &bi);
     flush_uploads(f.cb);
+
+    // A texture created but never rendered to is still in UNDEFINED,
+    // and sampling one is undefined behaviour the validation layer
+    // rightly objects to. Anything sampled must be moved to a readable
+    // layout once, and the first frame is the place.
+    for (TextureH h : pending_initial_layout_)
+        if (VkTextureRes *t = textures.get(h))
+            transition(f.cb, *t,
+                       format_is_depth(t->desc.format)
+                           ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                           : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    pending_initial_layout_.clear();
 
     swapchain_handle_ = swapchain_images_[image_index_];
     cmd_->cb = f.cb;
@@ -1978,19 +2056,24 @@ void VkCommandListImpl::begin_rendering(const RenderingInfo &info) {
     ri.pColorAttachments = colour.data();
     ri.pDepthAttachment = info.has_depth ? &depth : nullptr;
     ri.pStencilAttachment = has_stencil ? &stencil : nullptr;
+    if (getenv("MANIFOLD_DUMP_PIPELINES"))
+        MF_INFO("vk begin_rendering '%s': %ux%u colour=%zu depth=%s stencil=%s "
+                "(depth load=%d clear=%.3f, stencil load=%d clear=%u)",
+                info.name ? info.name : "?", w, h, colour.size(),
+                ri.pDepthAttachment ? "yes" : "NO",
+                ri.pStencilAttachment ? "yes" : "NO",
+                int(depth.loadOp), double(depth.clearValue.depthStencil.depth),
+                int(stencil.loadOp), stencil.clearValue.depthStencil.stencil);
     vkCmdBeginRendering(cb, &ri);
     rendering_ = true;
+    dev_->inside_render_pass_ = true;
     dev_->stats_.render_passes++;
 
-    // THE NEGATIVE HEIGHT. Origin at the bottom, height negative, so
-    // Vulkan's downward +Y becomes the engine's upward +Y. Everything
-    // else in the engine -- matrices, shaders, texture coordinates --
-    // is then identical between the two backends.
+    // The whole target, in the engine's convention; set_viewport does
+    // the flip.
     Viewport vp;
-    vp.x = 0;
-    vp.y = float(h);
     vp.width = float(w);
-    vp.height = -float(h);
+    vp.height = float(h);
     set_viewport(vp);
     set_scissor({0, 0, w, h});
 }
@@ -1999,10 +2082,20 @@ void VkCommandListImpl::end_rendering() {
     if (!rendering_) return;
     vkCmdEndRendering(cb);
     rendering_ = false;
+    dev_->inside_render_pass_ = false;
 }
 
+// THE NEGATIVE HEIGHT LIVES HERE AND NOWHERE ELSE. The caller gives a
+// top-left, y-down, positive-height rectangle; this turns it into the
+// flipped viewport that makes Vulkan's clip space agree with OpenGL's.
 void VkCommandListImpl::set_viewport(const Viewport &v) {
-    VkViewport vv{v.x, v.y, v.width, v.height, v.min_depth, v.max_depth};
+    VkViewport vv;
+    vv.x = v.x;
+    vv.y = v.y + v.height;
+    vv.width = v.width;
+    vv.height = -v.height;
+    vv.minDepth = v.min_depth;
+    vv.maxDepth = v.max_depth;
     vkCmdSetViewport(cb, 0, 1, &vv);
 }
 

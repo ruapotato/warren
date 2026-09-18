@@ -420,6 +420,15 @@ struct RenderingInfo {
     const char *name = nullptr;
 };
 
+// VIEWPORTS AND SCISSORS ARE IN ONE CONVENTION: origin at the TOP-LEFT
+// of the target, y increasing downwards, height positive. It matches
+// the screen rectangles the renderer computes and the row order
+// read_texture returns.
+//
+// Neither backend takes it in that form natively -- Vulkan needs a
+// negative height to put +Y up, OpenGL measures y from the bottom --
+// and both convert here rather than at the call site. A caller that
+// has to remember which backend it is on has no abstraction.
 struct Viewport {
     float x = 0, y = 0, width = 0, height = 0;
     float min_depth = 0.0f, max_depth = 1.0f;
@@ -617,6 +626,19 @@ public:
     // Acquires a swapchain image and returns the list to record into.
     // Null when the swapchain needs rebuilding, in which case the caller
     // should skip the frame.
+    // Ask for the next presented frame to be readable. It must be
+    // called BEFORE end_frame, and read_texture(swapchain_texture())
+    // after it.
+    //
+    // The two backends can only catch the image at different moments:
+    // Vulkan's presented image survives until it is reacquired and can
+    // be copied afterwards, while OpenGL's back buffer is gone the
+    // instant SwapWindow returns, so it has to be grabbed inside
+    // end_frame before the swap. One flag hides that difference;
+    // without it, screenshots work on one renderer and come out black
+    // on the other.
+    virtual void request_capture() = 0;
+
     virtual CommandList *begin_frame() = 0;
     virtual void end_frame() = 0;
     virtual TextureH swapchain_texture() const = 0;

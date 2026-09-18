@@ -167,8 +167,18 @@ struct GlTexture {
     GLuint id = 0;
     TextureDesc desc;
     GLenum target = GL_TEXTURE_2D;
-    // The swapchain is not a texture in OpenGL; this marks the handle
-    // that stands in for framebuffer zero.
+    // THE SWAPCHAIN IS A REAL TEXTURE HERE.
+    //
+    // OpenGL's default framebuffer is not one, and standing a handle
+    // in for it means a special case in every path that touches a
+    // render target: it cannot be read back like a texture, it cannot
+    // be sampled, and -- since glClipControl puts the origin at the
+    // upper left while the window system still presents bottom-up --
+    // anything drawn into it comes out inverted.
+    //
+    // So the backend renders to a texture of its own and blits it to
+    // framebuffer zero, flipped, at present. One blit a frame buys a
+    // swapchain that behaves exactly like Vulkan's.
     bool is_swapchain = false;
 };
 
@@ -248,6 +258,14 @@ private:
     uint64_t index_offset_ = 0;
     uint32_t stencil_ref_ = 0;
     int debug_depth_ = 0;
+    // Kept so end_rendering knows what to resolve. Vulkan does this
+    // itself through the attachment's resolve mode; OpenGL has to be
+    // told, with a blit.
+    RenderingInfo current_pass_;
+    bool pass_open_ = false;
+    // The height of whatever is being rendered into, so a y-down
+    // viewport or scissor can be turned into OpenGL's y-up one.
+    uint32_t target_height_ = 0;
     friend class GlDevice;
 };
 
@@ -292,6 +310,7 @@ public:
     PipelineH create_compute_pipeline(const ComputePipelineDesc &d) override;
     void destroy(PipelineH h) override;
 
+    void request_capture() override { capture_requested_ = true; }
     CommandList *begin_frame() override;
     void end_frame() override;
     TextureH swapchain_texture() const override { return swapchain_; }
@@ -315,6 +334,7 @@ public:
     FrameStats stats_;
 
     GLuint framebuffer_for(const RenderingInfo &info);
+    bool make_swapchain_texture();
     void apply_pipeline_state(const PipelineDesc &d, uint32_t stencil_ref);
     // The uniform buffer standing in for Vulkan's push constants.
     GLuint push_buffer() const { return push_ubo_; }
@@ -337,6 +357,7 @@ private:
     // The last state applied, so a pipeline bind is a diff.
     PipelineDesc applied_;
     bool applied_valid_ = false;
+    bool capture_requested_ = false;
     uint32_t applied_stencil_ref_ = 0xFFFFFFFF;
     friend class GlCommandList;
 };
@@ -366,11 +387,23 @@ bool GlDevice::init(const DeviceDesc &d) {
         return false;
     }
 
-    // THE CLIP SPACE. This single call is what makes one projection
-    // matrix and one shader work on both backends: depth in [0, 1] like
-    // Vulkan, with the y axis left alone so that Vulkan's negative
-    // viewport height meets it in the middle.
-    glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+    // THE CLIP SPACE, AND THE FRAMEBUFFER ORIGIN, IN ONE CALL.
+    //
+    // ZERO_TO_ONE gives Vulkan's depth range. UPPER_LEFT gives Vulkan's
+    // framebuffer origin, and that second half matters more than it
+    // looks: without it, a render target's texel (0, 0) is the
+    // BOTTOM-left corner of the image on OpenGL and the TOP-left on
+    // Vulkan, so every pass that samples a previous pass -- tonemap,
+    // bloom, screen-space anything -- comes out upside down on one of
+    // them. It is a difference that hides until the first full-screen
+    // effect and then looks like a bug in that effect.
+    //
+    // With both halves set, the two backends agree about depth, about
+    // which way is up, about gl_FragCoord, about texel order in a
+    // render target, and about the row order of a readback. Winding
+    // needs no compensation: ARB_clip_control negates the polygon-area
+    // sign for an upper-left origin, so facing is unchanged.
+    glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE);
 
     glEnable(GL_FRAMEBUFFER_SRGB);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -413,13 +446,7 @@ bool GlDevice::init(const DeviceDesc &d) {
     height_ = uint32_t(h);
     set_vsync(d.vsync);
 
-    // The handle that means "framebuffer zero".
-    swapchain_ = textures.create();
-    GlTexture *st = textures.get(swapchain_);
-    st->is_swapchain = true;
-    st->desc.width = width_;
-    st->desc.height = height_;
-    st->desc.format = swapchain_format_;
+    if (!make_swapchain_texture()) return false;
 
     glCreateBuffers(1, &push_ubo_);
     glNamedBufferData(push_ubo_, 128, nullptr, GL_DYNAMIC_DRAW);
@@ -599,11 +626,8 @@ size_t GlDevice::read_texture(TextureH h, void *out, size_t capacity, uint32_t m
                               uint32_t layer) {
     GlTexture *t = textures.get_checked(h, "texture");
     if (!t || !out) return 0;
-    if (t->is_swapchain) {
-        MF_ERROR("gl: cannot read back the default framebuffer as a texture");
-        return 0;
-    }
     (void)layer;
+
     uint32_t w = std::max(1u, t->desc.width >> mip);
     uint32_t hh = std::max(1u, t->desc.height >> mip);
     size_t need = size_t(w) * hh * format_block_size(t->desc.format);
@@ -614,19 +638,9 @@ size_t GlDevice::read_texture(TextureH h, void *out, size_t capacity, uint32_t m
     glFinish();
     GlFormat gf = gl_format(t->desc.format);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    // No flip: with GL_UPPER_LEFT the image is already stored the way
+    // Vulkan stores it, which is the way the contract says to return it.
     glGetTextureImage(t->id, GLint(mip), gf.format, gf.type, GLsizei(need), out);
-    // Bottom-up out of OpenGL, top-down out of Vulkan. The contract is
-    // top-down, so flip here.
-    size_t pitch = need / hh;
-    std::vector<uint8_t> row(pitch);
-    uint8_t *p8 = (uint8_t *)out;
-    for (uint32_t y = 0; y < hh / 2; y++) {
-        uint8_t *a = p8 + size_t(y) * pitch;
-        uint8_t *b = p8 + size_t(hh - 1 - y) * pitch;
-        std::memcpy(row.data(), a, pitch);
-        std::memcpy(a, b, pitch);
-        std::memcpy(b, row.data(), pitch);
-    }
     return need;
 }
 
@@ -854,16 +868,62 @@ CommandList *GlDevice::begin_frame() {
 }
 
 void GlDevice::end_frame() {
+    // PRESENT: blit the swapchain texture to framebuffer zero, turned
+    // over. glClipControl put the drawing origin at the upper left to
+    // match Vulkan, but the window system still scans the default
+    // framebuffer from the bottom, so the flip happens once, here,
+    // rather than in every shader that touches a render target.
+    if (const GlTexture *sc = textures.get(swapchain_)) {
+        RenderingInfo si;
+        ColourAttachment sa;
+        sa.texture = swapchain_;
+        sa.load = LoadOp::Load;
+        si.colour.push_back(sa);
+        GLuint fbo = framebuffer_for(si);
+        glNamedFramebufferReadBuffer(fbo, GL_COLOR_ATTACHMENT0);
+        // The source is sRGB-encoded already; a conversion here would
+        // encode it twice and wash the picture out.
+        glDisable(GL_FRAMEBUFFER_SRGB);
+        glBlitNamedFramebuffer(fbo, 0, 0, 0, GLint(width_), GLint(height_), 0,
+                               GLint(height_), GLint(width_), 0,
+                               GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glEnable(GL_FRAMEBUFFER_SRGB);
+        (void)sc;
+    }
+    capture_requested_ = false;
     SDL_GL_SwapWindow(window_);
 }
 
+bool GlDevice::make_swapchain_texture() {
+    if (swapchain_.valid()) {
+        if (GlTexture *old = textures.get(swapchain_)) {
+            if (old->id) glDeleteTextures(1, &old->id);
+            old->is_swapchain = false;
+        }
+        textures.destroy(swapchain_);
+        // The cached framebuffers referred to the old texture.
+        for (auto &kv : fbo_cache_) glDeleteFramebuffers(1, &kv.second);
+        fbo_cache_.clear();
+    }
+    TextureDesc d;
+    d.width = width_ ? width_ : 1;
+    d.height = height_ ? height_ : 1;
+    // sRGB, so the hardware encodes on write exactly as a Vulkan sRGB
+    // swapchain does. The blit at present is then a raw byte copy.
+    d.format = swapchain_format_;
+    d.usage = TextureUsage::ColourTarget | TextureUsage::Sampled |
+              TextureUsage::TransferSrc;
+    d.name = "swapchain";
+    swapchain_ = create_texture(d, nullptr);
+    if (GlTexture *t = textures.get(swapchain_)) t->is_swapchain = true;
+    return swapchain_.valid();
+}
+
 void GlDevice::resize_swapchain(uint32_t w, uint32_t h) {
+    if (w == width_ && h == height_) return;
     width_ = w;
     height_ = h;
-    if (GlTexture *t = textures.get(swapchain_)) {
-        t->desc.width = w;
-        t->desc.height = h;
-    }
+    make_swapchain_texture();
 }
 
 void GlDevice::set_vsync(bool on) {
@@ -885,11 +945,9 @@ std::string GlDevice::resource_report() const {
 // --------------------------------------------------- framebuffer caching
 
 GLuint GlDevice::framebuffer_for(const RenderingInfo &info) {
-    // Framebuffer zero, when the only attachment is the swapchain.
-    if (info.colour.size() == 1 && !info.has_depth) {
-        const GlTexture *t = textures.get(info.colour[0].texture);
-        if (t && t->is_swapchain) return 0;
-    }
+    // No special case for the swapchain: it is an ordinary texture in
+    // this backend, and framebuffer zero is only ever the destination
+    // of the present blit in end_frame.
     std::vector<uint64_t> key;
     key.reserve(info.colour.size() * 3 + 3);
     for (const ColourAttachment &c : info.colour) {
@@ -963,6 +1021,12 @@ void GlDevice::apply_pipeline_state(const PipelineDesc &d, uint32_t stencil_ref)
             glCullFace(d.raster.cull == CullMode::Back ? GL_BACK : GL_FRONT);
         }
     }
+    // NOT flipped for GL_UPPER_LEFT. ARB_clip_control negates the
+    // sign of the computed polygon area when the origin is upper-left,
+    // so facing comes out the same as it always did -- unlike Vulkan,
+    // where the negative viewport height is the engine's own doing and
+    // has to be reasoned about. Compensating here as well would cull
+    // every front face and draw every back one.
     if (all || d.raster.front_face != o.raster.front_face)
         glFrontFace(d.raster.front_face == FrontFace::CounterClockwise ? GL_CCW : GL_CW);
     if (all || d.raster.polygon != o.raster.polygon)
@@ -1063,6 +1127,7 @@ void GlCommandList::begin_rendering(const RenderingInfo &info) {
             w = td.width; h = td.height;
         }
     }
+    target_height_ = h;
     glViewport(0, 0, GLsizei(w), GLsizei(h));
     glDisable(GL_SCISSOR_TEST);
 
@@ -1100,18 +1165,66 @@ void GlCommandList::begin_rendering(const RenderingInfo &info) {
     }
     // The state cache no longer knows what the masks are.
     dev_->applied_valid_ = false;
+    current_pass_ = info;
+    pass_open_ = true;
 }
 
-void GlCommandList::end_rendering() {}
+// RESOLVE. A multisample colour target cannot be sampled by an
+// ordinary sampler2D, so a pass that asked for one has to be blitted
+// down before anything reads it. Vulkan does this inside the render
+// pass through the attachment's resolve mode and OpenGL has no such
+// thing, so it happens here -- and forgetting it is a black screen on
+// one backend and a correct picture on the other, which is exactly the
+// sort of divergence this RHI exists to prevent.
+void GlCommandList::end_rendering() {
+    if (!pass_open_) return;
+    pass_open_ = false;
+    for (size_t i = 0; i < current_pass_.colour.size(); i++) {
+        const ColourAttachment &c = current_pass_.colour[i];
+        if (!c.resolve.valid()) continue;
+        const GlTexture *src = dev_->textures.get(c.texture);
+        const GlTexture *dst = dev_->textures.get(c.resolve);
+        if (!src || !dst) continue;
 
+        RenderingInfo si;
+        ColourAttachment sa;
+        sa.texture = c.texture;
+        sa.load = LoadOp::Load;
+        si.colour.push_back(sa);
+        GLuint src_fbo = dev_->framebuffer_for(si);
+
+        RenderingInfo di;
+        ColourAttachment da;
+        da.texture = c.resolve;
+        da.load = LoadOp::Load;
+        di.colour.push_back(da);
+        GLuint dst_fbo = dev_->framebuffer_for(di);
+
+        glNamedFramebufferReadBuffer(src_fbo, GL_COLOR_ATTACHMENT0);
+        GLenum draw0 = GL_COLOR_ATTACHMENT0;
+        glNamedFramebufferDrawBuffers(dst_fbo, 1, &draw0);
+        // NEAREST, not LINEAR: source and destination are the same
+        // size, so a linear filter would only blur the resolve.
+        glBlitNamedFramebuffer(src_fbo, dst_fbo, 0, 0, GLint(src->desc.width),
+                               GLint(src->desc.height), 0, 0,
+                               GLint(dst->desc.width), GLint(dst->desc.height),
+                               GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+}
+
+// glViewport and glScissor take y from the BOTTOM of the framebuffer,
+// which glClipControl does not change. The engine's rectangles are
+// y-down from the top, so both are turned over here.
 void GlCommandList::set_viewport(const Viewport &vp) {
-    glViewport(GLint(vp.x), GLint(vp.y), GLsizei(vp.width), GLsizei(vp.height));
+    GLint y = GLint(float(target_height_) - vp.y - vp.height);
+    glViewport(GLint(vp.x), y, GLsizei(vp.width), GLsizei(vp.height));
     glDepthRange(double(vp.min_depth), double(vp.max_depth));
 }
 
 void GlCommandList::set_scissor(const Rect &r) {
     glEnable(GL_SCISSOR_TEST);
-    glScissor(r.x, r.y, GLsizei(r.width), GLsizei(r.height));
+    GLint y = GLint(int32_t(target_height_) - r.y - int32_t(r.height));
+    glScissor(r.x, y, GLsizei(r.width), GLsizei(r.height));
 }
 
 void GlCommandList::bind_pipeline(PipelineH h) {

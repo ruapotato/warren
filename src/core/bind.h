@@ -89,6 +89,14 @@ T variant_to(const Variant &v) {
             variant_object_checked(v, Inner::class_name_static())));
     } else if constexpr (std::is_pointer_v<U>) {
         using Inner = std::remove_pointer_t<U>;
+        // Only an Object subclass can cross this boundary. A raw
+        // pointer to anything else is almost always an OUT PARAMETER,
+        // which reflection has no way to return -- bind a method that
+        // returns the value instead.
+        static_assert(std::is_base_of_v<Object, std::remove_cv_t<Inner>>,
+                      "only Object* can cross the Variant boundary; a plain "
+                      "pointer is usually an out parameter, which reflection "
+                      "cannot express -- return the value instead");
         return static_cast<U>(
             variant_object_checked(v, Inner::class_name_static()));
     } else {
@@ -101,10 +109,19 @@ Variant variant_from(T &&value) {
     using U = std::remove_cv_t<std::remove_reference_t<T>>;
     if constexpr (std::is_same_v<U, Variant>) return std::forward<T>(value);
     else if constexpr (std::is_enum_v<U>) return Variant(int64_t(value));
+    // Every integer width funnels to one Variant case. Without this a
+    // method returning size_t or unsigned short fails to bind, with a
+    // template error long enough to hide what is wrong with it.
+    else if constexpr (std::is_integral_v<U> && !std::is_same_v<U, bool>)
+        return Variant(int64_t(value));
     else if constexpr (is_ref_ptr<U>::value)
         return Variant(static_cast<Object *>(value.get()));
-    else if constexpr (std::is_pointer_v<U>)
+    else if constexpr (std::is_pointer_v<U>) {
+        static_assert(
+            std::is_base_of_v<Object, std::remove_cv_t<std::remove_pointer_t<U>>>,
+            "only Object* can be returned through a Variant");
         return Variant(static_cast<Object *>(value));
+    }
     else return Variant(std::forward<T>(value));
 }
 

@@ -89,6 +89,8 @@ glTextureParameteriv
 glGenerateTextureMipmap
 glBindTextureUnit
 glGetTextureImage
+glReadPixels
+glReadBuffer
 glGetTextureLevelParameteriv
 glCreateSamplers
 glDeleteSamplers
