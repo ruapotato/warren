@@ -1,13 +1,19 @@
 """ROTGRAVE -- the dead, and what they want.
 
 Eleven species out of `design/rotgrave_design.json`, which carries
-what each one is worth in points and how it moves, and nothing about
-what it looks like. The old version's bodies are MakeHuman meshes in
-a bespoke figure format that this engine does not read; bringing
-them across is its own job. Until then the bodies are built here,
-out of boxes, tinted by the species' own colour. That is enough to
-tell a shambler from a hound at forty metres, which is the only
-thing the silhouette has to do.
+what each one is worth in points and how it moves, and nothing at
+all about what it looks like. What it looks like comes from two
+places. The seven human ones wear the MakeHuman figures the old
+version used, now in `assets/figures` -- see `figures.py` -- and
+the four that are not human are the glTF beasts the design names.
+Either way the species' own tags choose: `shambler` carries three
+bodies and draws one per corpse, so a crowd of them is a crowd.
+
+The built bodies below are still here and still used, when the
+figure files are absent. Boxes tinted by the species' colour are
+enough to tell a shambler from a hound at forty metres, which is
+all the silhouette has to do, and a checkout without a quarter of
+a gigabyte of meshes in it should still start.
 
 WHO THEY GO FOR IS NOT "THE NEAREST".
 
@@ -23,6 +29,8 @@ import math
 import random
 
 import warren as wr
+
+from .figures import Wardrobe
 
 
 # The health curve, which is the only one of the four in DESIGN.md
@@ -162,14 +170,37 @@ class Bodies:
     because the colour is in the vertices.
     """
 
-    def __init__(self, design):
+    def __init__(self, design, wardrobe=None):
         self.design = design
         self.meshes = {}
         self.material = wr.Material()
         self.material.albedo = wr.Color(1, 1, 1, 1)
         self.material.roughness = 0.88
+        self.wardrobe = wardrobe if wardrobe is not None else Wardrobe()
+        self.looks = {}
         for key, sp in design.undead.items():
             self.meshes[key] = self._build(sp)
+            self.looks[key] = [n for n in figure_names(sp)
+                               if self.wardrobe.has(n)]
+
+    def dress(self, species_key, rng):
+        """One body for this species: a figure if there is one.
+
+        Species with several tags draw one each time. Falling back
+        is per species, not global -- the beasts can be missing
+        while the people are there, or the other way round.
+        """
+        looks = self.looks.get(species_key) or []
+        sp = self.design.undead[species_key]
+        if looks:
+            node = self.wardrobe.make(rng.choice(looks), sp.height)
+            if node is not None:
+                return node
+        node = wr.MeshInstance3D()
+        node.name = "Body"
+        node.mesh = self.meshes[species_key]
+        node.set_material(0, self.material)
+        return node
 
     def _build(self, sp):
         cloth = _tint(sp.tint)
@@ -185,6 +216,22 @@ class Bodies:
         return build_figure(skin, cloth, h, sp.radius, hunch=hunch,
                             arms_forward=0.85, bulk=1.0 + (sp.health - 1.0)
                             * 0.25)
+
+
+def figure_names(sp):
+    """The figure files this species could be drawn as.
+
+    The design says it two ways. A human species carries `tags` --
+    the stems of the figures that were built for it, without their
+    `foe_` prefix. A beast carries `scene`, a path into the old
+    project's tree; only the file name at the end of it survived
+    the move.
+    """
+    if sp.tags:
+        return ["foe_" + t for t in sp.tags]
+    if sp.scene:
+        return [sp.scene.rsplit("/", 1)[-1].rsplit(".", 1)[0]]
+    return []
 
 
 def _gore_tint(gore, fallback):
@@ -238,10 +285,7 @@ class Zombie:
         self.agent.position = at
         parent.add_child(self.agent)
 
-        self.node = wr.MeshInstance3D()
-        self.node.name = "Body"
-        self.node.mesh = bodies.meshes[species_key]
-        self.node.set_material(0, bodies.material)
+        self.node = bodies.dress(species_key, rng)
         self.agent.add_child(self.node)
 
     @property

@@ -13,7 +13,17 @@ import random
 
 import warren as wr
 
+from .figures import Wardrobe
 from .undead import build_figure
+
+# WHO YOU ARE. One figure, for now: the old version had a
+# character-maker that picked a body, a haircut and an outfit out of
+# the modular pieces in the archive, and every one of those pieces
+# still converts. Until that screen exists there is one survivor,
+# and they are 1.8 m because that is the height the camera boom, the
+# step height and the zombies' reach were all set against.
+HERO = "hero"
+HERO_HEIGHT = 1.8
 from .weapons import Gun, Knife, resolve_shot
 
 
@@ -67,7 +77,7 @@ class Player:
         self.aiming = False
         self.moving = False
 
-    def spawn(self, parent, at):
+    def spawn(self, parent, at, wardrobe=None):
         self.body = wr.CharacterBody3D()
         self.body.name = "Survivor"
         self.body.radius = 0.4
@@ -82,20 +92,24 @@ class Player:
         # camera following a fridge -- which is what the first pass
         # looked like.
         #
-        # Upright, not hunched, arms down: the survivor has to be
-        # the one silhouette on screen that is obviously not one of
-        # them, and posture does that at any distance where colour
-        # will not.
-        shape = wr.MeshInstance3D()
+        # The survivor is the MakeHuman figure in assets/figures,
+        # dressed and standing upright. Upright is the point: they
+        # have to be the one silhouette on screen that is obviously
+        # not one of them, and posture does that at any distance
+        # where colour will not.
+        shape = (wardrobe or Wardrobe()).make(HERO, HERO_HEIGHT)
+        if shape is None:
+            shape = wr.MeshInstance3D()
+            shape.mesh = build_figure(
+                skin=wr.Color(0.78, 0.63, 0.50, 1.0),
+                cloth=wr.Color(0.24, 0.29, 0.26, 1.0),
+                height=HERO_HEIGHT, radius=0.34, hunch=0.0,
+                arms_forward=0.10)
+            mat = wr.Material()
+            mat.albedo = wr.Color(1, 1, 1, 1)
+            mat.roughness = 0.78
+            shape.set_material(0, mat)
         shape.name = "Body"
-        shape.mesh = build_figure(
-            skin=wr.Color(0.78, 0.63, 0.50, 1.0),
-            cloth=wr.Color(0.24, 0.29, 0.26, 1.0),
-            height=1.8, radius=0.34, hunch=0.0, arms_forward=0.10)
-        mat = wr.Material()
-        mat.albedo = wr.Color(1, 1, 1, 1)
-        mat.roughness = 0.78
-        shape.set_material(0, mat)
         self.body.add_child(shape)
 
         self.camera = wr.Camera3D()

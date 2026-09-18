@@ -17,6 +17,7 @@ import warren as wr
 _AUTOFIRE = bool(os.environ.get("ROTGRAVE_AUTOFIRE"))
 
 from rotgrave.design import load
+from rotgrave.figures import Wardrobe
 from rotgrave.town import Town, AREA_OPEN, AREA_SEWER
 from rotgrave.player import Player
 from rotgrave.effects import Effects
@@ -48,7 +49,11 @@ class Game(wr.Node3D):
 
         start = self.design.zones["crossroads"]
         cx, _, cz = start.centre
-        self.player = Player(wr.physics()).spawn(self, wr.Vec3(cx, 1.2, cz))
+        # One wardrobe, shared: the player and the dead draw from
+        # the same files and there is no reason to load them twice.
+        self.wardrobe = Wardrobe()
+        self.player = Player(wr.physics()).spawn(self, wr.Vec3(cx, 1.2, cz),
+                                                 self.wardrobe)
         self.player.arm(self.design)
 
         # NOVEMBER, FOUR IN THE AFTERNOON. The mode is a dead town
@@ -151,7 +156,7 @@ class Game(wr.Node3D):
         self.player.sound = self.sound
         self.effects = Effects(self)
         self.hud = Hud(self)
-        self.bodies = Bodies(self.design)
+        self.bodies = Bodies(self.design, self.wardrobe)
         # Under the region, because that is where a NavAgent3D
         # looks for the crowd it belongs to -- it walks up its
         # ancestors until it finds a NavRegion3D, and one parented

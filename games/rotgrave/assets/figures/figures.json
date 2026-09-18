@@ -1,0 +1,57 @@
+{
+ "foe_draugr": {
+  "height": 1.8519,
+  "tris": 41918,
+  "verts": 24311
+ },
+ "foe_raider": {
+  "height": 1.7792,
+  "tris": 41518,
+  "verts": 29125
+ },
+ "foe_skeleton": {
+  "height": 1.7595,
+  "tris": 27165,
+  "verts": 14869
+ },
+ "foe_skeleton2": {
+  "height": 1.5994,
+  "tris": 27917,
+  "verts": 15641
+ },
+ "foe_vampire": {
+  "height": 1.749,
+  "tris": 31662,
+  "verts": 17849
+ },
+ "foe_witch": {
+  "height": 1.6851,
+  "tris": 36594,
+  "verts": 21008
+ },
+ "foe_wraith": {
+  "height": 1.8401,
+  "tris": 29135,
+  "verts": 16437
+ },
+ "foe_zombie": {
+  "height": 1.6416,
+  "tris": 35082,
+  "verts": 22074
+ },
+ "foe_zombie2": {
+  "height": 1.8605,
+  "tris": 31822,
+  "verts": 18813
+ },
+ "foe_zombie3": {
+  "height": 1.6043,
+  "tris": 28123,
+  "verts": 15519
+ },
+ "hero": {
+  "height": 1.6546,
+  "tris": 35382,
+  "verts": 21517
+ }
+}

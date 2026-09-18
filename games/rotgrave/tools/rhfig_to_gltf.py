@@ -282,11 +282,27 @@ def hidden_skin(surfaces, reach=COVER_REACH):
     return dropped
 
 
-def convert(stem, out_path, texture_dir, scale=1.0):
-    man, surfaces = read_figure(stem)
+def convert(stems, out_path, texture_dir, scale=1.0):
+    """One figure, or several pieces worn as one.
+
+    The wearables are exported on their own -- a figure file holding
+    nothing but the trousers -- and every piece is rigged to the same
+    nineteen bones as the body, so dressing somebody is concatenating
+    surfaces. That is how the player is assembled: a bare body, the
+    clothes chosen for them, and a haircut.
+    """
+    if isinstance(stems, str):
+        stems = [stems]
+    man, surfaces = read_figure(stems[0])
     bones = man.get("bones", [])
     if not bones:
-        raise ValueError(f"{stem}: no bones")
+        raise ValueError(f"{stems[0]}: no bones")
+    for extra in stems[1:]:
+        piece_man, piece = read_figure(extra)
+        worn = [b.get("name") for b in piece_man.get("bones", [])]
+        if worn != [b.get("name") for b in bones]:
+            raise ValueError(f"{extra}: rigged to a different skeleton")
+        surfaces.extend(piece)
     if np is not None:
         hidden_skin(surfaces)
 
@@ -477,9 +493,25 @@ def main():
     ap.add_argument("--only", default="",
                     help="substring filter on the file stem")
     ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--compose", action="append", default=[],
+                    metavar="NAME=STEM+STEM",
+                    help="one figure worn out of several pieces")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    # A sidecar, because glTF has nowhere sensible to record how tall
+    # the thing in it is and the game needs to know: a species has a
+    # height in the design and the figure has one of its own, and the
+    # body has to be scaled from the second to the first.
+    index_path = os.path.join(args.out, "figures.json")
+    index = {}
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            index = json.load(f)
+
+    def note(name, man, nv, nt):
+        index[name] = {"height": round(float(man.get("height", 0.0)), 4),
+                       "verts": nv, "tris": nt}
     stems = sorted({os.path.join(args.src, f[:-5])
                     for f in os.listdir(args.src) if f.endswith(".json")})
     done = 0
@@ -490,14 +522,32 @@ def main():
         if not os.path.exists(stem + ".bin"):
             continue
         try:
-            man, nv, nt = convert(stem, os.path.join(args.out, name + ".glb"),
+            man, nv, nt = convert([stem], os.path.join(args.out, name + ".glb"),
                                   args.src, args.scale)
         except Exception as exc:
             print(f"  {name}: {exc}", file=sys.stderr)
             continue
+        note(name, man, nv, nt)
         print(f"  {name}: {nv} verts, {nt} tris, "
               f"{len(man.get('bones', []))} bones")
         done += 1
+    for spec in args.compose:
+        name, _, pieces = spec.partition("=")
+        stems = [os.path.join(args.src, q) for q in pieces.split("+") if q]
+        try:
+            man, nv, nt = convert(stems, os.path.join(args.out, name + ".glb"),
+                                  args.src, args.scale)
+        except Exception as exc:
+            print(f"  {name}: {exc}", file=sys.stderr)
+            continue
+        note(name, man, nv, nt)
+        print(f"  {name}: {nv} verts, {nt} tris, "
+              f"{len(man.get('bones', []))} bones  <- "
+              + " + ".join(os.path.basename(q) for q in stems))
+        done += 1
+
+    with open(index_path, "w") as f:
+        json.dump(index, f, indent=1, sort_keys=True)
     print(f"{done} figures -> {args.out}")
 
 
