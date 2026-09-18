@@ -109,6 +109,7 @@ class Object:
     pass
 
 class Node(Object):
+    name: str
     scene_path: str
     process: bool
     physics_process: bool

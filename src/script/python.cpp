@@ -7,6 +7,9 @@
 
 #include "app/engine.h"
 #include "core/log.h"
+#include "core/variant_json.h"
+#include "procgen/sdf.h"
+#include "render/mesh.h"
 #include "platform/input.h"
 #include "pyvalue.h"
 #include "scene/scene_tree.h"
@@ -90,6 +93,50 @@ PyObject *py_instantiate(PyObject *, PyObject *args) {
     return object_to_python(o);
 }
 
+// A SHAPE, FROM A DICT.
+//
+// The same grammar the agent protocol takes, because it is the same
+// parser: a script and a program driving the engine from outside
+// should not have two shape languages to learn between them.
+//
+//     import warren
+//     mesh = warren.shape({"op": "difference", "of": [
+//         {"shape": "box", "size": [1, 1, 1], "round": 0.05},
+//         {"shape": "sphere", "radius": 0.6}]})
+PyObject *py_shape(PyObject *, PyObject *args, PyObject *kwargs) {
+    static const char *keywords[] = {"spec", "cell_size", "detail", "smooth", nullptr};
+    PyObject *spec = nullptr;
+    float cell_size = 0.0f;
+    int detail = 48;
+    int smooth = 0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|fip",
+                                     const_cast<char **>(keywords), &spec,
+                                     &cell_size, &detail, &smooth))
+        return nullptr;
+    Variant v;
+    if (!from_python(spec, &v)) {
+        PyErr_SetString(PyExc_TypeError, "shape() takes a dict");
+        return nullptr;
+    }
+    std::string error;
+    gen::Sdf sdf = gen::Sdf::from_json(json_from_variant(v), &error);
+    if (!error.empty()) {
+        PyErr_SetString(PyExc_ValueError, error.c_str());
+        return nullptr;
+    }
+    gen::Sdf::MeshOptions options;
+    options.cell_size = cell_size;
+    options.target_cells = detail;
+    options.smooth_normals = smooth != 0;
+    Ref<Mesh> mesh = sdf.to_mesh(options, &error);
+    if (!mesh) {
+        PyErr_SetString(PyExc_ValueError, error.c_str());
+        return nullptr;
+    }
+    // The Ref goes out of scope here; object_to_python takes its own.
+    return object_to_python(mesh.get());
+}
+
 PyObject *py_classes(PyObject *, PyObject *) {
     std::vector<ClassInfo *> all = ClassDB::all();
     PyObject *list = PyList_New(Py_ssize_t(all.size()));
@@ -164,6 +211,8 @@ PyMethodDef k_module_methods[] = {
     {"instantiate", py_instantiate, METH_VARARGS,
      "Make an instance of an engine class by name."},
     {"classes", py_classes, METH_NOARGS, "Every registered class name."},
+    {"shape", (PyCFunction)py_shape, METH_VARARGS | METH_KEYWORDS,
+     "Build a Mesh from a procedural shape description."},
     {"group", py_group, METH_VARARGS, "Every node in a group."},
     {"key_down", py_key_down, METH_VARARGS, "Is a key held?"},
     {"action_down", py_action_down, METH_VARARGS, "Is an action held?"},

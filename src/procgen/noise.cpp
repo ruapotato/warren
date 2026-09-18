@@ -1,8 +1,8 @@
-#include "noise.h"
+#include "procgen/noise.h"
 
 #include <cmath>
 
-namespace wr::voxel {
+namespace wr::gen {
 
 float perlin(const Vec3 &p, uint32_t seed, Vec3 *out_gradient) {
     const int32_t xi = int32_t(std::floor(p.x));
@@ -113,4 +113,4 @@ float worley(const Vec3 &p, uint32_t seed) {
     return std::sqrt(best);
 }
 
-}  // namespace wr::voxel
+}  // namespace wr::gen

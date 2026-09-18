@@ -1,7 +1,7 @@
 #include <algorithm>
 
 #include "agent/agent.h"
-#include "agent/variant_json.h"
+#include "core/variant_json.h"
 #include "core/object.h"
 
 namespace wr {

@@ -48,7 +48,7 @@ VoxelTerrain3D::~VoxelTerrain3D() {
     chunks_.clear();
 }
 
-void VoxelTerrain3D::set_density(std::unique_ptr<DensitySource> d) {
+void VoxelTerrain3D::set_density(std::unique_ptr<Field> d) {
     Jobs::wait(counter_);
     base_density_ = std::move(d);
     terrain_ = dynamic_cast<TerrainDensity *>(base_density_.get());
@@ -138,8 +138,8 @@ void VoxelTerrain3D::queue_chunk(const ChunkCoord &c) {
     Chunk *raw = chunk.get();
     chunks_[c] = std::move(chunk);
 
-    MeshRequest req;
-    req.density = edited_.get();
+    ContourRequest req;
+    req.field = edited_.get();
     req.origin = chunk_origin(c);
     // THE ONLY LINE LEVEL OF DETAIL NEEDS IN THE MESHER. The same
     // field, sampled at twice the spacing over twice the box; the
@@ -150,7 +150,7 @@ void VoxelTerrain3D::queue_chunk(const ChunkCoord &c) {
     raw->state.store(State::Meshing, std::memory_order_release);
     Jobs::submit(
         [raw, req]() {
-            mesh_chunk(req, &raw->mesh);
+            contour_field(req, &raw->mesh);
             // TANGENTS ON THE WORKER, NOT AT UPLOAD. Deriving them
             // is O(vertices) over ten thousand of them and needs
             // nothing but the arrays, so it belongs beside the

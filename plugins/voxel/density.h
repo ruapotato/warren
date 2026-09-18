@@ -1,80 +1,29 @@
 // Warren voxel -- what the ground is.
 //
-// The terrain is a SIGNED DISTANCE FIELD: a function from a point in
-// space to how far it is from the surface, negative inside the rock
-// and positive in the air. Everything else follows from that -- the
-// mesher finds where it crosses zero, digging subtracts a sphere from
-// it, and a cave is a region where it went positive.
-//
-// A field rather than a grid of blocks, because a field can be
-// sampled at any resolution and always agrees with itself. That is
-// what makes distant terrain meshable coarsely without the ground
-// moving when you walk up to it.
+// The terrain generator and the record of what has been dug out of
+// it. The field interface both of these implement lives in the
+// engine, in procgen/field.h, because the procedural modelling tools
+// contour the same kind of field with the same mesher.
 #pragma once
 
 #include <cstdint>
 #include <functional>
 #include <vector>
 
-#include "core/math/transform.h"
+#include "procgen/field.h"
+#include "procgen/noise.h"
 
 namespace wr::voxel {
 
-// What a cell is made of: an index into the terrain's palette, with 0
-// always air. NOT called Material, because the engine already has a
-// class of that name and a voxel is not made of one -- it refers to
-// one, which is what an id is for.
-using MaterialId = uint8_t;
-
-struct Sample {
-    // Negative inside the solid, positive outside, in metres. It need
-    // not be a true distance -- the mesher only needs the sign and a
-    // roughly linear crossing -- but the closer it is, the better the
-    // surface looks.
-    float distance = 1.0f;
-    MaterialId material = 0;
-};
-
-// The source of the world. Implement this to make your own planet;
-// the default below makes a good one.
-class DensitySource {
-public:
-    virtual ~DensitySource() = default;
-    virtual Sample sample(const Vec3 &p) const = 0;
-    // THE GRADIENT, WHICH IS THE SURFACE NORMAL.
-    //
-    // The default takes six extra samples; a generator that knows its
-    // own derivative should say so, because this is called once per
-    // surface crossing and there are a great many of them.
-    virtual Vec3 gradient(const Vec3 &p, float h = 0.05f) const {
-        return {(sample({p.x + h, p.y, p.z}).distance -
-                 sample({p.x - h, p.y, p.z}).distance),
-                (sample({p.x, p.y + h, p.z}).distance -
-                 sample({p.x, p.y - h, p.z}).distance),
-                (sample({p.x, p.y, p.z + h}).distance -
-                 sample({p.x, p.y, p.z - h}).distance)};
-    }
-    // WHAT THE SURFACE IS MADE OF, given where it is and which way
-    // it faces.
-    //
-    // Distinct from `sample().material`, which says what is at a
-    // point. At the surface itself the depth is zero, so a
-    // depth-banded rule gives the same answer everywhere; and asking
-    // a corner of the cell instead makes the answer flip between
-    // neighbouring cells wherever a band boundary passes through,
-    // which paints contour stripes across the whole landscape.
-    //
-    // The slope is what a surface material actually depends on:
-    // grass on the flat, rock on the steep, snow up high.
-    virtual MaterialId surface_material(const Vec3 &p, const Vec3 &normal) const {
-        return sample(p).material;
-    }
-    // A conservative bound on |distance| over a box, used to skip
-    // whole chunks without sampling them. Returning infinity is
-    // always correct and always slow.
-    virtual float bound(const AABB &box) const { return INF; }
-    virtual const char *name() const { return "density"; }
-};
+// The field vocabulary is the engine's; the terrain is this
+// plugin's use of it.
+using gen::Field;
+using gen::MaterialId;
+using gen::Sample;
+using gen::fbm;
+using gen::perlin;
+using gen::ridged;
+using gen::worley;
 
 // THE ONE THAT SHIPS.
 //
@@ -128,7 +77,7 @@ struct TerrainParams {
     float material_noise = 12.0f;
 };
 
-class TerrainDensity : public DensitySource {
+class TerrainDensity : public Field {
 public:
     explicit TerrainDensity(const TerrainParams &p = {}) : params_(p) {}
 
@@ -151,7 +100,7 @@ private:
 };
 
 // A flat world, for tests and for a sandbox.
-class FlatDensity : public DensitySource {
+class FlatDensity : public Field {
 public:
     explicit FlatDensity(float height = 0.0f, MaterialId m = 3)
         : height_(height), material_(m) {}
@@ -197,9 +146,9 @@ struct Edit {
     float field(const Vec3 &p) const;
 };
 
-class EditedDensity : public DensitySource {
+class EditedDensity : public Field {
 public:
-    explicit EditedDensity(DensitySource *base) : base_(base) {}
+    explicit EditedDensity(Field *base) : base_(base) {}
 
     Sample sample(const Vec3 &p) const override;
     Vec3 gradient(const Vec3 &p, float h) const override;
@@ -213,10 +162,10 @@ public:
     const std::vector<Edit> &edits() const { return edits_; }
     // Which edits touch a box, so a chunk only pays for its own.
     void edits_in(const AABB &box, std::vector<const Edit *> &out) const;
-    DensitySource *base() const { return base_; }
+    Field *base() const { return base_; }
 
 private:
-    DensitySource *base_ = nullptr;
+    Field *base_ = nullptr;
     std::vector<Edit> edits_;
     std::vector<AABB> bounds_;
 };

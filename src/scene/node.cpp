@@ -381,6 +381,16 @@ bool Node3D::visible_in_tree() const {
 
 static void register_node_classes() {
     ClassBuilder<Node>()
+        // A PROPERTY, not only a pair of methods.
+        //
+        // Every other reader of the reflection treats a property as
+        // the way to read and write a thing: the inspector shows
+        // them, a scene file saves them, and Python turns them into
+        // attributes. Leaving `name` out meant `node.name = "Lamp"`
+        // from a script quietly set a Python attribute on the
+        // wrapper and left the node called "Node" -- no error, and
+        // the wrong answer several steps later.
+        .prop("name", &Node::name, &Node::set_name)
         .method("set_name", &Node::set_name).args("name")
         .method("get_name", &Node::name)
         .method("get_path", &Node::path)

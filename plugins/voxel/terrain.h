@@ -12,7 +12,13 @@
 
 #include "core/jobs.h"
 #include "density.h"
-#include "mesher.h"
+#include "procgen/surface.h"
+
+namespace wr::voxel {
+using gen::ContourRequest;
+using gen::ContourResult;
+using gen::contour_field;
+}
 #include "scene/bodies.h"
 #include "scene/nodes.h"
 
@@ -114,8 +120,8 @@ public:
     // --- the field -----------------------------------------------------------
     // The terrain owns its density source. `terrain()` is the default
     // one, so its parameters can be tuned without replacing it.
-    void set_density(std::unique_ptr<DensitySource> d);
-    DensitySource *density() const { return edited_.get(); }
+    void set_density(std::unique_ptr<Field> d);
+    Field *density() const { return edited_.get(); }
     TerrainDensity *terrain_density() const { return terrain_; }
     void set_seed(int64_t seed);
 
@@ -178,7 +184,7 @@ private:
         std::atomic<State> state{State::Queued};
         // Written by a worker, read by the main thread once the state
         // says Ready. The state is the handshake.
-        MeshResult mesh;
+        ContourResult mesh;
         MeshInstance3D *instance = nullptr;
         StaticBody3D *body = nullptr;
         Ref<Mesh> gpu_mesh;
@@ -201,7 +207,7 @@ private:
 
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>, ChunkCoordHash> chunks_;
     std::unique_ptr<EditedDensity> edited_;
-    std::unique_ptr<DensitySource> base_density_;
+    std::unique_ptr<Field> base_density_;
     TerrainDensity *terrain_ = nullptr;
     Ref<Material> material_;
     JobCounterRef counter_;

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "noise.h"
+#include "procgen/noise.h"
 
 namespace wr::voxel {
 
@@ -121,7 +121,7 @@ Vec3 TerrainDensity::gradient(const Vec3 &p, float h) const {
     // The warp and the caves make an analytic derivative long and
     // fragile; central differences on a field this smooth are
     // accurate and are only six samples.
-    return DensitySource::gradient(p, h);
+    return Field::gradient(p, h);
 }
 
 // HOW FAR THIS BOX IS FROM ANY SURFACE.
@@ -233,7 +233,7 @@ Sample EditedDensity::sample(const Vec3 &p) const {
 }
 
 Vec3 EditedDensity::gradient(const Vec3 &p, float h) const {
-    return DensitySource::gradient(p, h);
+    return Field::gradient(p, h);
 }
 
 MaterialId EditedDensity::surface_material(const Vec3 &p,

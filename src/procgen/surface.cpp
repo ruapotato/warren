@@ -1,10 +1,10 @@
-#include "mesher.h"
+#include "procgen/surface.h"
 
 #include <algorithm>
 #include <algorithm>
 #include <cstring>
 
-namespace wr::voxel {
+namespace wr::gen {
 
 Palette::Palette() {
     for (int i = 0; i < 256; i++) {
@@ -70,14 +70,14 @@ const int kEdgeCorners[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7},   // along x
 
 }  // namespace
 
-void mesh_chunk(const MeshRequest &req, MeshResult *out) {
+void contour_field(const ContourRequest &req, ContourResult *out) {
     out->vertices.clear();
     out->indices.clear();
     out->bounds = AABB();
     out->empty = true;
     out->surface_cells = 0;
     out->samples = 0;
-    if (!req.density || req.resolution <= 0) return;
+    if (!req.field || req.resolution <= 0) return;
 
     const int res = req.resolution;
     const float cs = req.cell_size;
@@ -118,7 +118,7 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
                 for (int i = 0; i <= 4; i++) {
                     Vec3 p = req.origin + Vec3(float(i), float(j), float(k)) *
                                               (span / 4.0f);
-                    float d = req.density->sample(p).distance;
+                    float d = req.field->sample(p).distance;
                     nearest = std::min(nearest, std::fabs(d));
                     const bool neg = d <= 0.0f;
                     if (i == 0 && j == 0 && k == 0) sign_first = neg;
@@ -141,7 +141,7 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
     for (int z = -1; z <= res; z++)
         for (int y = -1; y <= res; y++)
             for (int x = -1; x <= res; x++) {
-                Sample s = req.density->sample(corner_pos(x, y, z));
+                Sample s = req.field->sample(corner_pos(x, y, z));
                 const size_t i = corner_index(x, y, z);
                 field[i] = s.distance;
                 mats[i] = s.material;
@@ -231,7 +231,7 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
                     Vec3 p = lerp(ca, cb, t);
                     // THE NORMAL COMES FROM THE GRID WE ALREADY HAVE.
                     //
-                    // Asking the density source costs six more
+                    // Asking the field costs six more
                     // samples per crossing, and there are several
                     // crossings per surface cell and tens of
                     // thousands of surface cells -- which for a
@@ -288,7 +288,7 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
                 // wherever a depth band crosses them, and the whole
                 // landscape comes out in contour stripes.
                 MaterialId best_mat =
-                    req.density->surface_material(vert.position, vert.normal);
+                    req.field->surface_material(vert.position, vert.normal);
                 if (best_mat == 0) {
                     // The field says air at the vertex, which happens
                     // a fraction of a cell out. Fall back to whatever
@@ -365,4 +365,4 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
     out->empty = out->indices.empty();
 }
 
-}  // namespace wr::voxel
+}  // namespace wr::gen

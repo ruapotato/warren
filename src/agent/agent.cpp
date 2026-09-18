@@ -6,9 +6,12 @@
 #include <string>
 #include <vector>
 
-#include "agent/variant_json.h"
+#include "core/variant_json.h"
 #include "app/engine.h"
 #include "core/log.h"
+#include "core/suggest.h"
+#include "procgen/sdf.h"
+#include "render/mesh.h"
 #include "resource/packed_scene.h"
 #include "resource/resource.h"
 #include "scene/node.h"
@@ -21,20 +24,6 @@ namespace {
 
 // --------------------------------------------------------------- misses
 
-int edit_distance(const std::string &a, const std::string &b) {
-    std::vector<int> prev(b.size() + 1), cur(b.size() + 1);
-    for (size_t j = 0; j <= b.size(); j++) prev[j] = int(j);
-    for (size_t i = 1; i <= a.size(); i++) {
-        cur[0] = int(i);
-        for (size_t j = 1; j <= b.size(); j++) {
-            const int cost = std::tolower(a[i - 1]) == std::tolower(b[j - 1]) ? 0 : 1;
-            cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost});
-        }
-        prev = cur;
-    }
-    return prev[b.size()];
-}
-
 // THE POINT OF THIS FILE, more or less.
 //
 // A caller that guesses a name wrong gets told the names that are
@@ -44,24 +33,8 @@ int edit_distance(const std::string &a, const std::string &b) {
 // and a model that has to guess three times to set a position is a
 // model nobody wants driving an engine.
 Json near_misses(const std::string &wanted, const std::vector<std::string> &have) {
-    struct Scored { int d; std::string name; };
-    std::vector<Scored> scored;
-    // A third of the length, so short names need a close match and
-    // long ones can afford a typo or two. Substring hits always
-    // count: someone who wrote "position" at "global_position" knew
-    // roughly what they wanted.
-    const int budget = std::max(2, int(wanted.size()) / 3 + 1);
-    for (const std::string &n : have) {
-        const int d = edit_distance(wanted, n);
-        const bool contains = n.find(wanted) != std::string::npos ||
-                              wanted.find(n) != std::string::npos;
-        if (d <= budget || contains) scored.push_back({contains ? std::min(d, 1) : d, n});
-    }
-    std::sort(scored.begin(), scored.end(), [](const Scored &a, const Scored &b) {
-        return a.d != b.d ? a.d < b.d : a.name < b.name;
-    });
     Json out = Json::array();
-    for (size_t i = 0; i < scored.size() && i < 5; i++) out.push(Json(scored[i].name));
+    for (const std::string &n : suggest(wanted, have)) out.push(Json(n));
     return out;
 }
 
@@ -725,6 +698,143 @@ Json cmd_load_scene(const AgentContext &ctx, const Json &c) {
     return j;
 }
 
+// ------------------------------------------------------- making things
+
+// THE SHAPE LANGUAGE, DESCRIBED BY THE ENGINE ITSELF.
+//
+// An agent cannot write a shape it has not been told the grammar of,
+// and a grammar in a README is a grammar that will be out of date.
+// Every name here is checked by test_agent against the parser, so a
+// primitive that stops parsing, or one that is added and not listed,
+// fails the build rather than a user.
+struct ShapeDoc {
+    const char *name;
+    const char *params;
+    const char *note;
+};
+
+const ShapeDoc kShapes[] = {
+    {"sphere", "radius=0.5", "centred on the origin, like all of them"},
+    {"box", "size=[1,1,1], round=0", "round takes the corners off without growing it"},
+    {"cylinder", "radius=0.5, height=1, round=0", "standing on Y"},
+    {"capsule", "radius=0.25, height=1", "height includes the round ends"},
+    {"cone", "radius=0.5, height=1, round=0", "tip up"},
+    {"torus", "major=0.5, minor=0.15", "lying in the XZ plane"},
+    {"half_space", "normal=[0,1,0], offset=0",
+     "unbounded: only useful intersected with something, which is how you "
+     "slice a shape flat"},
+};
+
+const ShapeDoc kOps[] = {
+    {"union", "of=[...], blend=0", "everything; blend melts them together"},
+    {"intersection", "of=[...], blend=0", "only where they overlap"},
+    {"difference", "of=[...], blend=0", "the first one, minus all the rest"},
+};
+
+const ShapeDoc kModifiers[] = {
+    {"at", "[x,y,z]", "where it goes; applied after everything else on the node"},
+    {"rotate", "[x,y,z]", "degrees about each axis"},
+    {"scale", "number", "uniform"},
+    {"round", "number", "grow and round every edge"},
+    {"shell", "number", "hollow it out, leaving walls that thick"},
+    {"twist", "number", "turns per metre about Y"},
+    {"bend", "number", "curvature about Z as X increases"},
+    {"displace", "number, or {amplitude, scale, octaves, seed}",
+     "fractal noise on the surface -- what turns a sphere into a rock"},
+    {"elongate", "[x,y,z]", "stretch by sliding the halves apart, keeping the ends round"},
+    {"mirror", "[x,y,z]", "nonzero axes are mirrored, so only half need be built"},
+    {"repeat", "[x,y,z], count=[x,y,z]",
+     "copies on a lattice; a count of 0 on an axis repeats for ever"},
+    {"material", "number", "palette index for this part and everything under it"},
+};
+
+Json shape_doc_list(const ShapeDoc *docs, size_t n) {
+    Json out = Json::array();
+    for (size_t i = 0; i < n; i++) {
+        Json j = Json::object();
+        j.set("name", docs[i].name);
+        j.set("params", docs[i].params);
+        j.set("note", docs[i].note);
+        out.push(j);
+    }
+    return out;
+}
+
+Json cmd_shapes(const AgentContext &, const Json &) {
+    Json j = ok();
+    j.set("about",
+          "A shape is a signed distance field described as JSON, contoured "
+          "into a mesh. One object per node: \"shape\" for a primitive or "
+          "\"op\" with \"of\" for a combination, plus any modifiers on the "
+          "same object. Booleans always work here -- they are min and max on "
+          "the field, not surgery on triangles.");
+    j.set("example",
+          R"({"op":"difference","of":[{"shape":"box","size":[2,1,2],"round":0.05},)"
+          R"({"shape":"cylinder","radius":0.3,"height":3,"at":[0.6,0,0.6]}]})");
+    j.set("primitives", shape_doc_list(kShapes, sizeof(kShapes) / sizeof(kShapes[0])));
+    j.set("operations", shape_doc_list(kOps, sizeof(kOps) / sizeof(kOps[0])));
+    j.set("modifiers",
+          shape_doc_list(kModifiers, sizeof(kModifiers) / sizeof(kModifiers[0])));
+    return j;
+}
+
+Json cmd_make_mesh(const AgentContext &ctx, const Json &c) {
+    if (!c.has("shape") && !c.has("sdf"))
+        return fail("missing_arg",
+                    "make_mesh needs \"shape\": the shape to build. Send the "
+                    "\"shapes\" command for the grammar.");
+    std::string error;
+    gen::Sdf shape =
+        gen::Sdf::from_json(c.has("shape") ? c["shape"] : c["sdf"], &error);
+    if (!error.empty()) {
+        Json j = fail("bad_shape", error);
+        j.set("see", "the shapes command");
+        return j;
+    }
+
+    gen::Sdf::MeshOptions options;
+    if (c.has("cell_size")) options.cell_size = float(c["cell_size"].number());
+    if (c.has("detail")) options.target_cells = int(c["detail"].number());
+    if (c.has("smooth")) options.smooth_normals = c["smooth"].boolean();
+
+    Ref<Mesh> mesh = shape.to_mesh(options, &error);
+    if (!mesh) return fail("mesh_failed", error);
+
+    Json j = ok();
+    j.set("vertices", int(mesh->vertex_count()));
+    j.set("triangles", int(mesh->triangle_count()));
+    const AABB b = mesh->bounds();
+    Json size = Json::object();
+    size.set("x", double(b.max.x - b.min.x)).set("y", double(b.max.y - b.min.y));
+    size.set("z", double(b.max.z - b.min.z));
+    j.set("size", size);
+
+    if (c.has("save")) {
+        const std::string path = c["save"].string();
+        if (!ResourceSaver::save(mesh.get(), path))
+            return fail("save_failed", "could not write " + path);
+        j.set("saved", path);
+    }
+    // Put it in the world, which is the point: an agent that builds
+    // something wants to look at it, and looking at it means a node
+    // and then a screenshot.
+    if (c.has("parent")) {
+        Json err;
+        Node *parent = resolve(ctx, c["parent"].string(), &err);
+        if (!parent) return err;
+        MeshInstance3D *mi = new MeshInstance3D();
+        mi->set_name(c.has("name") ? c["name"].string() : "Shape");
+        mi->mesh = mesh;
+        parent->add_child(mi);
+        if (c.has("at")) {
+            Json r = apply_property(ctx, mi, "position", c["at"]);
+            if (!r["ok"].boolean()) { mi->free_from_parent(); return r; }
+        }
+        j.set("node", node_brief(mi));
+    }
+    return j;
+}
+
 Json cmd_stats(const AgentContext &ctx, const Json &) {
     Engine *e = ctx.engine;
     Engine::FrameTimes ft = e->frame_times(0);
@@ -767,6 +877,11 @@ const Command kCommands[] = {
      "path:string, node:string?", cmd_save_scene},
     {"load_scene", "load a scene file as the current scene, or under a parent",
      "path:string, parent:string?", cmd_load_scene},
+    {"shapes", "the procedural shape language: every primitive, operation and modifier",
+     "", cmd_shapes},
+    {"make_mesh", "build a mesh from a shape and, optionally, put it in the world",
+     "shape:object, parent:string?, name:string?, at:vec3?, cell_size:float?, "
+     "detail:int?, smooth:bool?, save:string?", cmd_make_mesh},
     {"stats", "frame times and what the engine is doing", "", cmd_stats, true},
 };
 

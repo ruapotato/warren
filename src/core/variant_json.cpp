@@ -1,4 +1,4 @@
-#include "agent/variant_json.h"
+#include "core/variant_json.h"
 
 #include <cmath>
 #include <cstdio>
@@ -102,6 +102,32 @@ bool read_euler(const Json &j, float *ypr, std::string *error) {
 const char *const kRGBA[4] = {"r", "g", "b", "a"};
 
 }  // namespace
+
+Json json_from_variant(const Variant &v) {
+    switch (v.type()) {
+        case VType::Nil: return Json();
+        case VType::Bool: return Json(v.to_bool());
+        case VType::Int: return Json(double(v.to_int()));
+        case VType::Float: return Json(double(v.to_float()));
+        case VType::String: return Json(v.to_string());
+        case VType::Array: {
+            Json j = Json::array();
+            if (const Array *a = v.array_ptr())
+                for (const Variant &e : *a) j.push(json_from_variant(e));
+            return j;
+        }
+        case VType::Dict: {
+            Json j = Json::object();
+            if (const Dict *d = v.dict_ptr())
+                for (const auto &kv : *d) j.set(kv.first, json_from_variant(kv.second));
+            return j;
+        }
+        default:
+            // The maths types already have a JSON shape and it is the
+            // same one, so there is no reason to write it twice.
+            return variant_to_json(v);
+    }
+}
 
 std::string type_label(VType t, const std::string &class_name) {
     if (t == VType::Object) return class_name.empty() ? "Object" : class_name;

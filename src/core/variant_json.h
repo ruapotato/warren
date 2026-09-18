@@ -1,4 +1,9 @@
-// Warren -- Variant to JSON and back, for the agent interface.
+// Warren -- Variant to JSON and back.
+//
+// Three callers want this: the agent protocol, which speaks JSON to
+// the outside; the procedural shape language, which is JSON that a
+// script hands over as a dict; and anything that writes a Variant to
+// a file a person will read.
 #pragma once
 
 #include <string>
@@ -32,6 +37,15 @@ Json variant_to_json(const Variant &v);
 // is the kind of quiet wrongness that costs an afternoon.
 bool json_to_variant(const Json &j, VType want, Variant *out,
                      std::string *error, const Variant *current = nullptr);
+
+// THE OTHER DIRECTION, for a script.
+//
+// A Python dict describing a shape is a Variant before it is
+// anything else, and the shape parser reads JSON. Rather than a
+// second parser that takes Dicts and drifts away from the first,
+// the Dict becomes JSON and there is one parser. Objects in the
+// Variant have no JSON form and become null.
+Json json_from_variant(const Variant &v);
 
 // The type as the schema names it: "vec3", "float", "Node3D".
 std::string type_label(VType t, const std::string &class_name = "");

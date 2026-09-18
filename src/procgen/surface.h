@@ -1,4 +1,4 @@
-// Warren voxel -- turning a field into triangles.
+// Warren -- turning a field into triangles.
 //
 // DUAL CONTOURING, not marching cubes.
 //
@@ -18,13 +18,13 @@
 
 #include <vector>
 
-#include "density.h"
+#include "procgen/field.h"
 #include "render/mesh.h"
 
-namespace wr::voxel {
+namespace wr::gen {
 
-struct MeshRequest {
-    const DensitySource *density = nullptr;
+struct ContourRequest {
+    const Field *field = nullptr;
     // World position of the chunk's corner (0, 0, 0).
     Vec3 origin;
     // Metres per cell. Doubling it halves the detail, which is how
@@ -42,7 +42,7 @@ struct MeshRequest {
     bool smooth_normals = true;
 };
 
-struct MeshResult {
+struct ContourResult {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     AABB bounds;
@@ -57,7 +57,7 @@ struct MeshResult {
 
 // Thread-safe: it touches nothing but its arguments, so a hundred
 // chunks can be meshed at once.
-void mesh_chunk(const MeshRequest &request, MeshResult *out);
+void contour_field(const ContourRequest &request, ContourResult *out);
 
 // The colour a material is drawn in until there is a texture array.
 // Exposed so a game can replace the palette.
@@ -68,4 +68,4 @@ struct Palette {
     static Palette &instance();
 };
 
-}  // namespace wr::voxel
+}  // namespace wr::gen
