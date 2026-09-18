@@ -21,3 +21,6 @@ src/render/shaders/generated/
 .vscode/
 .idea/
 *.swp
+# What a run leaves beside the binary.
+*.ppm
+shots/
