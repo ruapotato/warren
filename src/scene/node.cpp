@@ -96,7 +96,7 @@ Node *Node::find_child(const std::string &n) const {
     return nullptr;
 }
 
-Node *Node::get_node(const std::string &p) const {
+Node *Node::find_path(const std::string &p) const {
     if (p.empty() || p == ".") return const_cast<Node *>(this);
     const Node *cur = this;
     size_t i = 0;
@@ -111,22 +111,30 @@ Node *Node::get_node(const std::string &p) const {
         i = j + 1;
         if (part.empty() || part == ".") continue;
         if (part == "..") {
-            if (!cur->parent_) {
-                MF_ERROR("get_node('%s'): '..' above the root", p.c_str());
-                return nullptr;
-            }
+            if (!cur->parent_) return nullptr;
             cur = cur->parent_;
             continue;
         }
         Node *next = cur->find_child(part);
-        if (!next) {
-            MF_ERROR("get_node('%s'): no child '%s' under %s", p.c_str(),
-                     part.c_str(), cur->path().c_str());
-            return nullptr;
-        }
+        if (!next) return nullptr;
         cur = next;
     }
     return const_cast<Node *>(cur);
+}
+
+Node *Node::get_node(const std::string &p) const {
+    // THE LOUD ONE. A script asking for a node it expects to exist
+    // wants to be told when it does not, because the alternative is
+    // a null dereference three lines later with no clue why. A
+    // lookup that is allowed to fail -- resolving a saved path,
+    // probing for an optional child -- calls find_path instead, and
+    // a "not found" that is a normal answer should never be logged
+    // as an error.
+    Node *n = find_path(p);
+    if (!n)
+        MF_ERROR("get_node('%s'): nothing there, from %s", p.c_str(),
+                 path().c_str());
+    return n;
 }
 
 Node *Node::root() const {
@@ -367,6 +375,7 @@ static void register_node_classes() {
         .method("get_child", &Node::child).args("index")
         .method("find_child", &Node::find_child).args("name")
         .method("get_node", &Node::get_node).args("path")
+        .method("find_path", &Node::find_path).args("path")
         .method("find_by_class", &Node::find_by_class).args("class_name")
         .method("add_to_group", &Node::add_to_group).args("group")
         .method("remove_from_group", &Node::remove_from_group).args("group")
@@ -380,16 +389,25 @@ static void register_node_classes() {
         .signal("tree_exiting");
 
     ClassBuilder<Node3D>()
+        // POSITION AND BASIS ARE THE STATE; the rest are views of
+        // it. A scene file stores those two and nothing else, or a
+        // child comes back with its parent's transform folded in.
         .prop("transform", &Node3D::transform, &Node3D::set_transform)
+        .transient()
         .prop("global_transform", &Node3D::global_transform,
               &Node3D::set_global_transform)
+        .transient()
         .prop("position", &Node3D::position, &Node3D::set_position)
         .prop("global_position", &Node3D::global_position,
               &Node3D::set_global_position)
+        .transient()
         .prop("basis", &Node3D::basis, &Node3D::set_basis)
         .prop("rotation", &Node3D::rotation, &Node3D::set_rotation)
+        .transient()
         .prop("euler", &Node3D::euler, &Node3D::set_euler)
+        .transient()
         .prop("scale", &Node3D::scale, &Node3D::set_scale)
+        .transient()
         .prop("visible", &Node3D::visible, &Node3D::set_visible)
         .prop("layers", &Node3D::layers, &Node3D::set_layers)
         .method("translate", &Node3D::translate).args("delta")

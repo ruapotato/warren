@@ -66,6 +66,18 @@ void Camera3D::make_current() {
     if (tree()) tree()->set_active_camera(this);
 }
 
+void Camera3D::on_exit_tree() {
+    if (tree() && tree()->active_camera() == this)
+        tree()->set_active_camera(nullptr);
+}
+
+void Camera3D::on_enter_tree() {
+    // Symmetrically: a camera that was current before it was moved
+    // is current again where it lands, so re-parenting a rig does
+    // not silently switch the view to whatever else is around.
+    if (current_ && tree()) tree()->set_active_camera(this);
+}
+
 void Camera3D::screen_ray(const Vec2 &screen_uv, float aspect, Vec3 *origin,
                           Vec3 *direction) const {
     // Screen UV has y down; NDC has y up.
@@ -136,6 +148,12 @@ static void register_scene_nodes() {
 
     ClassBuilder<MeshInstance3D>()
         .prop("mesh", &MeshInstance3D::get_mesh, &MeshInstance3D::set_mesh)
+        // Slot zero, as a property, so a scene file and an inspector
+        // can reach the common case. A mesh with several material
+        // slots still needs set_material, and a scene saving only
+        // slot zero says so rather than pretending.
+        .prop("material", &MeshInstance3D::first_material,
+              &MeshInstance3D::set_first_material)
         .field("cast_shadows", &MeshInstance3D::cast_shadows)
         .field("receive_shadows", &MeshInstance3D::receive_shadows)
         .field("tint", &MeshInstance3D::tint)

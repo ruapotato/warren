@@ -80,6 +80,19 @@ bool Engine::init(const EngineConfig &cfg) {
         if (n) MF_INFO("%s", plugins_.report().c_str());
     }
 
+    if (cfg.enable_editor) {
+        // ASKED OF THE DEVICE, NOT OF A TEXTURE HANDLE. Between
+        // frames there is no current swapchain image, so
+        // texture_desc(swapchain_texture()) hands back a
+        // default-constructed descriptor -- RGBA8 -- and the
+        // pipeline is then built for a format the pass will never
+        // have. Validation catches it; without validation it is a
+        // blank editor on some drivers and a correct one on others.
+        ui_ready_ = ui_renderer_.init(device_, device_->swapchain_format(), 1);
+        editor_.init(this);
+        editor_.set_enabled(cfg.editor_visible);
+    }
+
     if (cfg.enable_audio) {
         audio_.init(cfg.audio);
         audio_system_.set_server(&audio_);
@@ -143,6 +156,10 @@ void Engine::shutdown() {
     // each voice is playing; a node destroyed while that callback is
     // mid-mix would free the samples under it. Closing the device
     // joins that thread, and after that nothing else is racing.
+    editor_.shutdown();
+    ui_renderer_.shutdown();
+    ui_ready_ = false;
+
     audio_.shutdown();
     audio_system_.set_server(nullptr);
     audio_system_install(nullptr);
@@ -209,10 +226,65 @@ bool Engine::step() {
 
     const bool want_shot = !config_.screenshot_path.empty() &&
                            frames_ + 1 == config_.screenshot_frame;
+    // THE EDITOR IS BUILT BEFORE THE FRAME IS RECORDED, so that a
+    // panel that changes a property changes it for the frame the
+    // player is about to see rather than the one after. It is a
+    // build of geometry only; nothing is drawn until the pass below.
+    if (config_.enable_editor) {
+        if (Input::key_just_pressed(Key::F1)) editor_.toggle();
+        ui::Input ui_in;
+        const Vec2 mouse = Input::mouse_position();
+        ui_in.mouse_x = mouse.x;
+        ui_in.mouse_y = mouse.y;
+        ui_in.mouse_down = Input::mouse_down(MouseButton::Left);
+        ui_in.mouse_right = Input::mouse_down(MouseButton::Right);
+        ui_in.wheel = Input::wheel();
+        ui_in.text = Input::text_typed();
+        ui_in.key_backspace = Input::key_just_pressed(Key::Backspace);
+        ui_in.key_enter = Input::key_just_pressed(Key::Return);
+        ui_in.key_escape = Input::key_just_pressed(Key::Escape);
+        ui_in.key_tab = Input::key_just_pressed(Key::Tab);
+        ui_in.key_left = Input::key_just_pressed(Key::Left);
+        ui_in.key_right = Input::key_just_pressed(Key::Right);
+        ui_in.ctrl = Input::key_down(Key::LeftCtrl) ||
+                     Input::key_down(Key::RightCtrl);
+        ui_in.shift = Input::key_down(Key::LeftShift) ||
+                      Input::key_down(Key::RightShift);
+        const Vec2i drawable = window_.drawable_size();
+        ui_.begin_frame(float(drawable.x), float(drawable.y), ui_in, dt);
+        editor_.build(ui_, dt);
+        ui_.end_frame();
+    }
+
     rhi::CommandList *cmd = device_->begin_frame();
     if (cmd) {
         Camera3D *cam = tree_->active_camera();
         if (cam) renderer_.render(cmd, tree_.get(), cam, device_->swapchain_texture());
+        // OVER THE TONEMAP, NOT THROUGH IT. The editor's colours are
+        // chosen against a monitor, not against an exposure: running
+        // a panel through the scene's tonemap makes it change
+        // brightness when the player walks into a dark room, which
+        // is the one thing a tool must not do.
+        if (config_.enable_editor && editor_.enabled() && ui_ready_ &&
+            !ui_.draw_data().empty()) {
+            rhi::TextureH target = device_->swapchain_texture();
+            rhi::TextureDesc td = device_->texture_desc(target);
+            rhi::RenderingInfo ri;
+            rhi::ColourAttachment ca;
+            ca.texture = target;
+            ca.load = rhi::LoadOp::Load;
+            ri.colour.push_back(ca);
+            ri.width = td.width;
+            ri.height = td.height;
+            ri.name = "editor";
+            cmd->begin_rendering(ri);
+            rhi::Viewport vp;
+            vp.width = float(td.width);
+            vp.height = float(td.height);
+            cmd->set_viewport(vp);
+            ui_renderer_.draw(cmd, ui_.draw_data(), td.width, td.height);
+            cmd->end_rendering();
+        }
         if (want_shot) device_->request_capture();
         device_->end_frame();
     }

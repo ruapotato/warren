@@ -75,7 +75,10 @@ public:
     Node *find_child(const std::string &n) const;
     // "Arena/Props/Lamp", or "." for this node. Null and a logged error
     // if any step is missing.
+    // Loud: logs when it finds nothing, for a caller that expected
+    // something. Use find_path where a miss is a normal answer.
     Node *get_node(const std::string &path) const;
+    Node *find_path(const std::string &path) const;
     // First descendant of the given class, breadth first.
     Node *find_by_class(const std::string &class_name) const;
     std::vector<Node *> find_all_by_class(const std::string &class_name) const;

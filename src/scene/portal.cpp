@@ -198,6 +198,10 @@ static void register_portal_class() {
         .field("edge_colour", &Portal3D::edge_colour)
         .field("edge_width", &Portal3D::edge_width, "range:0,0.5")
         .field("open", &Portal3D::open, "range:0,1")
+        // A PROPERTY AS WELL AS A METHOD, so a scene file and an
+        // inspector can see the link. link_to keeps the two ends
+        // agreeing; setting the property does the same thing.
+        .prop("link", &Portal3D::link, &Portal3D::link_to)
         .method("link_to", &Portal3D::link_to).args("other")
         .method("unlink", &Portal3D::unlink)
         .method("get_link", &Portal3D::link)

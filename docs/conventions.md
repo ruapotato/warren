@@ -343,3 +343,58 @@ That is the feature working. A test that called it error would be
 measuring the latency of its own simulator. What *is* error is being
 off the path — `tests/test_net` measures **0.570 m of lag and 0.013 m
 of drift** over a link losing a fifth of everything.
+
+## Scene files
+
+Binary, versioned, and written from the same reflection everything
+else uses. A node is its class name, its name, the properties whose
+values differ from a freshly constructed instance of that class, its
+object references, and its children.
+
+**Only what differs from a default is written**, which is what keeps
+a diff between two versions of a level readable.
+
+### Views are not state
+
+A `Node3D` exposes `transform`, `position`, `basis`, `rotation`,
+`euler`, `scale`, `global_transform` and `global_position`, and every
+one of them is the same matrix seen from a different angle. An
+inspector should show them all; a scene file must store exactly one
+set, because **the last view read is the one that wins** — the first
+version of this wrote them all and a child came back with its
+parent's transform folded into its own, while the file was three
+times the size it needed to be. `ClassBuilder::transient()` marks a
+property as a view, and anything that saves skips it.
+
+### Two kinds of object reference
+
+A **mesh** is a resource: shared, written once into a table at the
+head of the file, referred to by index. Four boxes sharing one mesh
+cost one mesh.
+
+**Another node** — the portal this portal is linked to — is part of
+the scene, and the only thing identifying it is where it sits in the
+tree. It is written as a path **relative to the scene root**, and
+resolved in a second pass once the whole tree exists. Relative
+because an absolute path names the tree it was saved from: a scene
+loaded as the new root has no `/root` above it, so every link would
+resolve to nothing while everything else looked perfect.
+
+Resolving links as nodes are read cannot work either — the portal at
+the top of a file is linked to one near the bottom, which has not
+been read yet.
+
+### What is not saved
+
+Scripts, and anything a program built by calling methods rather than
+setting properties — physics colliders, for one. Reloading the
+portals demo gives back the rooms, lights, shadows and linked
+portals; the player stands still, because walking is a script. The
+scene format will not fix that; a resource system and a script
+reference on the node will.
+
+`Node::get_node` logs when it finds nothing, for a caller that
+expected something. `Node::find_path` is the quiet one, for a lookup
+that is allowed to fail — resolving a saved path, probing for an
+optional child. A "not found" that is a normal answer should never
+be logged as an error.

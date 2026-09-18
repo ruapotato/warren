@@ -31,6 +31,9 @@ class AudioListener3D : public Node3D {
 public:
     void make_current();
     bool is_current() const;
+    // For the same reason Camera3D does it: the listener is held as
+    // a raw pointer and a scene change frees it.
+    void on_exit_tree() override;
 };
 
 // A sound with a position.

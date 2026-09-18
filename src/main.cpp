@@ -551,6 +551,7 @@ int main(int argc, char **argv) {
     std::string demo = "portals";
     std::string stub_path;
     std::string shadow_dump;
+    std::string save_scene_path, load_scene_path;
     bool bench = false;
 
     for (int i = 1; i < argc; i++) {
@@ -603,6 +604,14 @@ int main(int argc, char **argv) {
             // engine each frame took exactly 1/60s measures nothing.
             cfg.fixed_delta = -1.0f;
             cfg.window.vsync = false;
+        } else if (a == "--save-scene") {
+            save_scene_path = next("scene.mfs");
+        } else if (a == "--load-scene") {
+            load_scene_path = next("scene.mfs");
+        } else if (a == "--editor") {
+            cfg.editor_visible = true;
+        } else if (a == "--no-editor") {
+            cfg.enable_editor = false;
         } else if (a == "--no-ibl") {
             cfg.render.image_based_lighting = false;
         } else if (a == "--no-punctual-shadows") {
@@ -660,6 +669,10 @@ int main(int argc, char **argv) {
                 "  --clear RRGGBB        the clear colour, for spotting holes\n"
                 "  --bench               time 600 frames and print percentiles\n"
                 "  --no-lights           no punctual lights, sun only\n"
+                "  --editor              start with the editor open (F1 toggles)\n"
+                "  --save-scene FILE     write the scene out and carry on\n"
+                "  --load-scene FILE     replace the demo scene with a file\n"
+                "  --no-editor           do not build it at all\n"
                 "  --no-ibl              hemisphere ambient, no environment\n"
                 "  --no-punctual-shadows lights, but nothing blocks them\n"
                 "  --clustered-views N   how many views get a froxel grid\n"
@@ -723,6 +736,8 @@ int main(int argc, char **argv) {
     };
     engine.record_timings(bench);
     if (!engine.init(cfg)) return 1;
+    if (!load_scene_path.empty()) engine.editor()->load_scene(load_scene_path);
+    if (!save_scene_path.empty()) engine.editor()->save_scene(save_scene_path);
     int rc = engine.run();
     if (bench) {
         // The first thirty frames are pipeline warm-up, the first

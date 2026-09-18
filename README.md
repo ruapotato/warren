@@ -225,6 +225,38 @@ classes are in there too. `tests/test_python` compiles the result and
 checks it covers every registered class, which is what keeps it from
 rotting.
 
+## The editor
+
+`--editor` starts with it open; **F1** toggles it. A scene tree, an
+inspector, a Python console and a frame readout, over the running
+game.
+
+**The inspector is not written, it is derived.** Every class declares
+its properties once so that Python, the scene serialiser and the
+network layer can walk them; the inspector is the fourth thing that
+walks them and it cost about eighty lines. Eighty-six of the
+engine's ninety-seven properties get a real control, chosen from the
+declared type — including the properties of a class in a plugin the
+editor has never heard of.
+
+The console is the Python bridge with a text field in front of it,
+and the engine's log goes to it, so a warning from the renderer
+appears where you are looking rather than in a terminal behind the
+window.
+
+```sh
+build/bin/manifold --demo portals --editor
+build/bin/manifold --demo portals --save-scene level.mfs
+build/bin/manifold --load-scene level.mfs
+```
+
+A scene file stores the tree, every property whose value differs
+from a fresh instance of its class, and the meshes and materials
+inline. It does **not** store scripts or state a program built by
+calling methods — colliders, for instance. Reloading the portals
+demo gives back the same rooms, lights, shadows and linked portals;
+the player does not walk, because walking is a script.
+
 ## Plugins
 
 A plugin is a shared library exporting three C functions. It registers
@@ -262,6 +294,8 @@ src/scene/         node tree, cameras, lights, Portal3D, bodies
 src/physics/       shapes, BVH, sweeps, portal-aware tracing
 src/audio/         the mixer and clip loading
 src/net/           sockets, reliability, replication
+src/ui/            immediate-mode widgets and a 5x7 font
+src/editor/        the scene tree, inspector, console and scene files
 src/script/        the Python bridge and the stub generator
 src/plugin/        the plugin ABI and host
 src/app/           Engine: the loop that ties it together
@@ -271,7 +305,7 @@ tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
                    lights, image-based lighting, punctual shadows,
                    the plugin ABI and terrain LOD, audio,
-                   networking, Python
+                   networking, the UI, the editor, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -295,6 +329,7 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: an editor.
+Not yet: a resource system (scenes store meshes inline), scripts in
+scene files, transform gizmos, and an asset importer.
 
 See `docs/conventions.md` before touching the renderer.

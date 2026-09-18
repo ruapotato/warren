@@ -10,8 +10,11 @@
 #include "physics/world.h"
 #include "plugin/host.h"
 #include "audio/audio.h"
+#include "editor/editor.h"
 #include "render/renderer.h"
 #include "scene/audio_nodes.h"
+#include "ui/ui.h"
+#include "ui/ui_renderer.h"
 #include "scene/scene_tree.h"
 
 namespace mf {
@@ -21,6 +24,10 @@ struct EngineConfig {
     RenderSettings render;
     AudioServer::Config audio;
     bool enable_audio = true;
+    // The editor is built but off; F1 shows it. A shipped game
+    // passes false and the panels are never constructed.
+    bool enable_editor = true;
+    bool editor_visible = false;
     // Try this backend; on failure, say so and stop. Set
     // `allow_fallback` to try the other one instead -- off by default,
     // because an engine that silently changes renderer produces bug
@@ -76,6 +83,8 @@ public:
     PluginHost *plugins() { return &plugins_; }
     AudioServer *audio() { return &audio_; }
     AudioSystem *audio_system() { return &audio_system_; }
+    Editor *editor() { return &editor_; }
+    ui::Context *ui() { return &ui_; }
     const Clock &clock() const { return clock_; }
     uint64_t frames() const { return frames_; }
 
@@ -114,6 +123,10 @@ private:
     PluginHost plugins_;
     AudioServer audio_;
     AudioSystem audio_system_;
+    Editor editor_;
+    ui::Context ui_;
+    ui::Renderer ui_renderer_;
+    bool ui_ready_ = false;
     Clock clock_;
     double physics_accumulator_ = 0.0;
     uint64_t frames_ = 0;

@@ -75,6 +75,16 @@ struct PropertyInfo {
     VType type = VType::Nil;
     // For an Object-typed property, which class -- empty otherwise.
     std::string class_name;
+    // NOT PART OF THE OBJECT'S STATE, only a view of it.
+    //
+    // A Node3D has `transform`, `position`, `basis`, `rotation`,
+    // `euler`, `scale`, `global_transform` and `global_position`, and
+    // they are all the same four-by-three matrix seen from different
+    // angles. An inspector should show every one of them; a scene
+    // file must store exactly one, because writing them all means
+    // the last one read wins and a child's position comes back with
+    // its parent's added in. Marked with ClassBuilder::transient().
+    bool transient = false;
     std::function<Variant(const Object *)> get;
     std::function<void(Object *, const Variant &)> set;
     std::string hint;  // free text for an editor: "range:0,1", "file", ...

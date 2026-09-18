@@ -81,6 +81,16 @@ public:
     void set_cull_mask(uint32_t m) { cull_mask_ = m; }
     bool current() const { return current_; }
     void make_current();
+    // A CAMERA THAT LEAVES THE TREE STOPS BEING THE ACTIVE ONE.
+    //
+    // The tree holds the active camera as a raw pointer, and
+    // replacing a scene frees the camera along with everything else
+    // under it -- leaving the renderer and the audio system reading
+    // a dead node on the next frame. Clearing it here rather than
+    // where the scene is replaced means it is also right for a
+    // camera deleted on its own, or moved to another tree.
+    void on_exit_tree() override;
+    void on_enter_tree() override;
 
     // A ray through a point in [0,1] screen space, in world space.
     void screen_ray(const Vec2 &screen_uv, float aspect, Vec3 *origin,
@@ -124,6 +134,10 @@ public:
     void set_mesh(Mesh *m) { mesh = Ref<Mesh>(m); }
     Mesh *get_mesh() const { return mesh.get(); }
     void set_material(int slot, Material *m);
+    Material *first_material() const {
+        return materials.empty() ? nullptr : materials[0].get();
+    }
+    void set_first_material(Material *m) { set_material(0, m); }
     Material *get_material(int slot) const;
     int material_count() const { return int(materials.size()); }
 

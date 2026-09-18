@@ -524,10 +524,11 @@ bool Context::input_text(const char *label, std::string *value) {
         push_rect({cx, ty, 1.0f * theme.scale, text_height()}, theme.accent);
     }
     pop_clip();
-    const char *visible = label;
-    if (*visible_end(label) != 0 || visible_end(label) != label) {
-        // Labels are drawn to the right, like every other control.
-    }
+    // NO LABEL DRAWN. A text field wants its whole row for the text
+    // -- a name half hidden behind a caption is worse than one with
+    // the caption above it -- so the caller puts a text() in front
+    // of it. The label is identity only, which is what the "##"
+    // convention is for.
     return committed;
 }
 

@@ -1,7 +1,9 @@
 #include "log.h"
 
 #include <cstring>
+#include <algorithm>
 #include <mutex>
+#include <vector>
 
 namespace mf {
 namespace {
@@ -9,6 +11,7 @@ namespace {
 LogLevel g_level = LogLevel::Info;
 std::string g_tail;
 std::mutex g_mutex;
+std::vector<LogSink> g_sinks;
 int g_errors = 0;
 
 const char *level_name(LogLevel l) {
@@ -59,11 +62,30 @@ void log_write(LogLevel l, const char *file, int line, const char *fmt, ...) {
     std::fputs(line_buf, l >= LogLevel::Warn ? stderr : stdout);
     if (l >= LogLevel::Warn) std::fflush(stderr);
     g_tail += line_buf;
+    // The sinks get the body without the level prefix or the newline:
+    // a console has its own idea of how to show a warning, and
+    // re-parsing what was just formatted would be silly.
+    for (LogSink sink : g_sinks)
+        if (sink) sink(l, body);
     // Keep the tail bounded; a render loop can produce a lot of it.
     if (g_tail.size() > 96 * 1024)
         g_tail.erase(0, g_tail.size() - 64 * 1024);
 }
 
 const std::string &log_tail() { return g_tail; }
+
+void log_add_sink(LogSink sink) {
+    if (!sink) return;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (LogSink s : g_sinks)
+        if (s == sink) return;
+    g_sinks.push_back(sink);
+}
+
+void log_remove_sink(LogSink sink) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_sinks.erase(std::remove(g_sinks.begin(), g_sinks.end(), sink),
+                  g_sinks.end());
+}
 
 }  // namespace mf

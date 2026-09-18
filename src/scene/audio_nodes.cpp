@@ -88,6 +88,9 @@ void collect_portals(Node *root, std::vector<Portal3D *> *out) {
 
 void AudioListener3D::make_current() { g_listener = this; }
 bool AudioListener3D::is_current() const { return g_listener == this; }
+void AudioListener3D::on_exit_tree() {
+    if (g_listener == this) g_listener = nullptr;
+}
 
 // -------------------------------------------------------- the players
 

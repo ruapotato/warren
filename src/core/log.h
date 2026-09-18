@@ -19,6 +19,18 @@ void log_write(LogLevel l, const char *file, int line, const char *fmt, ...)
 // Every message ever written, for a debug overlay or a crash report.
 const std::string &log_tail();
 
+// ANOTHER PLACE FOR MESSAGES TO GO.
+//
+// The editor's console is the reason this exists: a warning from the
+// renderer should appear where the person using the engine is
+// looking, not only in a terminal behind the window. A sink is
+// called with the message body, already formatted and without the
+// trailing newline, while the log's own mutex is held -- so it must
+// not log, and must not block.
+using LogSink = void (*)(LogLevel, const char *);
+void log_add_sink(LogSink sink);
+void log_remove_sink(LogSink sink);
+
 // An error that should stop the frame but not the process. Returns the
 // count so a caller can tell whether anything went wrong in a block.
 int error_count();

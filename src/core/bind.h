@@ -232,6 +232,17 @@ public:
     // what the stub generator prints and what a keyword call matches.
     // Optional everywhere: a method without them still works, it just
     // reads worse.
+    // The property just declared is a VIEW of the object's state
+    // rather than part of it: shown in an inspector, skipped by
+    // anything that saves. See PropertyInfo::transient.
+    ClassBuilder &transient() {
+        if (!last_property_.empty()) {
+            auto it = ci_->properties.find(last_property_);
+            if (it != ci_->properties.end()) it->second.transient = true;
+        }
+        return *this;
+    }
+
     template <class... S>
     ClassBuilder &args(S... names) {
         static_assert(sizeof...(S) > 0, "args() with no names does nothing");
@@ -374,10 +385,12 @@ private:
     void add(PropertyInfo &&pi) {
         std::string n = pi.name;
         if (!ci_->properties.count(n)) ci_->property_order.push_back(n);
+        last_property_ = n;
         ci_->properties[n] = std::move(pi);
     }
     ClassInfo *ci_ = nullptr;
     std::string last_method_;
+    std::string last_property_;
 };
 
 }  // namespace mf
