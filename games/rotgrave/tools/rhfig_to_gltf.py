@@ -39,8 +39,59 @@ import os
 import struct
 import sys
 
+try:
+    import numpy as np
+except ImportError:      # the masking pass needs it; nothing else does
+    np = None
+
 MAGIC = b"RHFIG2"
 HEADER = 8
+
+# HOW FAR OFF THE SKIN EACH LAYER SITS, in metres.
+#
+# A few surfaces really are coincident with the face -- the brows
+# and lashes are drawn a hair above it and nothing else separates
+# them -- so each one is pushed out along its own normals by a
+# fraction of a millimetre, in the order somebody dresses in. This
+# is only about the depth buffer being unable to choose between two
+# surfaces at the same depth. It is NOT what fixes the body showing
+# through the clothes; see hidden_skin below for that.
+LAYER = {
+    "skin": 0.0,
+    "eyes": 0.0,
+    "lashes": 0.0008,
+    "brows": 0.0010,
+    "breeches": 0.0020,
+    "boots": 0.0030,
+    "mail": 0.0032,
+    "leathers": 0.0040,
+    "robe": 0.0044,
+    "coat": 0.0048,
+    "beard": 0.0050,
+    "hair": 0.0054,
+    "hood": 0.0062,
+    "helm": 0.0066,
+}
+DEFAULT_LAYER = 0.0035
+
+# Which surfaces count as clothing for the purpose of hiding the
+# body underneath. Brows, lashes and eyes sit ON the face and would
+# mask it away; hair and beards are sparse and alpha-cut, and the
+# scalp behind them still needs to be there.
+CLOTHING = {"breeches", "boots", "mail", "leathers", "robe", "coat",
+            "hood", "helm"}
+
+# How far the body is allowed to be from a garment and still count
+# as being under it, in metres. Loose clothing hangs further off
+# than this in places, but those are places where the skin could
+# never poke through anyway.
+COVER_REACH = 0.07
+
+# And how far BEHIND a piece of skin cloth may be for that skin to
+# count as having burst out through it. Shorter, because looking
+# backwards through your own body finds things that are not over
+# you -- the far wall of a sleeve, the other leg.
+BURST_REACH = 0.03
 
 # glTF component types
 F32, U16, U32 = 5126, 5123, 5125
@@ -110,11 +161,134 @@ class Blob:
         return len(self.views) - 1
 
 
+def _grid_of(tri_p, cell):
+    """Triangles bucketed by the cells their bounds touch."""
+    lo = tri_p.min(axis=1)
+    hi = tri_p.max(axis=1)
+    cells = {}
+    for t in range(len(tri_p)):
+        a = np.floor(lo[t] / cell).astype(int)
+        b = np.floor(hi[t] / cell).astype(int)
+        for x in range(a[0], b[0] + 1):
+            for y in range(a[1], b[1] + 1):
+                for z in range(a[2], b[2] + 1):
+                    cells.setdefault((x, y, z), []).append(t)
+    return cells
+
+
+def hidden_skin(surfaces, reach=COVER_REACH):
+    """The body triangles that no one can see, because cloth is over them.
+
+    MakeHuman models its clothing ON the body and then deletes the
+    body underneath -- the trousers come with a list of the vertices
+    they cover, and the exporter is meant to drop them. Rhabdos's
+    exporter kept the whole body, so the thighs are still inside the
+    trousers, and they do not stay inside: the body is a separate
+    surface posed by the same skeleton, and wherever it is modelled
+    a little fuller than the cloth, it comes through. Measured on
+    the zombie, a ninth of the trouser surface has skin outside it,
+    by up to five centimetres. That reads as dirty texture work or
+    as z-fighting and is neither -- it is one mesh sticking through
+    another, and no depth bias or layer offset touches it.
+
+    So the delete groups are worked out here instead of being read,
+    by asking the only question that matters: standing on this piece
+    of skin and looking straight out, is there cloth in the way? A
+    short ray along the vertex normal answers it, and answers it
+    correctly for loose clothing (still covered, just further away)
+    and for gaps between garments (nothing in the way -- keep it).
+
+    A triangle goes only when all three of its corners are covered,
+    which leaves a rim of body standing under every hem rather than
+    a hole at the edge of it.
+    """
+    skin = [s for s in surfaces if s["spec"].get("role") == "skin"]
+    cloth = [s for s in surfaces if s["spec"].get("role") in CLOTHING]
+    if not skin or not cloth:
+        return 0
+
+    tri = []
+    for c in cloth:
+        p = np.asarray(c["pos"], dtype=np.float64).reshape(-1, 3)
+        idx = np.asarray(c["index"], dtype=np.int64).reshape(-1, 3)
+        tri.append(p[idx])
+    tri_p = np.concatenate(tri)
+    grid = _grid_of(tri_p, reach)
+
+    v0 = tri_p[:, 0]
+    e1 = tri_p[:, 1] - v0
+    e2 = tri_p[:, 2] - v0
+
+    dropped = 0
+    for s in skin:
+        p = np.asarray(s["pos"], dtype=np.float64).reshape(-1, 3)
+        n = np.asarray(s["nrm"], dtype=np.float64).reshape(-1, 3)
+        covered = np.zeros(len(p), dtype=bool)
+
+        def strikes(a, d, span):
+            """Does the ray from a along d, of length span, meet cloth?"""
+            b = a + d * span
+            lo = np.floor(np.minimum(a, b) / reach).astype(int)
+            hi = np.floor(np.maximum(a, b) / reach).astype(int)
+            near = set()
+            for x in range(lo[0], hi[0] + 1):
+                for y in range(lo[1], hi[1] + 1):
+                    for z in range(lo[2], hi[2] + 1):
+                        near.update(grid.get((x, y, z), ()))
+            if not near:
+                return False
+            k = np.fromiter(near, dtype=np.int64, count=len(near))
+            # Moller-Trumbore, every candidate at once.
+            h = np.cross(d, e2[k])
+            det = np.einsum("ij,ij->i", e1[k], h)
+            live = np.abs(det) > 1e-12
+            if not live.any():
+                return False
+            inv = np.where(live, 1.0 / np.where(live, det, 1.0), 0.0)
+            sv = a - v0[k]
+            u = np.einsum("ij,ij->i", sv, h) * inv
+            q = np.cross(sv, e1[k])
+            w = (q @ d) * inv
+            t = np.einsum("ij,ij->i", e2[k], q) * inv
+            return bool((live & (u >= 0) & (w >= 0) & (u + w <= 1)
+                         & (t > 0) & (t <= span)).any())
+
+        for i in range(len(p)):
+            # Cloth in front of this skin: it is underneath, drop it.
+            # Cloth behind it: it has come out through the garment it
+            # belongs inside, which is the whole complaint -- drop it
+            # as well, and the cloth closes over the gap.
+            if (strikes(p[i] + n[i] * 1e-4, n[i], reach)
+                    or strikes(p[i] - n[i] * 1e-4, -n[i], BURST_REACH)):
+                covered[i] = True
+
+        idx = np.asarray(s["index"], dtype=np.int64).reshape(-1, 3)
+        keep = ~covered[idx].all(axis=1)
+        dropped += int((~keep).sum())
+        idx = idx[keep]
+
+        # Compact: a vertex no triangle names still costs a skinning
+        # transform every frame, so it should not survive the trip.
+        used = np.unique(idx)
+        remap = np.full(len(p), -1, dtype=np.int64)
+        remap[used] = np.arange(len(used))
+        for key, width in (("pos", 3), ("nrm", 3), ("uv", 2),
+                           ("joints", 4), ("weights", 4)):
+            a = np.asarray(s[key]).reshape(-1, width)[used]
+            s[key] = tuple(a.reshape(-1).tolist())
+        s["index"] = tuple(remap[idx].reshape(-1).tolist())
+        s["nv"] = int(len(used))
+        s["ni"] = int(idx.size)
+    return dropped
+
+
 def convert(stem, out_path, texture_dir, scale=1.0):
     man, surfaces = read_figure(stem)
     bones = man.get("bones", [])
     if not bones:
         raise ValueError(f"{stem}: no bones")
+    if np is not None:
+        hidden_skin(surfaces)
 
     blob = Blob()
     accessors = []
@@ -153,7 +327,13 @@ def convert(stem, out_path, texture_dir, scale=1.0):
     primitives = []
     for s in surfaces:
         nv, ni = s["nv"], s["ni"]
-        pos = [v * scale for v in s["pos"]]
+        # Lifted off the skin by its layer, along its own normals.
+        lift = LAYER.get(s["spec"].get("role", ""), DEFAULT_LAYER) * scale
+        if lift > 0.0:
+            pos = [(s["pos"][i] * scale) + s["nrm"][i] * lift
+                   for i in range(len(s["pos"]))]
+        else:
+            pos = [v * scale for v in s["pos"]]
         pv = blob.add(struct.pack("<%df" % len(pos), *pos), ARRAY_BUFFER)
         mn = [min(pos[i::3]) for i in range(3)]
         mx = [max(pos[i::3]) for i in range(3)]
