@@ -1153,7 +1153,7 @@ int main(int argc, char **argv) {
                 "warren [options]\n"
                 "  --backend vulkan|gl   which renderer (default vulkan)\n"
                 "  --demo portals        which scene (portals, terrain, fly, skin,\n"
-                "                        nav)\n"
+                "                        nav, none)\n"
                 "  --shot FILE           save a png and carry on\n"
                 "  --shot-frame N        which frame to save (default 8)\n"
                 "  --frames N            stop after N frames (fixed 1/60s step)\n"
@@ -1258,6 +1258,10 @@ int main(int argc, char **argv) {
         else if (demo == "terrain") build_terrain_demo(e);
         else if (demo == "skin") build_skin_demo(e);
         else if (demo == "nav") build_nav_demo(e);
+        // NOTHING, on purpose. A game builds its own world from a
+        // script and wants an empty tree to build it into, not a
+        // demo to delete first.
+        else if (demo == "none" || demo.empty()) {}
         else WR_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;

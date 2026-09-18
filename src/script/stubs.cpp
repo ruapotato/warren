@@ -130,11 +130,9 @@ const char *k_preamble = R"(# Warren -- generated type stubs. Do not edit.
 # Put it next to your scripts, or anywhere on the type checker's path,
 # and an editor will complete `mf.` correctly.
 
-from types import SimpleNamespace
 from typing import Any
 
 version: str
-Key: SimpleNamespace
 
 # ------------------------------------------------------------ values
 #
@@ -261,8 +259,57 @@ def classes() -> list[str]:
 def group(name: str) -> list[Node]:
     """Every node in a group."""
 
+class _Keys:
+    """Key codes, as `warren.Key.W`. Letters, the number row as NUM1
+    to NUM0, and the ones a game reaches for."""
+    A: int; B: int; C: int; D: int; E: int; F: int; G: int; H: int
+    I: int; J: int; K: int; L: int; M: int; N: int; O: int; P: int
+    Q: int; R: int; S: int; T: int; U: int; V: int; W: int; X: int
+    Y: int; Z: int
+    NUM1: int; NUM2: int; NUM3: int; NUM4: int; NUM5: int
+    NUM6: int; NUM7: int; NUM8: int; NUM9: int; NUM0: int
+    F1: int; F2: int; F3: int; F4: int; F5: int
+    SPACE: int; ESCAPE: int; TAB: int; RETURN: int; BACKSPACE: int
+    SHIFT: int; LSHIFT: int; RSHIFT: int
+    CTRL: int; LCTRL: int; RCTRL: int; ALT: int
+    UP: int; DOWN: int; LEFT: int; RIGHT: int
+    DELETE: int; HOME: int; END: int
+    COMMA: int; PERIOD: int; GRAVE: int
+
+class _Buttons:
+    """Mouse buttons, as `warren.Mouse.LEFT`."""
+    LEFT: int; MIDDLE: int; RIGHT: int; X1: int; X2: int
+
+Key: _Keys
+Mouse: _Buttons
+
+def environment() -> Environment | None:
+    """The sky, the sun and the fog. One object, kept -- holding on
+    to it is fine. None with no renderer."""
+
 def key_down(key: int) -> bool:
     """Is a key held?"""
+
+def key_pressed(key: int) -> bool:
+    """Was a key pressed this frame?"""
+
+def key_released(key: int) -> bool:
+    """Was a key released this frame?"""
+
+def mouse_down(button: int) -> bool:
+    """Is a mouse button held?"""
+
+def mouse_pressed(button: int) -> bool:
+    """Was a mouse button pressed this frame?"""
+
+def mouse_released(button: int) -> bool:
+    """Was a mouse button released this frame?"""
+
+def mouse_captured() -> bool:
+    """Is the pointer locked to the window?"""
+
+def capture_mouse(on: bool) -> None:
+    """Lock or release the pointer. Nothing, with no window."""
 
 def action_down(action: str) -> bool:
     """Is an action held?"""

@@ -10,6 +10,7 @@
 #include "core/variant_json.h"
 #include "procgen/sdf.h"
 #include "procgen/texture.h"
+#include "render/environment.h"
 #include "render/material.h"
 #include "render/mesh.h"
 #include "platform/input.h"
@@ -209,6 +210,57 @@ PyObject *py_key_down(PyObject *, PyObject *args) {
     if (!PyArg_ParseTuple(args, "i", &code)) return nullptr;
     return PyBool_FromLong(Input::key_down(Key(code)) ? 1 : 0);
 }
+PyObject *py_environment(PyObject *, PyObject *) {
+    // One per engine, made on first ask and kept -- a script that
+    // holds on to it must keep working, and handing back a fresh
+    // proxy each time would make `env = wr.environment()` in _ready
+    // a subtly dead object.
+    static Ref<Environment> env;
+    if (!g_engine || !g_engine->renderer()) Py_RETURN_NONE;
+    if (!env) env = Ref<Environment>(new Environment());
+    env->bind_renderer(g_engine->renderer());
+    return object_to_python(env.get());
+}
+
+PyObject *py_key_pressed(PyObject *, PyObject *args) {
+    int code = 0;
+    if (!PyArg_ParseTuple(args, "i", &code)) return nullptr;
+    return PyBool_FromLong(Input::key_just_pressed(Key(code)) ? 1 : 0);
+}
+PyObject *py_key_released(PyObject *, PyObject *args) {
+    int code = 0;
+    if (!PyArg_ParseTuple(args, "i", &code)) return nullptr;
+    return PyBool_FromLong(Input::key_just_released(Key(code)) ? 1 : 0);
+}
+PyObject *py_mouse_down(PyObject *, PyObject *args) {
+    int b = 1;
+    if (!PyArg_ParseTuple(args, "i", &b)) return nullptr;
+    return PyBool_FromLong(Input::mouse_down(MouseButton(b)) ? 1 : 0);
+}
+PyObject *py_mouse_pressed(PyObject *, PyObject *args) {
+    int b = 1;
+    if (!PyArg_ParseTuple(args, "i", &b)) return nullptr;
+    return PyBool_FromLong(Input::mouse_just_pressed(MouseButton(b)) ? 1 : 0);
+}
+PyObject *py_mouse_released(PyObject *, PyObject *args) {
+    int b = 1;
+    if (!PyArg_ParseTuple(args, "i", &b)) return nullptr;
+    return PyBool_FromLong(Input::mouse_just_released(MouseButton(b)) ? 1 : 0);
+}
+PyObject *py_mouse_captured(PyObject *, PyObject *) {
+    Window *w = g_engine ? g_engine->window() : nullptr;
+    return PyBool_FromLong(w && w->mouse_captured() ? 1 : 0);
+}
+PyObject *py_capture_mouse(PyObject *, PyObject *args) {
+    int on = 1;
+    if (!PyArg_ParseTuple(args, "p", &on)) return nullptr;
+    Window *w = g_engine ? g_engine->window() : nullptr;
+    // A script that asks to capture the mouse with no window is not
+    // making a mistake -- it is running headless, in a test or under
+    // the agent -- so this is silently nothing rather than an error.
+    if (w) w->set_mouse_captured(on != 0);
+    Py_RETURN_NONE;
+}
 PyObject *py_action_down(PyObject *, PyObject *args) {
     const char *a = nullptr;
     if (!PyArg_ParseTuple(args, "s", &a)) return nullptr;
@@ -274,7 +326,22 @@ PyMethodDef k_module_methods[] = {
     {"surface", (PyCFunction)py_surface, METH_VARARGS | METH_KEYWORDS,
      "Build a Material from a procedural surface description."},
     {"group", py_group, METH_VARARGS, "Every node in a group."},
+    {"environment", py_environment, METH_NOARGS,
+     "The sky, the sun and the fog."},
     {"key_down", py_key_down, METH_VARARGS, "Is a key held?"},
+    {"key_pressed", py_key_pressed, METH_VARARGS,
+     "Was a key pressed this frame?"},
+    {"key_released", py_key_released, METH_VARARGS,
+     "Was a key released this frame?"},
+    {"mouse_down", py_mouse_down, METH_VARARGS, "Is a mouse button held?"},
+    {"mouse_pressed", py_mouse_pressed, METH_VARARGS,
+     "Was a mouse button pressed this frame?"},
+    {"mouse_released", py_mouse_released, METH_VARARGS,
+     "Was a mouse button released this frame?"},
+    {"mouse_captured", py_mouse_captured, METH_NOARGS,
+     "Is the pointer locked to the window?"},
+    {"capture_mouse", py_capture_mouse, METH_VARARGS,
+     "Lock or release the pointer."},
     {"action_down", py_action_down, METH_VARARGS, "Is an action held?"},
     {"action_pressed", py_action_pressed, METH_VARARGS,
      "Was an action pressed this frame?"},
@@ -322,6 +389,20 @@ PyObject *init_module() {
         {"UP", int(Key::Up)}, {"DOWN", int(Key::Down)},
         {"LEFT", int(Key::Left)}, {"RIGHT", int(Key::Right)},
         {"F1", int(Key::F1)}, {"F2", int(Key::F2)}, {"F3", int(Key::F3)},
+        {"F4", int(Key::F4)}, {"F5", int(Key::F5)},
+        // The number row, which any game with weapon slots needs and
+        // which was the one gap a real game found first.
+        {"NUM1", int(Key::Num1)}, {"NUM2", int(Key::Num2)},
+        {"NUM3", int(Key::Num3)}, {"NUM4", int(Key::Num4)},
+        {"NUM5", int(Key::Num5)}, {"NUM6", int(Key::Num6)},
+        {"NUM7", int(Key::Num7)}, {"NUM8", int(Key::Num8)},
+        {"NUM9", int(Key::Num9)}, {"NUM0", int(Key::Num0)},
+        {"LSHIFT", int(Key::LeftShift)}, {"RSHIFT", int(Key::RightShift)},
+        {"LCTRL", int(Key::LeftCtrl)}, {"RCTRL", int(Key::RightCtrl)},
+        {"ALT", int(Key::LeftAlt)}, {"BACKSPACE", int(Key::Backspace)},
+        {"DELETE", int(Key::Delete)}, {"HOME", int(Key::Home)},
+        {"END", int(Key::End)}, {"COMMA", int(Key::Comma)},
+        {"PERIOD", int(Key::Period)}, {"GRAVE", int(Key::Grave)},
     };
     for (const auto &e : k) {
         PyObject *v = PyLong_FromLong(e.code);
@@ -339,6 +420,31 @@ PyObject *init_module() {
         Py_DECREF(ns);
     }
     Py_DECREF(keys);
+
+    // The mouse buttons, by the same route and for the same reason.
+    PyObject *buttons = PyDict_New();
+    struct { const char *name; int code; } mb[] = {
+        {"LEFT", int(MouseButton::Left)},
+        {"MIDDLE", int(MouseButton::Middle)},
+        {"RIGHT", int(MouseButton::Right)},
+        {"X1", int(MouseButton::X1)}, {"X2", int(MouseButton::X2)},
+    };
+    for (const auto &e : mb) {
+        PyObject *v = PyLong_FromLong(e.code);
+        PyDict_SetItemString(buttons, e.name, v);
+        Py_DECREF(v);
+    }
+    PyObject *ns2 = PyImport_ImportModule("types");
+    if (ns2) {
+        PyObject *simple = PyObject_GetAttrString(ns2, "SimpleNamespace");
+        if (simple) {
+            PyObject *obj = PyObject_Call(simple, PyTuple_New(0), buttons);
+            if (obj) PyModule_AddObject(m, "Mouse", obj);
+            Py_DECREF(simple);
+        }
+        Py_DECREF(ns2);
+    }
+    Py_DECREF(buttons);
 
     PyModule_AddStringConstant(m, "version", "0.1.0");
     // A module initialiser that returns a module with an exception
@@ -508,7 +614,35 @@ bool Python::run_file(const std::string &path) {
     size_t n;
     while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) source.append(buf, n);
     std::fclose(f);
-    return run_string(source, path.c_str());
+
+    // __file__, because a script run from a file is entitled to know
+    // where it is. A game's entry point is the one file that has to
+    // find its own package, and without this the first line of every
+    // one of them is a guess about the working directory.
+    //
+    // Also sys.path, with the script's own directory on it -- the
+    // rule every Python runtime follows, and the reason `python
+    // game/main.py` can `import game`.
+    std::error_code abs_ec;
+    std::filesystem::path full = std::filesystem::absolute(path, abs_ec);
+    const std::string file = abs_ec ? path : full.string();
+    const std::string dir =
+        abs_ec ? std::string(".") : full.parent_path().string();
+    add_search_path(dir);
+
+    PyObject *main = PyImport_AddModule("__main__");
+    if (main) {
+        PyObject *v = PyUnicode_FromString(file.c_str());
+        if (v) {
+            PyObject_SetAttrString(main, "__file__", v);
+            Py_DECREF(v);
+        }
+    }
+    bool ok = run_string(source, path.c_str());
+    // Left in place afterwards on purpose: a script that defines a
+    // class and hands it to the tree is still running long after
+    // this returns, and it may import at any point.
+    return ok;
 }
 
 bool Python::attach_script(Node *node, const std::string &module_or_path) {

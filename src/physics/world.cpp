@@ -632,6 +632,12 @@ Dict PhysicsWorld::raycast_dict(const Vec3 &from, const Vec3 &to,
     return hit_to_dict(raycast(from, to, uint32_t(mask)));
 }
 
+int64_t PhysicsWorld::add_mesh_id(Mesh *mesh, const Transform3D &at,
+                                  int64_t layer) {
+    if (!mesh) return 0;
+    return add_mesh(*mesh, at, uint32_t(layer)).packed();
+}
+
 int64_t PhysicsWorld::add_sphere(const Vec3 &at, float radius, int64_t layer) {
     return add_shape(Shape::sphere(radius), Transform3D(at), uint32_t(layer)).packed();
 }
@@ -652,6 +658,8 @@ static void register_physics_classes() {
         .method("raycast", &PhysicsWorld::raycast_dict,
                 {Variant(int64_t(0xFFFFFFFF))})
         .args("from_point", "to_point", "mask")
+        .method("add_mesh", &PhysicsWorld::add_mesh_id, {Variant(int64_t(1))})
+        .args("mesh", "at", "layer")
         .method("add_sphere", &PhysicsWorld::add_sphere, {Variant(int64_t(1))})
         .args("at", "radius", "layer")
         .method("add_box", &PhysicsWorld::add_box, {Variant(int64_t(1))})

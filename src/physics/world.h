@@ -200,6 +200,11 @@ public:
     Dict trace_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const;
     Dict raycast_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const;
     // Convenience constructors for the common shapes.
+    // THE LEVEL, for a script. add_mesh above takes a reference and
+    // a Node3D owner, neither of which crosses the reflection; this
+    // is the same call shaped so a game written in Python can make
+    // the thing it just built collide.
+    int64_t add_mesh_id(Mesh *mesh, const Transform3D &at, int64_t layer);
     int64_t add_sphere(const Vec3 &at, float radius, int64_t layer);
     int64_t add_box(const Transform3D &at, const Vec3 &half, int64_t layer);
     int64_t add_capsule(const Transform3D &at, float radius, float height,
