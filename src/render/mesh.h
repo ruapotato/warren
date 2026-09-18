@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/object.h"
+#include "resource/resource.h"
 #include "rhi/rhi.h"
 
 namespace mf {
@@ -59,8 +60,8 @@ void compute_tangents(std::vector<Vertex> &vertices,
                       const std::vector<uint32_t> &indices);
 AABB compute_bounds(const std::vector<Vertex> &vertices);
 
-class Mesh : public Object {
-    MF_CLASS(Mesh, Object)
+class Mesh : public Resource {
+    MF_CLASS(Mesh, Resource)
 
 public:
     Mesh() = default;

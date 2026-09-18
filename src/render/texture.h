@@ -5,12 +5,13 @@
 #include <vector>
 
 #include "core/object.h"
+#include "resource/resource.h"
 #include "rhi/rhi.h"
 
 namespace mf {
 
-class Texture : public Object {
-    MF_CLASS(Texture, Object)
+class Texture : public Resource {
+    MF_CLASS(Texture, Resource)
 
 public:
     Texture() = default;

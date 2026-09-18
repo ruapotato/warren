@@ -55,6 +55,9 @@ bool Engine::init(const EngineConfig &cfg) {
         return false;
     }
 
+    // Before anything can load a texture.
+    resource_set_device(device_);
+
     if (!renderer_.init(device_, cfg.render)) {
         MF_FATAL("engine: the renderer failed to start");
         return false;
@@ -156,6 +159,12 @@ void Engine::shutdown() {
     // each voice is playing; a node destroyed while that callback is
     // mid-mix would free the samples under it. Closing the device
     // joins that thread, and after that nothing else is racing.
+    // BEFORE THE DEVICE GOES. A cached texture holds GPU handles,
+    // and freeing it afterwards frees them through a device that is
+    // no longer there.
+    ResourceLoader::forget_all();
+    resource_set_device(nullptr);
+
     editor_.shutdown();
     ui_renderer_.shutdown();
     ui_ready_ = false;

@@ -30,12 +30,13 @@
 #include <vector>
 
 #include "core/object.h"
+#include "resource/resource.h"
 #include "scene/node.h"
 
 namespace mf {
 
-class PackedScene : public Object {
-    MF_CLASS(PackedScene, Object)
+class PackedScene : public Resource {
+    MF_CLASS(PackedScene, Resource)
 
 public:
     // The serialised tree. Public because a tool may want to write

@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "core/math/mathdefs.h"
+#include "resource/resource.h"
 #include "core/object.h"
 
 namespace mf {
@@ -36,8 +37,8 @@ namespace mf {
 // A decoded sound. Interleaved float samples, which is what the mixer
 // wants and what a WAV decodes to anyway; a minute of stereo at 48k
 // is 23 MB, so anything longer should be streamed and is not yet.
-class AudioClip : public Object {
-    MF_CLASS(AudioClip, Object)
+class AudioClip : public Resource {
+    MF_CLASS(AudioClip, Resource)
 
 public:
     std::vector<float> samples;

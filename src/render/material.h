@@ -4,6 +4,7 @@
 #include <string>
 
 #include "core/object.h"
+#include "resource/resource.h"
 #include "render/texture.h"
 #include "rhi/rhi.h"
 
@@ -26,8 +27,8 @@ struct MaterialUniforms {
 };
 static_assert(sizeof(MaterialUniforms) == 80, "must match MaterialData");
 
-class Material : public Object {
-    MF_CLASS(Material, Object)
+class Material : public Resource {
+    MF_CLASS(Material, Resource)
 
 public:
     Material() = default;

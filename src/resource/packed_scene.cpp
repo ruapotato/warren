@@ -12,6 +12,7 @@
 #include "render/material.h"
 #include "render/mesh.h"
 #include "scene/nodes.h"
+#include "resource/resource.h"
 #include "scene/scene_tree.h"
 
 namespace mf {
@@ -90,6 +91,20 @@ void collect_resources(Node *n, ResourceTable *table, Node *scene_root) {
 }
 
 void write_resource(ByteWriter &w, Object *o) {
+    // A RESOURCE THAT HAS A FILE IS WRITTEN AS THE FILE.
+    //
+    // Inline is the fallback, not the rule. A level of forty rooms
+    // all using one crate should be forty references to crate.mesh,
+    // not forty crates -- and editing the crate should change all
+    // forty, which it cannot do if each room has its own copy. The
+    // same argument as scene instancing, one layer down.
+    Resource *res = o->cast_to<Resource>();
+    if (res && res->has_path()) {
+        w.u8(1);
+        w.str(res->resource_path());
+        return;
+    }
+    w.u8(0);
     w.str(o->get_class_name());
     if (Mesh *m = o->cast_to<Mesh>()) {
         // Geometry is not reflected and never will be: a property
@@ -127,6 +142,25 @@ void write_resource(ByteWriter &w, Object *o) {
 }
 
 Object *read_resource(ByteReader &r) {
+    if (r.u8() == 1) {
+        const std::string path = r.str();
+        if (!r.ok()) return nullptr;
+        Ref<Resource> res = ResourceLoader::load(path);
+        if (!res) {
+            // A MISSING ASSET IS A HOLE, NOT A REFUSAL -- the same
+            // rule as a missing scene. A level that opens with one
+            // crate missing can be repaired; one that will not open
+            // cannot.
+            MF_WARN("scene: '%s' could not be loaded", path.c_str());
+            return nullptr;
+        }
+        // The caller wraps this in a Ref, which retains it. The
+        // inline path below returns a fresh object at refcount zero
+        // and gets the same treatment, so both end up held exactly
+        // once -- retaining here as well would leak every shared
+        // resource in the level.
+        return res.get();
+    }
     const std::string cls = r.str();
     if (!r.ok()) return nullptr;
     Object *o = ClassDB::instantiate(cls);
