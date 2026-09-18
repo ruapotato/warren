@@ -34,7 +34,55 @@ layout(set = SET_FRAME, binding = B_FRAME(0), std140) uniform FrameData {
     vec4 cascade_splits;    // view-space distance at which each ends
     vec4 cascade_texel;     // world size of one shadow texel, per cascade
     vec4 screen;            // width, height, 1/width, 1/height
+    ivec4 counts;           // lights, unused, unused, unused
 } frame;
+
+// ------------------------------------------------------- punctual lights
+//
+// CLUSTERED, AND CLUSTERED PER VIEW.
+//
+// The screen is divided into a grid of froxels -- tiles in x and y,
+// exponential slices in z -- and each one holds the indices of the
+// lights that reach it. A fragment looks up its own froxel and shades
+// against those, so the cost is the lights that actually touch the
+// pixel rather than every light in the level.
+//
+// Per VIEW, not per frame, and that is the portal engine's version of
+// this. A portal view is a different camera looking at a different
+// part of the world through the same pixels; its froxels contain
+// different lights. The grids for every view in the frame live in one
+// buffer end to end and each view carries the index of where its own
+// block starts.
+#define CLUSTER_X 16
+#define CLUSTER_Y 9
+#define CLUSTER_Z 24
+#define CLUSTER_COUNT (CLUSTER_X * CLUSTER_Y * CLUSTER_Z)
+// Per froxel. A froxel that more lights than this reach keeps the
+// nearest; the binder sorts by distance so what is dropped is what
+// contributed least.
+#define CLUSTER_MAX_LIGHTS 8
+
+#define LIGHT_OMNI 0
+#define LIGHT_SPOT 1
+
+struct Light {
+    vec4 position_range;    // xyz world, w = range in metres
+    vec4 colour_energy;     // rgb colour, a = energy in candela
+    vec4 direction_cone;    // xyz the way it points, w = cos(outer angle)
+    vec4 params;            // cos(inner), source radius, type, unused
+};
+
+layout(set = SET_FRAME, binding = B_FRAME(2), std430) readonly buffer Lights {
+    Light lights[];
+};
+// One count per froxel, for every view in the frame.
+layout(set = SET_FRAME, binding = B_FRAME(3), std430) readonly buffer Clusters {
+    uint cluster_count[];
+};
+// CLUSTER_MAX_LIGHTS indices per froxel, at cluster * CLUSTER_MAX_LIGHTS.
+layout(set = SET_FRAME, binding = B_FRAME(4), std430) readonly buffer LightIndex {
+    uint light_index[];
+};
 
 // ----------------------------------------------------------------- view
 //
@@ -57,7 +105,23 @@ layout(set = SET_VIEW, binding = B_VIEW(0), std140) uniform ViewData {
     // recursion has gone. Used for tinting debug views and for
     // deciding whether a portal frame draws itself.
     ivec4 portal;           // depth, portal id, flags, unused
+    // Where this view's froxel grid starts, and how to find a slice.
+    // slice = log2(z) * cluster.z + cluster.w, clamped.
+    vec4 cluster;           // base cluster (as float), unused, scale, bias
 } view;
+
+// Which froxel a fragment is in. `frag` is gl_FragCoord.xy, which is
+// measured from the TOP-LEFT on both backends -- see the note on
+// viewports in docs/conventions.md -- and so is the binder's tile
+// numbering, or the two would index different halves of the screen.
+int cluster_of(vec2 frag, float view_depth) {
+    ivec2 tile = ivec2(frag * frame.screen.zw * vec2(CLUSTER_X, CLUSTER_Y));
+    tile = clamp(tile, ivec2(0), ivec2(CLUSTER_X - 1, CLUSTER_Y - 1));
+    int slice = int(log2(max(view_depth, 1e-4)) * view.cluster.z + view.cluster.w);
+    slice = clamp(slice, 0, CLUSTER_Z - 1);
+    return int(view.cluster.x) +
+           (slice * CLUSTER_Y + tile.y) * CLUSTER_X + tile.x;
+}
 
 // -------------------------------------------------------------- per draw
 
@@ -109,6 +173,23 @@ float srgb_to_linear(float c) {
 }
 vec3 srgb_to_linear(vec3 c) {
     return vec3(srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b));
+}
+
+// HOW A PUNCTUAL LIGHT FALLS OFF.
+//
+// Inverse square, because that is what light does and because keeping
+// the units physical is what lets a scene lit for noon still work at
+// dusk. The windowing term is Karis's: it takes the tail of the
+// inverse square, which never reaches zero, and eases it to exactly
+// zero at `range` -- so a light can be culled at a finite distance
+// without a visible edge where it stops.
+float distance_attenuation(float dist_sq, float range, float radius) {
+    // The source radius keeps the divide finite at the centre and
+    // makes a light behave like a small sphere rather than a point.
+    float d2 = max(dist_sq, radius * radius);
+    float factor = dist_sq / max(range * range, 1e-6);
+    float smooth_factor = clamp(1.0 - factor * factor, 0.0, 1.0);
+    return (smooth_factor * smooth_factor) / d2;
 }
 
 // Hash and noise, for dithering and for anything that wants a stable

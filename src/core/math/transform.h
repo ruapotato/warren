@@ -155,6 +155,20 @@ struct AABB {
                max.y >= o.min.y && min.z <= o.max.z && max.z >= o.min.z;
     }
 
+    // The point inside the box nearest to `p` -- p itself when it is
+    // already inside. The sphere test everything from light culling to
+    // a BVH descent is built on.
+    Vec3 closest_point(const Vec3 &p) const {
+        return {clampf(p.x, min.x, max.x), clampf(p.y, min.y, max.y),
+                clampf(p.z, min.z, max.z)};
+    }
+    float distance_squared_to(const Vec3 &p) const {
+        return (closest_point(p) - p).length_sq();
+    }
+    bool intersects_sphere(const Vec3 &centre, float radius) const {
+        return distance_squared_to(centre) <= radius * radius;
+    }
+
     Vec3 corner(int i) const {
         return {(i & 1) ? max.x : min.x, (i & 2) ? max.y : min.y,
                 (i & 4) ? max.z : min.z};

@@ -72,6 +72,17 @@ struct RenderSettings {
     // a caster outside the view still casts into it.
     float shadow_caster_extrusion = 60.0f;
 
+    // PUNCTUAL LIGHTS.
+    //
+    // Clustered, and clustered per view -- a portal view is a
+    // different camera looking at different geometry through the same
+    // pixels, so it needs its own froxel grid. Views past this many
+    // (the deepest recursion levels, which occupy a handful of pixels)
+    // fall back to the sun and the ambient alone.
+    bool punctual_lights = true;
+    int max_clustered_views = 16;
+    int max_lights = 256;
+
     int msaa = 4;
     float exposure = 1.0f;
     Color clear_colour = Color(0.05f, 0.06f, 0.08f, 1.0f);
@@ -88,6 +99,9 @@ struct RenderStats {
     uint32_t visible_meshes = 0;
     uint32_t shadow_draws = 0;
     uint32_t cascades = 0;
+    uint32_t lights = 0;            // punctual, after culling
+    uint32_t light_assignments = 0; // light-froxel pairs binned
+    uint32_t clustered_views = 0;
     double cpu_ms = 0.0;
 };
 
@@ -143,6 +157,10 @@ private:
         rhi::Rect scissor;
         int depth = 0;
         int portal_id = -1;
+        // A shadow cascade is uploaded through this same struct, and
+        // it must not take a froxel grid: it is the light's view, not
+        // a view lights are gathered for.
+        bool clustered = true;
     };
 
     struct Renderable {
@@ -164,6 +182,10 @@ private:
     bool portal_child(const View &v, size_t portal_index, View *out,
                       rhi::Rect *scissor) const;
     void fit_cascades(const std::vector<View> &views);
+    // Fills the froxel grid for one view. Returns the base index of
+    // its block, or -1 if the frame has run out of room for grids.
+    int cluster_view(const View &v, int slot);
+    void upload_lights();
     void shadow_pass(rhi::CommandList *cmd);
 
     bool create_targets(uint32_t w, uint32_t h);
@@ -209,6 +231,7 @@ private:
         portal_layout_, tonemap_layout_;
     rhi::BindGroupH frame_group_, view_group_, portal_group_, tonemap_group_;
     rhi::BindGroupH frame_group_no_shadow_;
+    rhi::BufferH light_buffer_, cluster_buffer_, light_index_buffer_;
     rhi::BufferH frame_ubo_, view_ubo_, portal_ubo_;
     uint32_t view_stride_ = 0, portal_stride_ = 0;
     uint32_t view_cursor_ = 0, portal_cursor_ = 0;
@@ -225,6 +248,24 @@ private:
         rhi::PipelineH tonemap;
         rhi::PipelineH shadow, shadow_ds;
     } pipe_;
+
+    // Exactly the bytes of the Light struct in common.glsl.
+    struct LightGpu {
+        Vec4 position_range;
+        Vec4 colour_energy;
+        Vec4 direction_cone;
+        Vec4 params;
+    };
+    std::vector<LightGpu> lights_;
+    // Mirrors of the GPU buffers, filled on the CPU and uploaded once.
+    std::vector<uint32_t> cluster_counts_;
+    std::vector<uint32_t> cluster_indices_;
+    int clustered_views_ = 0;
+    // The sun, after the scene has had its say: a DirectionalLight3D
+    // in the tree overrides the renderer's own fields.
+    Vec3 sun_dir_used_{0, -1, 0};
+    Color sun_colour_used_ = Color::white();
+    float sun_energy_used_ = 1.0f;
 
     Ref<Mesh> portal_quad_;
     Ref<Material> default_material_;

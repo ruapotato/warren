@@ -27,6 +27,7 @@ struct FrameUniforms {
     Vec4 cascade_splits;
     Vec4 cascade_texel;
     Vec4 screen;
+    int32_t counts[4];
 };
 
 // Matches ViewData.
@@ -39,6 +40,7 @@ struct ViewUniforms {
     Vec4 eye;
     Vec4 near_far;
     int32_t portal[4];
+    Vec4 cluster;
 };
 
 // Matches PortalData in portal.glsl.
@@ -57,6 +59,19 @@ static_assert(sizeof(PushUniforms) == 96, "push constants must fit the budget");
 
 constexpr uint32_t kViewRing = 128;    // views per frame, across all recursion
 constexpr uint32_t kPortalRing = 128;
+
+// Must match common.glsl. A mismatch is silent and looks like lights
+// that flicker on and off as the camera turns, so it is asserted where
+// the grid is built.
+constexpr int kClusterX = 16;
+constexpr int kClusterY = 9;
+constexpr int kClusterZ = 24;
+constexpr int kClusterCount = kClusterX * kClusterY * kClusterZ;
+constexpr int kClusterMaxLights = 8;
+// The far end of the froxel grid. Beyond it everything lands in the
+// last slice, which is correct but coarse -- and punctual lights that
+// reach further than this are not punctual lights.
+constexpr float kClusterFar = 400.0f;
 
 uint32_t align_up(uint32_t v, uint32_t a) { return a ? ((v + a - 1) / a) * a : v; }
 
@@ -97,6 +112,12 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     fl.entries.push_back({0, BindingType::UniformBuffer, true, true, false, 1});
     fl.entries.push_back({1, BindingType::SampledTexture, false, true, false, 1});
     fl.name = "frame";
+    // The clustered light data: the lights themselves, the froxel
+    // counts and the index list. Storage buffers rather than uniform
+    // ones because the sizes are decided by the scene, and read in the
+    // fragment stage only.
+    for (uint32_t b = 2; b <= 4; b++)
+        fl.entries.push_back({b, BindingType::StorageBuffer, false, true, false, 1});
     frame_layout_ = dev->create_bind_group_layout(fl);
 
     BindGroupLayoutDesc vl;
@@ -134,6 +155,25 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     bd.size = uint64_t(portal_stride_) * kPortalRing;
     bd.name = "portal ring";
     portal_ubo_ = dev->create_buffer(bd);
+
+    {
+        const int slots = std::max(1, settings_.max_clustered_views);
+        cluster_counts_.assign(size_t(slots) * kClusterCount, 0u);
+        cluster_indices_.assign(
+            size_t(slots) * kClusterCount * kClusterMaxLights, 0u);
+        BufferDesc lb;
+        lb.usage = BufferUsage::Storage;
+        lb.access = MemoryAccess::CpuToGpu;
+        lb.size = uint64_t(std::max(1, settings_.max_lights)) * sizeof(LightGpu);
+        lb.name = "lights";
+        light_buffer_ = dev->create_buffer(lb);
+        lb.size = cluster_counts_.size() * sizeof(uint32_t);
+        lb.name = "light clusters";
+        cluster_buffer_ = dev->create_buffer(lb);
+        lb.size = cluster_indices_.size() * sizeof(uint32_t);
+        lb.name = "light indices";
+        light_index_buffer_ = dev->create_buffer(lb);
+    }
 
     // THE SHADOW MAP IS ONE ARRAY, ONE LAYER PER CASCADE. An atlas in
     // a single 2D texture would work too, but then every filter tap
@@ -173,6 +213,16 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         t.texture = shadow_map_;
         t.sampler = SamplerCache::shadow(dev);
         fg.entries.push_back(t);
+        BindGroupEntry l;
+        l.binding = 2;
+        l.buffer = light_buffer_;
+        fg.entries.push_back(l);
+        l.binding = 3;
+        l.buffer = cluster_buffer_;
+        fg.entries.push_back(l);
+        l.binding = 4;
+        l.buffer = light_index_buffer_;
+        fg.entries.push_back(l);
     }
     frame_group_ = dev->create_bind_group(fg);
 
@@ -233,6 +283,9 @@ void Renderer::shutdown() {
         if (b->valid()) device_->destroy(*b);
     if (shadow_map_.valid()) device_->destroy(shadow_map_);
     if (shadow_dummy_.valid()) device_->destroy(shadow_dummy_);
+    if (light_buffer_.valid()) device_->destroy(light_buffer_);
+    if (cluster_buffer_.valid()) device_->destroy(cluster_buffer_);
+    if (light_index_buffer_.valid()) device_->destroy(light_index_buffer_);
     for (BindGroupLayoutH *l : {&frame_layout_, &view_layout_, &material_layout_,
                                 &portal_layout_, &tonemap_layout_})
         if (l->valid()) device_->destroy(*l);
@@ -560,8 +613,8 @@ bool Renderer::create_pipelines() {
 void Renderer::upload_frame() {
     FrameUniforms f{};
     f.time = Vec4(0, 0, 0, 0);
-    f.sun_direction = Vec4(-sun_direction.normalized(), 0.0f);
-    f.sun_colour = Vec4(sun_colour.rgb(), sun_energy);
+    f.sun_direction = Vec4(-sun_dir_used_.normalized(), 0.0f);
+    f.sun_colour = Vec4(sun_colour_used_.rgb(), sun_energy_used_);
     f.ambient = Vec4(ambient.rgb(), ambient_energy);
     f.fog = Vec4(fog_colour.rgb(), fog_density);
     f.fog_params = Vec4(0.0f, 0.0f, fog_height_falloff, 0.0f);
@@ -580,6 +633,7 @@ void Renderer::upload_frame() {
     f.screen = Vec4(float(width_), float(height_),
                     width_ ? 1.0f / float(width_) : 0.0f,
                     height_ ? 1.0f / float(height_) : 0.0f);
+    f.counts[0] = int32_t(lights_.size());
     device_->write_buffer(frame_ubo_, &f, sizeof(f));
 }
 
@@ -604,6 +658,20 @@ uint32_t Renderer::upload_view(const View &v) {
                       0.0f, 0.0f);
     u.portal[0] = v.depth;
     u.portal[1] = v.portal_id;
+    // The froxel grid for this view, built on the way past. A view
+    // that gets no grid points at block zero with a zero count, so
+    // the shader's loop runs zero times rather than reading someone
+    // else's lights.
+    if (v.clustered && settings_.punctual_lights && !lights_.empty() &&
+        clustered_views_ < settings_.max_clustered_views) {
+        const int base = cluster_view(v, clustered_views_++);
+        const float near = std::max(v.projection.get_z_near(), 1e-3f);
+        const float log_ratio = std::log2(kClusterFar / near);
+        u.cluster = Vec4(float(base), 0.0f, float(kClusterZ) / log_ratio,
+                         -float(kClusterZ) * std::log2(near) / log_ratio);
+    } else {
+        u.cluster = Vec4(0, 0, 0, 0);
+    }
     uint32_t offset = view_cursor_ * view_stride_;
     device_->write_buffer(view_ubo_, &u, sizeof(u), offset);
     view_cursor_++;
@@ -627,6 +695,13 @@ uint32_t Renderer::upload_portal(const Portal3D *p) {
 void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
     renderables_.clear();
     portals_.clear();
+    lights_.clear();
+    // The renderer's own sun fields are the default, not the law: a
+    // DirectionalLight3D in the tree is what a scene author reaches
+    // for, and until now the renderer ignored it entirely.
+    sun_dir_used_ = sun_direction;
+    sun_colour_used_ = sun_colour;
+    sun_energy_used_ = sun_energy;
     if (!tree || !tree->root()) return;
 
     std::vector<Node *> stack{tree->root()};
@@ -638,6 +713,36 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
 
         if (Portal3D *p = n->cast_to<Portal3D>()) {
             if (p->active && p->linked() && p->visible_in_tree()) portals_.push_back(p);
+            continue;
+        }
+        if (Light3D *l = n->cast_to<Light3D>()) {
+            if (!l->visible_in_tree() || l->energy <= 0.0f) continue;
+            if (DirectionalLight3D *d = n->cast_to<DirectionalLight3D>()) {
+                // The first one in the tree wins. A second sun is a
+                // scene mistake, not a feature to support.
+                sun_dir_used_ = d->direction();
+                sun_colour_used_ = d->colour;
+                sun_energy_used_ = d->energy;
+                continue;
+            }
+            OmniLight3D *o = n->cast_to<OmniLight3D>();
+            if (!o || o->range <= 0.0f) continue;
+            if (int(lights_.size()) >= settings_.max_lights) continue;
+            SpotLight3D *sp = n->cast_to<SpotLight3D>();
+            LightGpu g{};
+            const Transform3D xf = o->global_transform();
+            g.position_range = Vec4(xf.origin, o->range);
+            g.colour_energy = Vec4(o->colour.rgb(), o->energy);
+            const Vec3 dir = o->forward();
+            const float outer = sp ? std::cos(sp->angle) : -1.0f;
+            const float inner =
+                sp ? std::cos(sp->angle * (1.0f - clampf(sp->angle_softness,
+                                                         0.0f, 0.95f)))
+                   : 1.0f;
+            g.direction_cone = Vec4(dir, outer);
+            g.params = Vec4(inner, std::max(o->radius, 1e-3f),
+                            sp ? 1.0f : 0.0f, 0.0f);
+            lights_.push_back(g);
             continue;
         }
         MeshInstance3D *mi = n->cast_to<MeshInstance3D>();
@@ -662,6 +767,7 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
         }
     }
     stats_.visible_meshes = uint32_t(renderables_.size());
+    stats_.lights = uint32_t(lights_.size());
 }
 
 // --------------------------------------------------------------- drawing
@@ -899,6 +1005,124 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
 }
 
 
+
+// --------------------------------------------------------- light culling
+
+void Renderer::upload_lights() {
+    // Always write something: a zero-length storage buffer is not a
+    // thing, and a descriptor pointing at a buffer with stale bytes
+    // behind a zero count is worse than one pointing at zeroes.
+    if (!lights_.empty())
+        device_->write_buffer(light_buffer_, lights_.data(),
+                              lights_.size() * sizeof(LightGpu));
+    if (!cluster_counts_.empty())
+        device_->write_buffer(cluster_buffer_, cluster_counts_.data(),
+                              cluster_counts_.size() * sizeof(uint32_t));
+    if (!cluster_indices_.empty())
+        device_->write_buffer(light_index_buffer_, cluster_indices_.data(),
+                              cluster_indices_.size() * sizeof(uint32_t));
+}
+
+int Renderer::cluster_view(const View &v, int slot) {
+    if (slot < 0 || slot >= settings_.max_clustered_views) return -1;
+    const int base = slot * kClusterCount;
+
+    uint32_t *counts = cluster_counts_.data() + base;
+    uint32_t *indices = cluster_indices_.data() + size_t(base) * kClusterMaxLights;
+    std::memset(counts, 0, size_t(kClusterCount) * sizeof(uint32_t));
+    if (lights_.empty()) return base;
+
+    Transform3D cam = v.camera;
+    cam.basis = cam.basis.orthonormalized();
+    const Transform3D to_view = cam.inverse_orthonormal();
+
+    const float near = std::max(v.projection.get_z_near(), 1e-3f);
+    const float far = kClusterFar;
+    // The same exponential slicing the shader inverts.
+    const float log_ratio = std::log2(far / near);
+    const float scale = float(kClusterZ) / log_ratio;
+    const float bias = -float(kClusterZ) * std::log2(near) / log_ratio;
+
+    // The view-space z at each slice boundary, so a froxel's depth
+    // range is a lookup rather than an exp per light per froxel.
+    float slice_z[kClusterZ + 1];
+    for (int k = 0; k <= kClusterZ; k++)
+        slice_z[k] = near * std::pow(far / near, float(k) / float(kClusterZ));
+
+    // And the view-space x/y extents at each of those depths. Read
+    // from the projection, so an off-axis or oblique portal view is
+    // handled without a special case.
+    float ex_l[kClusterZ + 1], ex_r[kClusterZ + 1];
+    float ex_b[kClusterZ + 1], ex_t[kClusterZ + 1];
+    for (int k = 0; k <= kClusterZ; k++)
+        v.projection.get_extents_at(slice_z[k], &ex_l[k], &ex_r[k], &ex_b[k],
+                                    &ex_t[k]);
+
+    size_t assigned = 0;
+    for (uint32_t li = 0; li < uint32_t(lights_.size()); li++) {
+        const LightGpu &L = lights_[li];
+        const Vec3 centre = to_view.xform(L.position_range.xyz());
+        const float radius = L.position_range.w;
+        // View space looks down -Z, so a point in front has z < 0.
+        const float dist = -centre.z;
+        if (dist - radius > far || dist + radius < 0.0f) continue;
+
+        // WHICH SLICES. Solved from the boundary table rather than
+        // from the log, because the log of a negative z is not a
+        // number and a light behind the eye still lights what is in
+        // front of it.
+        int z0 = 0, z1 = kClusterZ - 1;
+        while (z0 < kClusterZ && slice_z[z0 + 1] < dist - radius) z0++;
+        while (z1 > z0 && slice_z[z1] > dist + radius) z1--;
+
+        for (int z = z0; z <= z1; z++) {
+            // The froxel's depth slab, and the widest x/y extents
+            // across it -- a slab is a frustum, not a box, so its
+            // bounding box is the far face's.
+            const float zn = slice_z[z], zf = slice_z[z + 1];
+            const float l = std::min(ex_l[z], ex_l[z + 1]);
+            const float r = std::max(ex_r[z], ex_r[z + 1]);
+            const float b = std::min(ex_b[z], ex_b[z + 1]);
+            const float t = std::max(ex_t[z], ex_t[z + 1]);
+            const float tw = (r - l) / float(kClusterX);
+            const float th = (t - b) / float(kClusterY);
+            if (tw <= 0.0f || th <= 0.0f) continue;
+
+            // Tiles the light's bounding box can touch. Tile 0 in y is
+            // the TOP of the screen, matching gl_FragCoord, so y runs
+            // from `top` downwards.
+            const int tx0 = std::max(0, int(std::floor((centre.x - radius - l) / tw)));
+            const int tx1 = std::min(kClusterX - 1,
+                                     int(std::floor((centre.x + radius - l) / tw)));
+            const int ty0 = std::max(0, int(std::floor((t - centre.y - radius) / th)));
+            const int ty1 = std::min(kClusterY - 1,
+                                     int(std::floor((t - centre.y + radius) / th)));
+
+            for (int ty = ty0; ty <= ty1; ty++) {
+                for (int tx = tx0; tx <= tx1; tx++) {
+                    // Exact sphere-versus-box, because the bounding
+                    // box above is generous at the corners and a
+                    // light assigned to a froxel it does not reach is
+                    // a froxel slot wasted on nothing.
+                    const AABB froxel(
+                        Vec3(l + tw * float(tx), t - th * float(ty + 1), -zf),
+                        Vec3(l + tw * float(tx + 1), t - th * float(ty), -zn));
+                    if (froxel.distance_squared_to(centre) > radius * radius)
+                        continue;
+
+                    const int c = (z * kClusterY + ty) * kClusterX + tx;
+                    if (counts[c] >= uint32_t(kClusterMaxLights)) continue;
+                    indices[size_t(c) * kClusterMaxLights + counts[c]] = li;
+                    counts[c]++;
+                    assigned++;
+                }
+            }
+        }
+    }
+    stats_.light_assignments += uint32_t(assigned);
+    return base;
+}
+
 // ------------------------------------------------------- portal traversal
 
 // THE ONE COPY OF THE RULE.
@@ -1017,7 +1241,7 @@ void Renderer::fit_cascades(const std::vector<View> &views) {
 
     // The light's orientation. Only the rotation matters for an
     // orthographic projection; the position is chosen per cascade.
-    const Vec3 dir = sun_direction.normalized();
+    const Vec3 dir = sun_dir_used_.normalized();
     Vec3 up = std::fabs(dir.y) > 0.95f ? Vec3(0, 0, 1) : Vec3(0, 1, 0);
     const Basis light_basis = Basis::looking_at(dir, up);
     const Basis to_light = light_basis.transposed();  // orthonormal inverse
@@ -1119,6 +1343,7 @@ void Renderer::shadow_pass(rhi::CommandList *cmd) {
         View lv;
         lv.camera = cascade_camera_[c];
         lv.projection = cascade_projection_[c];
+        lv.clustered = false;
         uint32_t offset = upload_view(lv);
 
         Plane frustum[6];
@@ -1207,6 +1432,7 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     stats_ = RenderStats();
     view_cursor_ = 0;
     portal_cursor_ = 0;
+    clustered_views_ = 0;
     camera_ = camera;
 
     TextureDesc td = device_->texture_desc(target);
@@ -1293,6 +1519,17 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
         cmd->draw(3);
         cmd->end_rendering();
     }
+
+    // THE LIGHT BUFFERS GO UP LAST, and that is safe rather than
+    // lucky. Nothing recorded this frame has executed yet -- the
+    // command buffer is submitted by end_frame, after this returns --
+    // and these are host-visible buffers written straight through
+    // their mapping, exactly like the per-view uniform ring. Doing it
+    // here is what lets each view's froxel grid be built as the
+    // recursion reaches it, instead of having to predict the
+    // traversal twice.
+    stats_.clustered_views = uint32_t(clustered_views_);
+    if (settings_.punctual_lights) upload_lights();
 
     stats_.cpu_ms = (Clock::now() - t0) * 1000.0;
 }

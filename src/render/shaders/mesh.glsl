@@ -144,6 +144,47 @@ float sample_shadow(vec3 world, vec3 n, vec3 l, float view_depth) {
     return sum / 9.0;
 }
 
+// ------------------------------------------------------- punctual lights
+
+// Every light whose froxel this fragment lands in. The loop is over
+// what reaches the pixel, not over the level.
+vec3 punctual(vec3 world, vec3 n, vec3 v, vec3 albedo, float metallic,
+              float rough, float view_depth) {
+    vec3 sum = vec3(0.0);
+    if (frame.counts.x <= 0) return sum;
+
+    int c = cluster_of(gl_FragCoord.xy, view_depth);
+    uint n_lights = min(cluster_count[c], uint(CLUSTER_MAX_LIGHTS));
+    for (uint i = 0u; i < n_lights; i++) {
+        Light L = lights[light_index[uint(c) * uint(CLUSTER_MAX_LIGHTS) + i]];
+
+        vec3 to_light = L.position_range.xyz - world;
+        float dist_sq = dot(to_light, to_light);
+        float range = L.position_range.w;
+        if (dist_sq > range * range) continue;
+
+        float atten = distance_attenuation(dist_sq, range, L.params.y);
+        if (atten <= 0.0) continue;
+        vec3 l = to_light * inversesqrt(max(dist_sq, 1e-12));
+
+        // A spot is an omni with the cone taken out of it. Smoothed
+        // between the inner and outer angles, so the edge is a falloff
+        // rather than a cut.
+        if (int(L.params.z) == LIGHT_SPOT) {
+            float cd = dot(-l, L.direction_cone.xyz);
+            float t = (cd - L.direction_cone.w) /
+                      max(L.params.x - L.direction_cone.w, 1e-4);
+            t = clamp(t, 0.0, 1.0);
+            atten *= t * t;
+            if (atten <= 0.0) continue;
+        }
+
+        sum += brdf(n, v, l, albedo, metallic, rough) * L.colour_energy.rgb *
+               L.colour_energy.a * atten;
+    }
+    return sum;
+}
+
 // ---------------------------------------------------------------- main
 
 void main() {
@@ -197,7 +238,9 @@ void main() {
     vec3 ambient = mix(frame.ambient.rgb * 0.35, frame.ambient.rgb, up) *
                    frame.ambient.a * ao * base.rgb * (1.0 - metallic * 0.6);
 
-    vec3 colour = lit + ambient + emissive;
+    vec3 colour = lit + punctual(v_world, n, v, base.rgb, metallic, rough,
+                                 view_depth) +
+                  ambient + emissive;
 
     // Height fog, applied in view space so it is the same through a
     // portal as around it.

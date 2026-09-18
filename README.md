@@ -88,6 +88,14 @@ at. The light is uploaded through the same uniform block a camera
 uses, so the matrix that rendered the map and the matrix that samples
 it cannot drift apart.
 
+**So do the light clusters.** Punctual lights are binned into a froxel
+grid, and the grid is built **per view**: a portal view is a different
+camera looking at different geometry through the same pixels, so it
+gets its own. A lamp forty metres away in the far room lights what is
+seen through the hole and nothing around it. `tests/test_lights`
+renders exactly that and measures 0.884 inside the aperture with a
+grid for that view and **0.000** without.
+
 **Physics knows about portals.** A swept capsule that crosses an
 aperture continues out of the far side with its velocity rotated and
 its length remaining — `PhysicsWorld::trace` returns the accumulated
@@ -210,7 +218,8 @@ src/app/           Engine: the loop that ties it together
 plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
-                   sequence, portal traversal, shadows, Python
+                   sequence, portal traversal, shadows, clustered
+                   lights, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -234,7 +243,7 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: LOD for the terrain, image-based lighting, point and spot
-lights, audio, networking, and an editor.
+Not yet: LOD for the terrain, image-based lighting, shadows for
+punctual lights, audio, networking, and an editor.
 
 See `docs/conventions.md` before touching the renderer.

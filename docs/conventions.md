@@ -158,3 +158,34 @@ Three things follow from the engine being a portal engine:
   interior goes black. Acne is handled by the normal-offset bias in
   `mesh.glsl`, which moves the lookup rather than the stored depth and
   so cannot detach a shadow from its caster.
+
+## Punctual lights
+
+Clustered: a grid of `16 x 9 x 24` froxels — tiles in x and y,
+exponential slices in z — each holding up to 8 light indices. A
+fragment looks up its own froxel and shades against those.
+
+**The grid is per view, not per frame.** A portal view is a different
+camera looking at different geometry through the same pixels, so its
+froxels contain different lights. Every view's grid lives in one
+buffer end to end and each view carries the index of where its block
+starts, which is why no dynamic storage-buffer offsets are needed.
+
+Two things have to agree between the binder and the shader or lights
+flicker as the camera turns, and both are easy to get backwards:
+
+* **Tile y counts from the TOP**, matching `gl_FragCoord.y`, which is
+  measured from the top on both backends.
+* **The slice mapping** is `slice = log2(z) * scale + bias` with
+  `scale = CLUSTER_Z / log2(far/near)`. The binder solves it from a
+  boundary table rather than from the log, because a light behind the
+  eye still lights what is in front of it and `log2` of a negative
+  depth is not a number.
+
+The froxel bounds come from `Projection::get_extents_at`, which reads
+rows 0, 1 and w and so is unaffected by an oblique near plane — the
+same property the shadow cascades rely on.
+
+Lights are gathered in `Renderer::collect`, and a `DirectionalLight3D`
+in the tree now overrides the renderer's own sun fields. The first one
+wins; a second sun is a scene mistake, not a feature.

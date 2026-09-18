@@ -341,10 +341,47 @@ void build_portal_demo(Engine &e) {
     DirectionalLight3D *sun = new DirectionalLight3D();
     sun->set_name("Sun");
     sun->set_rotation(Quat::from_euler_yxz(0.7f, -0.9f, 0.0f));
+    sun->colour = Color::hex(0xFFF3E0);
+    sun->energy = 3.0f;
     scene->add_child(sun);
 
+    // PUNCTUAL LIGHTS, ON BOTH SIDES OF THE PORTAL.
+    //
+    // Two in the small room and one over the arch in the large one,
+    // which is the case that matters: the light in the far room is
+    // culled against the PORTAL VIEW's froxel grid, not the camera's,
+    // so it lights what is seen through the hole even though it is
+    // forty metres behind the player.
+    auto lamp = [&](Node *parent, const char *name, const Vec3 &at,
+                    const Color &c, float energy, float range) {
+        OmniLight3D *o = new OmniLight3D();
+        o->set_name(name);
+        o->set_position(at);
+        o->colour = c;
+        o->energy = energy;
+        o->range = range;
+        parent->add_child(o);
+        return o;
+    };
+    lamp(small, "lamp_w", {-3.2f, 3.0f, 2.0f}, Color::hex(0xFFB259), 14.0f, 9.0f);
+    lamp(small, "lamp_e", {3.2f, 3.0f, -2.0f}, Color::hex(0x6FA8FF), 10.0f, 8.0f);
+    lamp(large, "lamp_far", far_centre + Vec3(0, 9.0f, -6.0f),
+         Color::hex(0xFFD9A0), 260.0f, 34.0f);
+
+    // And a spot, because a cone is the thing a cluster grid is worst
+    // at and therefore the thing worth having in the demo.
+    SpotLight3D *spot = new SpotLight3D();
+    spot->set_name("spot");
+    spot->set_position({0.0f, 3.6f, 3.4f});
+    spot->look_at({0.0f, 0.6f, -3.0f});
+    spot->colour = Color::hex(0xE8F4FF);
+    spot->energy = 90.0f;
+    spot->range = 18.0f;
+    spot->angle = deg2rad(34.0f);
+    spot->angle_softness = 0.35f;
+    small->add_child(spot);
+
     Renderer *r = e.renderer();
-    r->sun_direction = sun->direction();
     r->ambient = Color::hex(0x4F5B6B);
     r->ambient_energy = 0.7f;
     r->fog_colour = Color::hex(0x7C8A9A);
@@ -532,6 +569,10 @@ int main(int argc, char **argv) {
             cfg.startup_script = next("");
         } else if (a == "--script-path") {
             cfg.script_paths.push_back(next("."));
+        } else if (a == "--no-lights") {
+            cfg.render.punctual_lights = false;
+        } else if (a == "--clustered-views") {
+            cfg.render.max_clustered_views = std::stoi(next("16"));
         } else if (a == "--no-shadows") {
             cfg.render.shadows = false;
         } else if (a == "--shadow-size") {
@@ -577,6 +618,8 @@ int main(int argc, char **argv) {
                 "  --script-path DIR     add a directory to sys.path\n"
                 "  --no-python           do not start the interpreter\n"
                 "  --stubs FILE          write manifold.pyi and exit\n"
+                "  --no-lights           no punctual lights, sun only\n"
+                "  --clustered-views N   how many views get a froxel grid\n"
                 "  --no-shadows          turn the shadow pass off\n"
                 "  --shadow-size N       shadow map resolution (default 2048)\n"
                 "  --shadow-distance M   how far shadows reach (default 120)\n"
