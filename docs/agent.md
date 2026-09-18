@@ -225,6 +225,28 @@ turns a sphere into a rock) · `elongate` · `mirror` · `repeat` ·
 rather than trying to mesh the universe. Intersect them with something
 first — which is how you slice a shape flat.
 
+**Detail and decimation.** `detail` is how many cells the longest axis
+is divided into, and it sets how fine the contouring is. `simplify` is
+how far, in cells, the surface may move when the triangles are thinned
+afterwards — half a cell by default, which is smaller than the
+contourer's own sampling error and therefore invisible. Pass 0 to keep
+every triangle.
+
+The thinning is not optional in practice. A contourer emits one quad
+per surface cell whether the surface is curved there or not, so the
+crate above comes out of the contourer with sixty thousand triangles
+and leaves with two hundred. Driving it by error rather than by a
+triangle count is what makes one setting work on a crate and on a
+boulder: flat faces collapse for nothing, creases and silhouettes cost
+real distance and survive.
+
+`make_mesh` reports what you got, so a caller that cares can adjust:
+
+```json
+{"ok": true, "triangles": 200, "vertices": 92,
+ "size": {"x": 0.899, "y": 0.900, "z": 0.899}}
+```
+
 From Python, the same parser:
 
 ```python
