@@ -204,6 +204,15 @@ void AnimationPlayer::one_shot(const std::string &name,
     shot_mask_ = mask_for(mask);
 }
 
+void AnimationPlayer::one_shot_from(const std::string &name,
+                                    const std::string &from, float speed,
+                                    float fade) {
+    if (from.empty())
+        one_shot(name, {}, speed, fade);
+    else
+        one_shot(name, {from}, speed, fade);
+}
+
 void AnimationPlayer::on_process(float dt) {
     Skinned3D *s = target();
     if (!s || !s->pose().valid()) return;
@@ -274,6 +283,8 @@ static void register_animated_classes() {
     ClassBuilder<AnimationPlayer>()
         .method("play", &AnimationPlayer::play).args("name", "fade", "speed")
         .method("blend", &AnimationPlayer::blend).args("a", "b", "mix", "speed")
+        .method("one_shot", &AnimationPlayer::one_shot_from)
+                .args("name", "bone", "speed", "fade")
         .method("stop_one_shot", &AnimationPlayer::stop_one_shot)
         .method("acting", &AnimationPlayer::acting)
         .method("has", &AnimationPlayer::has).args("name")

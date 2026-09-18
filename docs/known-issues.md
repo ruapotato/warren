@@ -51,9 +51,10 @@ and the contour stage is only reporting it.
 **Workaround**
 
 Keep thresholds flush, or within one cell of `cell_height`.
-ROTGRAVE does: `Design._resolve_levels` snaps a building's floor to
-the ground immediately outside it when the two are close, so the
-church sits at its churchyard's height rather than 0.3 m above it.
+ROTGRAVE -- a game built on this engine, in its own repository --
+does exactly that: it snaps a building's floor to the ground
+immediately outside it when the two are close, so the church sits
+at its churchyard's height rather than 0.3 m above it.
 
 **A near miss worth recording.** This defect was blamed, for some
 time, for the town's zones being cut off from one another -- the

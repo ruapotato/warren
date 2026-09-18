@@ -235,6 +235,17 @@ public:
     // where it ended up. Set this false for that.
     bool drives_transform = true;
 
+    // WHICH WAY THE BODY POINTS, in radians a second, yawing toward
+    // where it is actually going. Zero leaves the rotation alone,
+    // which is what a game driving its own character wants.
+    //
+    // This has to be here rather than in the game, because only the
+    // agent knows the velocity that avoidance settled on -- a body
+    // pushed sideways round an obstacle is going somewhere other
+    // than at its target, and facing the target instead is a body
+    // walking sideways. It costs nothing until something sets it.
+    float turn_speed = 0.0f;
+
     void set_target(const Vec3 &p);
     void stop();
     bool has_target() const;

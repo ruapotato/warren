@@ -88,6 +88,13 @@ public:
     // `mask` is bone names; empty means the whole body.
     void one_shot(const std::string &name, const std::vector<std::string> &mask,
                   float speed = 1.0f, float fade = 0.12f);
+    // The same, named by ONE bone that brings its descendants -- the
+    // shape a caller actually wants ("from the spine up", so a reload
+    // plays over a walk). Empty `from` is the whole body. This is the
+    // overload scripts get: a subtree root is a string, and a list of
+    // them is not something the binding layer carries.
+    void one_shot_from(const std::string &name, const std::string &from,
+                       float speed = 1.0f, float fade = 0.12f);
     bool acting() const { return !shot_.empty(); }
     void stop_one_shot() { shot_.clear(); }
 

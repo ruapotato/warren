@@ -639,6 +639,15 @@ Ref<AnimationClip> build_clip(const Gltf &g, int index, const BuiltSkin &skin) {
     clip->name = src["name"].string();
     if (clip->name.empty()) clip->name = "clip" + std::to_string(index);
     clip->set_resource_name(clip->name);
+    // WHETHER IT LOOPS IS NOT IN THE SPEC. glTF has nowhere to say
+    // it, and a clip has to say it: a death animation that repeats
+    // is a corpse that keeps dying. `extras` is where authoring
+    // tools are meant to put what the format left out, so that is
+    // where it is read from, and a file that is silent keeps the
+    // looping default rather than guessing from the name.
+    const Json &extras = src["extras"];
+    if (!extras.is_null() && !extras["loop"].is_null())
+        clip->loops = extras["loop"].boolean(true);
 
     const Json &channels = src["channels"];
     const Json &samplers = src["samplers"];

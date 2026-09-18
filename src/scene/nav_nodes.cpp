@@ -383,6 +383,23 @@ void NavAgent3D::on_physics(float dt) {
 
     if (drives_transform) {
         set_global_position(a->position);
+        if (turn_speed > 0.0f) {
+            const Vec3 v = a->velocity;
+            // Below a crawl there is no direction to face, and the
+            // velocity that avoidance leaves on a stopped body is
+            // noise. Facing noise makes a standing body twitch.
+            const float flat = std::sqrt(v.x * v.x + v.z * v.z);
+            if (flat > 0.15f) {
+                const float want = std::atan2(-v.x, -v.z);
+                Vec3 e = euler();
+                float d = want - e.y;
+                while (d > 3.14159265f) d -= 6.28318531f;
+                while (d < -3.14159265f) d += 6.28318531f;
+                const float step = turn_speed * dt;
+                e.y += std::clamp(d, -step, step);
+                set_euler(e);
+            }
+        }
     } else {
         // The game is driving. Tell the crowd where the body really
         // is, or its avoidance is solving for a body that is not
@@ -452,6 +469,7 @@ static void register_nav_nodes() {
         .field("nav_include", &NavAgent3D::nav_include)
         .field("nav_exclude", &NavAgent3D::nav_exclude)
         .field("drives_transform", &NavAgent3D::drives_transform)
+        .field("turn_speed", &NavAgent3D::turn_speed, "range:0,32")
         .method("set_target", &NavAgent3D::set_target).args("point")
         .method("stop", &NavAgent3D::stop)
         .method("has_target", &NavAgent3D::has_target)
