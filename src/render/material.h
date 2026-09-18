@@ -57,6 +57,20 @@ public:
     float triplanar_sharpness = 4.0f;
 
     Ref<Texture> albedo_map;
+    // Through raw pointers for the reflection; a Ref is not a
+    // Variant. See the registration in material.cpp for why these
+    // have to be properties at all.
+    Texture *get_albedo_map() const { return albedo_map.get(); }
+    void set_albedo_map(Texture *t) { albedo_map = Ref<Texture>(t); touch(); }
+    Texture *get_normal_map() const { return normal_map.get(); }
+    void set_normal_map(Texture *t) { normal_map = Ref<Texture>(t); touch(); }
+    Texture *get_orm_map() const { return orm_map.get(); }
+    void set_orm_map(Texture *t) { orm_map = Ref<Texture>(t); touch(); }
+    Texture *get_emissive_map() const { return emissive_map.get(); }
+    void set_emissive_map(Texture *t) {
+        emissive_map = Ref<Texture>(t);
+        touch();
+    }
     Ref<Texture> normal_map;
     // Occlusion in red, roughness in green, metallic in blue -- the
     // glTF packing, so an imported model needs no channel shuffling.

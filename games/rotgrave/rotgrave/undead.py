@@ -59,62 +59,151 @@ def _tint(hexstr):
                     (v & 255) / 255.0, 1.0)
 
 
+def shade(c, k):
+    """A tint, lightened or darkened. Keeps a body from being one
+    flat colour, which is what makes a box look like a box."""
+    return wr.Color(min(1.0, c.r * k), min(1.0, c.g * k),
+                    min(1.0, c.b * k), 1.0)
+
+
+def build_figure(skin, cloth, height=1.8, radius=0.38, hunch=0.0,
+                 arms_forward=0.55, bulk=1.0):
+    """An upright body, out of boxes, in parts.
+
+    Parts, not one box, and each with its own colour: the engine
+    multiplies vertex colour into albedo, so a single material
+    gives a figure with a head a different tone from its coat. A
+    body that is one flat slab reads as furniture, which is exactly
+    what the first pass looked like.
+
+    `hunch` leans the trunk forward and drops the head -- the
+    difference between a survivor and something that used to be
+    one -- and `arms_forward` is how far the arms reach. Arms
+    forward is not decoration: a shambler reaching is the shape
+    that says it has seen you, and hanging them at the back was the
+    single most-complained-about thing in the version this is a
+    port of.
+    """
+    b = wr.MeshBuilder()
+    h, r = height, radius * bulk
+    lean = hunch * 0.16
+
+    # Legs.
+    b.colour = shade(cloth, 0.72)
+    for sx in (-1, 1):
+        b.add_box(wr.Vec3(sx * r * 0.45, h * 0.21, 0.0),
+                  wr.Vec3(r * 0.52, h * 0.42, r * 0.62))
+        b.add_box(wr.Vec3(sx * r * 0.45, h * 0.035, r * 0.12),
+                  wr.Vec3(r * 0.56, h * 0.07, r * 0.95))
+
+    # Trunk, leaning.
+    b.colour = cloth
+    b.add_box(wr.Vec3(0.0, h * 0.60, -lean * h),
+              wr.Vec3(r * 1.75, h * 0.40, r * 1.05))
+    b.colour = shade(cloth, 0.86)
+    b.add_box(wr.Vec3(0.0, h * 0.44, -lean * h * 0.4),
+              wr.Vec3(r * 1.55, h * 0.12, r * 0.98))
+
+    # Arms: upper out from the shoulder, lower reaching.
+    b.colour = shade(cloth, 0.92)
+    for sx in (-1, 1):
+        b.add_box(wr.Vec3(sx * r * 1.05, h * 0.62, -lean * h),
+                  wr.Vec3(r * 0.42, h * 0.30, r * 0.46))
+        b.colour = skin
+        b.add_box(wr.Vec3(sx * r * 1.05, h * 0.50 + arms_forward * h * 0.12,
+                          -(lean + arms_forward * 0.30) * h),
+                  wr.Vec3(r * 0.40, r * 0.40, h * 0.34 * (0.4 + arms_forward)))
+        b.colour = shade(cloth, 0.92)
+
+    # Neck and head, dropped by the hunch.
+    b.colour = skin
+    b.add_box(wr.Vec3(0.0, h * 0.82, -lean * h * 1.3),
+              wr.Vec3(r * 0.42, h * 0.06, r * 0.42))
+    b.add_box(wr.Vec3(0.0, h * 0.90 - hunch * h * 0.04,
+                      -(lean * 1.6) * h),
+              wr.Vec3(r * 0.86, h * 0.13, r * 0.80))
+    # A brow, so the head has a front.
+    b.colour = shade(skin, 0.7)
+    b.add_box(wr.Vec3(0.0, h * 0.93 - hunch * h * 0.04,
+                      -(lean * 1.6) * h - r * 0.42),
+              wr.Vec3(r * 0.78, h * 0.035, r * 0.10))
+    return b.build()
+
+
+def build_beast(skin, cloth, height=1.2, radius=0.4):
+    """Four legs, low and long. Read from above, which is how a
+    player usually first sees one coming."""
+    b = wr.MeshBuilder()
+    h, r = height, radius
+    b.colour = cloth
+    b.add_box(wr.Vec3(0, h * 0.66, 0), wr.Vec3(r * 1.5, h * 0.44, h * 1.35))
+    b.colour = shade(cloth, 0.8)
+    b.add_box(wr.Vec3(0, h * 0.62, h * 0.78),
+              wr.Vec3(r * 0.5, h * 0.18, h * 0.5))   # tail end
+    b.colour = skin
+    b.add_box(wr.Vec3(0, h * 0.74, -h * 0.80),
+              wr.Vec3(r * 1.1, h * 0.30, r * 1.5))   # head
+    b.colour = shade(skin, 0.62)
+    b.add_box(wr.Vec3(0, h * 0.66, -h * 1.02),
+              wr.Vec3(r * 0.7, h * 0.16, r * 0.6))   # muzzle
+    b.colour = shade(cloth, 0.7)
+    for sx in (-1, 1):
+        for sz, k in ((-0.55, 1.0), (0.55, 0.92)):
+            b.add_box(wr.Vec3(sx * r * 0.78, h * 0.22, sz * h),
+                      wr.Vec3(r * 0.32, h * 0.44 * k, r * 0.32))
+    return b.build()
+
+
 class Bodies:
     """One mesh per species, built once and shared.
 
     Thirty bodies on screen is thirty MeshInstance3D nodes pointing
-    at eleven meshes, not thirty meshes.
+    at eleven meshes, not thirty meshes. The material is white,
+    because the colour is in the vertices.
     """
 
     def __init__(self, design):
         self.design = design
         self.meshes = {}
-        self.materials = {}
+        self.material = wr.Material()
+        self.material.albedo = wr.Color(1, 1, 1, 1)
+        self.material.roughness = 0.88
         for key, sp in design.undead.items():
             self.meshes[key] = self._build(sp)
-            m = wr.Material()
-            m.albedo = _tint(sp.tint)
-            m.roughness = 0.82
-            self.materials[key] = m
 
     def _build(self, sp):
-        b = wr.MeshBuilder()
+        cloth = _tint(sp.tint)
+        # Skin from the species' gore colour, which is the one other
+        # colour the dump gives per species and is about right for
+        # what is left of one.
+        skin = _gore_tint(sp.gore, cloth)
         h = sp.height if sp.height > 0.1 else 1.8
-        r = sp.radius
         if sp.kind == "scene":
-            # The four-legged ones: long, low, and read from above,
-            # which is how a player usually sees them coming.
-            b.add_box(wr.Vec3(0, h * 0.62, 0), wr.Vec3(r * 1.5, h * 0.5,
-                                                       h * 1.5))
-            b.add_box(wr.Vec3(0, h * 0.78, -h * 0.85),
-                      wr.Vec3(r * 1.2, r * 1.2, r * 1.6))
-            for sx in (-1, 1):
-                for sz in (-1, 1):
-                    b.add_box(wr.Vec3(sx * r * 0.7, h * 0.2, sz * h * 0.5),
-                              wr.Vec3(r * 0.35, h * 0.45, r * 0.35))
-            return b.build()
+            return build_beast(skin, cloth, h, sp.radius)
+        # The faster it runs, the further forward it leans.
+        hunch = min(1.0, 0.25 + sp.run_speed / 12.0)
+        return build_figure(skin, cloth, h, sp.radius, hunch=hunch,
+                            arms_forward=0.85, bulk=1.0 + (sp.health - 1.0)
+                            * 0.25)
 
-        # Upright: legs, trunk, arms out in front, head. The arms
-        # forward matter -- a shambler reaching is the shape that
-        # says it has seen you, and the one the old version got
-        # wrong for a long time by hanging them behind the back.
-        b.add_box(wr.Vec3(0, h * 0.62, 0), wr.Vec3(r * 1.9, h * 0.44,
-                                                   r * 1.2))
-        b.add_box(wr.Vec3(0, h * 0.92, 0), wr.Vec3(r * 1.0, h * 0.14,
-                                                   r * 1.0))
-        for sx in (-1, 1):
-            b.add_box(wr.Vec3(sx * r * 0.55, h * 0.2, 0),
-                      wr.Vec3(r * 0.6, h * 0.4, r * 0.7))
-            b.add_box(wr.Vec3(sx * r * 1.05, h * 0.66, -r * 1.1),
-                      wr.Vec3(r * 0.45, r * 0.45, h * 0.3))
-        return b.build()
+
+def _gore_tint(gore, fallback):
+    """The dump writes gore as "(r, g, b, a)". Lightened, because
+    what it describes is what comes out rather than what is left."""
+    try:
+        parts = [float(v) for v in gore.strip("() ").split(",")]
+        c = wr.Color(parts[0], parts[1], parts[2], 1.0)
+        return shade(c, 2.1)
+    except Exception:
+        return shade(fallback, 1.3)
 
 
 class Zombie:
     """One body: an agent, a mesh, a target and a grudge."""
 
     __slots__ = ("node", "agent", "species", "health", "max_health",
-                 "damage", "bias", "swing_at", "dead", "round_no", "mesh")
+                 "damage", "bias", "swing_at", "dead", "round_no", "mesh",
+                 "groan_at", "sound")
 
     # Beyond this a body stops asking for a new path every time the
     # player moves; the route it has is good enough until it is not.
@@ -131,6 +220,11 @@ class Zombie:
         self.bias = rng.uniform(0.7, 1.45)
         self.swing_at = 0.0
         self.dead = False
+        self.sound = None
+        # Staggered, so a crowd that spawns together does not groan
+        # in chorus -- which reads as one large thing rather than as
+        # many small ones.
+        self.groan_at = rng.uniform(1.0, 6.0)
 
         self.agent = wr.NavAgent3D()
         self.agent.name = f"{species_key}"
@@ -147,7 +241,7 @@ class Zombie:
         self.node = wr.MeshInstance3D()
         self.node.name = "Body"
         self.node.mesh = bodies.meshes[species_key]
-        self.node.set_material(0, bodies.materials[species_key])
+        self.node.set_material(0, bodies.material)
         self.agent.add_child(self.node)
 
     @property
@@ -159,9 +253,16 @@ class Zombie:
         if self.dead:
             return 0, False
         self.health -= amount * (2.0 if headshot else 1.0)
+        if self.sound:
+            self.sound.at("hit_head" if headshot else "hit_flesh",
+                          self.position, volume=0.8)
         if self.health > 0.0:
             return PAY_HIT, False
         self.dead = True
+        if self.sound:
+            self.sound.pick(["undead_die1", "undead_die2", "undead_die3"],
+                            self.position, volume=0.9)
+            self.sound.at("gore_burst", self.position, volume=0.5)
         return (PAY_HEAD if headshot else PAY_KILL) + self.species.points, True
 
     def update(self, dt, target, now):
@@ -172,12 +273,27 @@ class Zombie:
             return None
         self.agent.set_target(target)
 
+        # A groan every so often, so a crowd behind you is audible
+        # before it is visible. That is most of what the sound is
+        # for in this mode.
+        if self.sound and now >= self.groan_at:
+            self.groan_at = now + 4.0 + (self.bias * 3.0)
+            if self.species.kind == "scene":
+                self.sound.pick(["hound_growl", "hound_bark", "hound_bark2"],
+                                self.position, volume=0.75)
+            else:
+                self.sound.pick(["groan1", "groan2", "groan3", "groan4",
+                                 "groan5"], self.position, volume=0.7)
+
         # Close enough, and the swing has come round again.
         d = self.position - target
         flat = math.sqrt(d.x * d.x + d.z * d.z)
         if flat > self.species.reach or now < self.swing_at:
             return None
         self.swing_at = now + self.species.swing
+        if self.sound:
+            self.sound.pick(["undead_attack1", "undead_attack2"],
+                            self.position, volume=0.9)
         return self.damage
 
     def free(self):

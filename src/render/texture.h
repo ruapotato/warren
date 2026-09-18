@@ -56,6 +56,26 @@ public:
     const std::string &path() const { return path_; }
     bool valid() const { return texture_.valid(); }
 
+    // WHAT IT WAS DECODED FROM, kept, for textures that came from
+    // memory rather than from a file.
+    //
+    // A texture embedded in a .glb has no path of its own, so a
+    // scene that refers to it cannot refer to it BY path -- and
+    // before this the scene format silently dropped it, which
+    // turned every imported model white the moment it was packed.
+    // Holding the encoded bytes costs a couple of hundred kilobytes
+    // per texture and makes a texture a resource that can be
+    // written out like any other.
+    //
+    // Empty for a texture loaded from a file: that one has a path,
+    // which is smaller and better.
+    const std::vector<uint8_t> &source() const { return source_; }
+    bool source_srgb() const { return source_srgb_; }
+    void keep_source(const void *data, size_t size, bool srgb) {
+        source_.assign((const uint8_t *)data, (const uint8_t *)data + size);
+        source_srgb_ = srgb;
+    }
+
     void release();
 
 private:
@@ -65,6 +85,8 @@ private:
     uint32_t width_ = 0, height_ = 0;
     rhi::Format format_ = rhi::Format::RGBA8;
     std::string path_;
+    std::vector<uint8_t> source_;
+    bool source_srgb_ = true;
     bool owns_sampler_ = false;
 };
 

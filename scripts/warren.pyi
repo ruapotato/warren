@@ -239,6 +239,7 @@ class AudioClip(Resource):
     def frames(self) -> int: ...
 
 class AudioPlayer(Node):
+    clip: AudioClip | None
     volume: float  # range:0,4
     pitch: float  # range:0.25,4
     loop: bool
@@ -274,6 +275,10 @@ class Control(Node):
     # signals: mouse_entered, mouse_exited, resized
 
 class Material(Resource):
+    albedo_map: Texture | None
+    normal_map: Texture | None
+    orm_map: Texture | None
+    emissive_map: Texture | None
     albedo: Color
     metallic: float  # range:0,1
     roughness: float  # range:0,1
@@ -369,6 +374,7 @@ class AudioListener3D(Node3D):
     def is_current(self) -> bool: ...
 
 class AudioPlayer3D(Node3D):
+    clip: AudioClip | None
     volume: float  # range:0,4
     pitch: float  # range:0.25,4
     loop: bool

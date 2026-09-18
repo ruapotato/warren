@@ -8,14 +8,22 @@ already -- `--script FILE` puts it there, the way every Python
 runtime does -- so `import rotgrave` works from wherever it is run.
 """
 
+import math
 import os
 
 import warren as wr
 
+# A hand on the trigger for headless runs. See Game._autofire.
+_AUTOFIRE = bool(os.environ.get("ROTGRAVE_AUTOFIRE"))
+
 from rotgrave.design import load
 from rotgrave.town import Town, AREA_OPEN, AREA_SEWER
 from rotgrave.player import Player
+from rotgrave.effects import Effects
+from rotgrave.hud import Hud
+from rotgrave.sound import Sound
 from rotgrave.undead import Bodies
+from rotgrave.weapons import Knife
 from rotgrave.rounds import Director
 
 
@@ -41,6 +49,7 @@ class Game(wr.Node3D):
         start = self.design.zones["crossroads"]
         cx, _, cz = start.centre
         self.player = Player(wr.physics()).spawn(self, wr.Vec3(cx, 1.2, cz))
+        self.player.arm(self.design)
 
         # NOVEMBER, FOUR IN THE AFTERNOON. The mode is a dead town
         # and the light has to say so before anything else does.
@@ -138,13 +147,18 @@ class Game(wr.Node3D):
         # F1 shows the bake. Off by default, on in a heartbeat --
         # it is the difference between "they will not go upstairs"
         # and "there is no upstairs".
+        self.sound = Sound(self)
+        self.player.sound = self.sound
+        self.effects = Effects(self)
+        self.hud = Hud(self)
         self.bodies = Bodies(self.design)
         # Under the region, because that is where a NavAgent3D
         # looks for the crowd it belongs to -- it walks up its
         # ancestors until it finds a NavRegion3D, and one parented
         # anywhere else never moves.
         self.director = Director(self.design, self.town, self.bodies,
-                                 self.town.region, seed=1)
+                                 self.town.region, seed=1,
+                                 sound=self.sound)
 
         self._nav_debug = False
         self._report_at = 0.0
@@ -179,53 +193,153 @@ class Game(wr.Node3D):
 
         now = wr.time()
         self.player.update(dt, wr.mouse_captured())
-        if wr.mouse_pressed(wr.Mouse.LEFT) and wr.mouse_captured():
-            self._fire(now)
+
+        if _AUTOFIRE:
+            self._autofire(now)
+        elif wr.mouse_captured():
+            self._weapons(now)
 
         self.director.update(dt, now, [self.player])
+        self.effects.update(now)
+        self.hud.update(now, self.player, self.director)
 
         if now >= self._report_at:
             self._report_at = now + 5.0
+            held = self.player.held
+            ammo = ("knife" if isinstance(held, Knife) or held is None
+                    else f"{held.mag}/{held.reserve}")
             wr.log(self.director.report()
-                   + f"  |  {self.player.health:.0f} hp")
+                   + f"  |  {self.player.health:.0f} hp"
+                   + f"  |  {self.player.points} pts"
+                   + f"  |  {held.name if held else '-'} {ammo}")
 
-    def _fire(self, now):
-        """A placeholder shot, until the twelve guns are in.
+    def _autofire(self, now):
+        """A hand on the trigger, for a run with nobody at the keyboard.
 
-        One trace, one body, a fixed amount of damage. It exists so
-        that a round can end -- a director with nothing that can
-        kill is a director that spawns until the cap and stops, and
-        none of the round logic gets exercised at all.
+        Not a cheat and not a bot: it aims at the nearest body and
+        pulls, which is the one thing a headless run cannot do and
+        the one thing the whole round loop depends on. Without it a
+        test run spawns to the cap and stops, and nothing past the
+        spawner is ever exercised.
         """
-        self.player.last_shot = now
-        origin, far = self.player.aim_ray()
-        best, best_t = None, 2.0
-        for z in self.director.alive:
-            if z.dead:
+        p = self.player
+        alive = [z for z in self.director.alive if not z.dead]
+        if not alive:
+            return
+        eye = p.camera.global_position
+        world = wr.physics()
+        best, best_d = None, 1e9
+        for z in alive:
+            d = (z.position - eye).length()
+            if d >= best_d or d > 60.0:
                 continue
-            # Closest approach of the ray to the body's middle.
-            c = z.position + wr.Vec3(0.0, z.agent.height * 0.5, 0.0)
-            d = far - origin
-            L = d.length()
-            if L < 1e-3:
-                continue
-            u = d * (1.0 / L)
-            t = (c - origin).dot(u)
-            if t < 0.0 or t > L:
-                continue
-            miss = (origin + u * t - c).length()
-            if miss > z.agent.radius + 0.25:
-                continue
-            if miss < best_t:
-                best, best_t = z, miss
+            # Only what it can actually see. Firing at a body
+            # through a building empties the magazine into a wall,
+            # which is what a player would not do and what made the
+            # first headless run look like the guns did not work.
+            chest = z.position + wr.Vec3(0, z.agent.height * 0.6, 0)
+            blocked = world.trace(eye, chest, 0xffffffff)
+            if blocked.get("hit"):
+                q = blocked["position"]
+                if (wr.Vec3(q.x, q.y, q.z) - eye).length() < d - 0.6:
+                    continue
+            best, best_d = z, d
         if best is None:
             return
-        head = best.position.y + best.agent.height * 0.82
-        aim_y = origin.y + (far.y - origin.y) * 0.5
-        points, killed = best.hurt(90.0, headshot=aim_y > head - 0.25)
-        self.player.points += points
-        if killed:
-            self.director.killed(best, points)
+        aim = (best.position + wr.Vec3(0, best.agent.height * 0.6, 0)) - eye
+        if aim.length() < 1e-3:
+            return
+        aim = aim.normalized()
+        p.yaw = math.atan2(-aim.x, -aim.z)
+        p.pitch = math.asin(max(-1.0, min(1.0, aim.y)))
+
+        held = p.held
+        if held is None or isinstance(held, Knife):
+            return
+        held.tick(now)
+        if held.empty:
+            held.begin_reload(now)
+            return
+        before = held.mag
+        hits = p.shoot(alive, now)
+        if held.mag < before:
+            self._flash(now)
+        self._land(hits, now)
+
+    def _weapons(self, now):
+        p = self.player
+        for key, slot in ((wr.Key.NUM1, 0), (wr.Key.NUM2, 1),
+                          (wr.Key.NUM3, 2)):
+            if wr.key_pressed(key) and p.slot != slot:
+                p.select(slot)
+                self.sound.flat("weapon_swap", volume=0.6)
+
+        held = p.held
+        if held is not None and not isinstance(held, Knife):
+            held.tick(now)
+            p._reload_noise(held, now)
+            if wr.key_pressed(wr.Key.R):
+                held.begin_reload(now)
+            p.aiming = wr.mouse_down(wr.Mouse.RIGHT)
+
+        # An automatic weapon fires while held, a semi-automatic on
+        # the press. The dump says which, per gun.
+        fire = False
+        if isinstance(held, Knife) or held is None:
+            fire = wr.mouse_pressed(wr.Mouse.LEFT)
+        elif held.spec.get("auto", False):
+            fire = wr.mouse_down(wr.Mouse.LEFT)
+        else:
+            fire = wr.mouse_pressed(wr.Mouse.LEFT)
+        if not fire:
+            return
+
+        alive = self.director.alive
+        if isinstance(held, Knife) or held is None:
+            hits = p.stab(alive, now)
+            pay_kill = Knife.PAY
+        else:
+            before = held.mag
+            hits = p.shoot(alive, now)
+            if held.mag < before:
+                self._flash(now)
+            pay_kill = None
+        self._land(hits, now, pay_kill)
+
+    def _flash(self, now):
+        p = self.player
+        held = p.held
+        if held is None or isinstance(held, Knife):
+            return
+        aim = p.look_direction()
+        # At the shoulder rather than at the camera: the camera is
+        # two metres behind the body, and a flash there is a flash
+        # floating in the air behind the player.
+        muzzle = (p.position + wr.Vec3(0.0, 1.35, 0.0)
+                  + aim * 0.75 + p.body.right() * 0.18)
+        origin, far = p.aim_ray()
+        end = origin + aim * float(held.spec.range)
+        wall = wr.physics().trace(muzzle, end, 0xffffffff)
+        if wall.get("hit"):
+            q = wall["position"]
+            end = wr.Vec3(q.x, q.y, q.z)
+        self.effects.shot(now, muzzle, aim, end)
+
+    def _land(self, hits, now, pay_kill=None):
+        """Turn hits into points, corpses and feedback."""
+        p = self.player
+        for z, damage, head in hits:
+            points, killed = z.hurt(damage, headshot=head)
+            if killed and pay_kill is not None:
+                points = pay_kill + z.species.points
+            p.points += points
+            self.hud.hit(now, killed)
+            if killed:
+                self.director.killed(z, points)
+                self.effects.corpse(now, z.node, z.position,
+                                    z.agent.euler.x)
+            if points:
+                self.sound.flat("points_up", volume=0.25)
 
 
 def start():

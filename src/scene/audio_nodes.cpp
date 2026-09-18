@@ -281,6 +281,7 @@ static void register_audio_nodes() {
         .method("is_current", &AudioListener3D::is_current);
 
     ClassBuilder<AudioPlayer3D>()
+        .prop("clip", &AudioPlayer3D::get_clip, &AudioPlayer3D::set_clip)
         .field("volume", &AudioPlayer3D::volume, "range:0,4")
         .field("pitch", &AudioPlayer3D::pitch, "range:0.25,4")
         .field("loop", &AudioPlayer3D::loop)
@@ -302,6 +303,7 @@ static void register_audio_nodes() {
         .method("portals_used", &AudioPlayer3D::portals_used);
 
     ClassBuilder<AudioPlayer>()
+        .prop("clip", &AudioPlayer::get_clip, &AudioPlayer::set_clip)
         .field("volume", &AudioPlayer::volume, "range:0,4")
         .field("pitch", &AudioPlayer::pitch, "range:0.25,4")
         .field("loop", &AudioPlayer::loop)

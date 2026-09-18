@@ -76,6 +76,9 @@ Ref<Texture> Texture::from_memory(rhi::Device *dev, const void *data, size_t siz
                                  srgb ? rhi::Format::RGBA8_SRGB : rhi::Format::RGBA8,
                                  mips, name);
     stbi_image_free(pixels);
+    // Kept so the texture can be written back out: one embedded in
+    // a model has no file to be referenced by. See Texture::source.
+    if (t) t->keep_source(data, size, srgb);
     return t;
 }
 

@@ -95,10 +95,22 @@ struct CrowdAgent {
 
     // Set by the crowd, read by whoever cares.
     bool arrived = false;
-    // How long this body has been claiming to go somewhere while
-    // barely moving. The crowd re-plans off it; a game can read it
-    // to decide something has gone wrong enough to act on.
+    // How long this body has been claiming to go somewhere without
+    // getting any closer to it. The crowd re-plans off it; a game
+    // can read it to decide something has gone wrong enough to act
+    // on.
+    //
+    // NOT "how long it has been still". A body wedged in a corner
+    // does not stand still -- it jitters, because avoidance and
+    // the wall push it back and forth a few centimetres a frame --
+    // and a test on speed resets every time it twitches. It can
+    // shuffle against the same corner for ever while reporting
+    // that it is fine.
     float stuck_for = 0.0f;
+    // The closest this body has been to the point it is walking
+    // to, since it started walking to it. Progress is measured
+    // against this, so wandering back and forth counts for nothing.
+    float best_progress = 1e30f;
     // How much avoidance had to bend the desired velocity, in metres
     // per second. Large and sustained means the body is stuck in a
     // crowd, which is the cue for a game to do something else.

@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "core/serialize.h"
 #include "render/material.h"
+#include "render/texture.h"
 #include "anim/clip.h"
 #include "anim/skeleton.h"
 #include "render/mesh.h"
@@ -27,7 +28,8 @@ constexpr uint32_t kSceneMagic = 0x4D465343u;  // 'MFSC'
 // materials and a player's clips, both of which used to be dropped
 // silently on save. The reader refuses an older file rather than
 // mis-parsing one, which is what an unversioned format change does.
-constexpr uint32_t kSceneVersion = 2;
+// 3: resources may hold resources -- a material's textures.
+constexpr uint32_t kSceneVersion = 3;
 
 // A freshly built instance of each class, kept so that saving can
 // skip every property still at its default. A scene file that lists
@@ -90,6 +92,29 @@ bool is_resource_array(const PropertyInfo &p, const Variant &v) {
     return a->empty();
 }
 
+// A RESOURCE CAN HOLD RESOURCES, and until now the table stopped at
+// the first level: a MeshInstance3D's material was collected, and
+// that material's textures were not. Every imported model came back
+// white, and nothing said why -- the material was there, its
+// albedo_map was simply gone.
+//
+// Dependencies go in FIRST, so that when the table is read back in
+// order a material's texture already exists by the time the material
+// asks for it.
+void collect_dependencies(Object *o, ResourceTable *table) {
+    if (!o) return;
+    for (ClassInfo *c = o->get_class_info(); c; c = c->base)
+        for (const std::string &pname : c->property_order) {
+            const PropertyInfo *p = c->find_property(pname);
+            if (!p || !p->set || p->transient) continue;
+            if (p->type != VType::Object) continue;
+            Object *dep = o->get(pname).to_object();
+            if (!dep || dep->cast_to<Node>()) continue;
+            collect_dependencies(dep, table);
+            table->add(dep);
+        }
+}
+
 void collect_resources(Node *n, ResourceTable *table, Node *scene_root) {
     if (!n) return;
     // AND THE RESOURCE TABLE STOPS THERE TOO. The eight doors in a
@@ -113,6 +138,7 @@ void collect_resources(Node *n, ResourceTable *table, Node *scene_root) {
             Object *o = n->get(pname).to_object();
             // A node is not a resource; it is written as a path.
             if (!o || o->cast_to<Node>()) continue;
+            collect_dependencies(o, table);
             table->add(o);
         }
     // And the ones held in lists. See is_resource_array.
@@ -125,14 +151,17 @@ void collect_resources(Node *n, ResourceTable *table, Node *scene_root) {
             if (const Array *a = v.array_ptr())
                 for (const Variant &e : *a) {
                     Object *o = e.to_object();
-                    if (o && !o->cast_to<Node>()) table->add(o);
+                    if (!o || o->cast_to<Node>()) continue;
+                    collect_dependencies(o, table);
+                    table->add(o);
                 }
         }
     for (const auto &child : n->children())
         if (child) collect_resources(child.get(), table, scene_root);
 }
 
-void write_resource(ByteWriter &w, Object *o) {
+void write_resource(ByteWriter &w, Object *o,
+                    const ResourceTable *table) {
     // A RESOURCE THAT HAS A FILE IS WRITTEN AS THE FILE.
     //
     // Inline is the fallback, not the rule. A level of forty rooms
@@ -223,14 +252,37 @@ void write_resource(ByteWriter &w, Object *o) {
         }
         return;
     }
+    if (Texture *t = o->cast_to<Texture>()) {
+        // The bytes it was decoded from. A texture with a file of
+        // its own was written by path far above; this is the one
+        // embedded in a model, which has nowhere else to live.
+        const std::vector<uint8_t> &src = t->source();
+        w.u32(uint32_t(src.size()));
+        w.u8(t->source_srgb() ? 1 : 0);
+        if (!src.empty()) w.raw(src.data(), src.size());
+        return;
+    }
     // Everything else by its reflected properties, which is how a
     // Material works and how anything added later will.
+    //
+    // OBJECT PROPERTIES ARE TABLE INDICES. Skipping them, which is
+    // what this did, is why a material's textures did not survive
+    // being packed. The table holds dependencies before dependents,
+    // so the index always names something already read.
     std::vector<std::pair<std::string, Variant>> props;
+    std::vector<std::pair<std::string, uint32_t>> refs;
     for (ClassInfo *c = o->get_class_info(); c; c = c->base)
         for (const std::string &pname : c->property_order) {
             const PropertyInfo *p = c->find_property(pname);
             if (!p || !p->set || p->transient) continue;
-            if (p->type == VType::Object) continue;
+            if (p->type == VType::Object) {
+                Object *dep = o->get(pname).to_object();
+                if (!dep || dep->cast_to<Node>()) continue;
+                auto it = table ? table->index.find(dep) : decltype(table->index)::const_iterator();
+                if (table && it != table->index.end())
+                    refs.emplace_back(pname, it->second);
+                continue;
+            }
             props.emplace_back(pname, o->get(pname));
         }
     w.u32(uint32_t(props.size()));
@@ -238,12 +290,24 @@ void write_resource(ByteWriter &w, Object *o) {
         w.str(kv.first);
         w.variant(kv.second);
     }
+    w.u32(uint32_t(refs.size()));
+    for (const auto &kv : refs) {
+        w.str(kv.first);
+        w.u32(kv.second);
+    }
 }
 
-Object *read_resource(ByteReader &r) {
+// RETURNS A Ref, not a raw pointer. The old contract was
+// "a fresh object at refcount zero, which the caller wraps",
+// and it cannot express a resource that is BUILT already
+// held -- a texture decoded by Texture::from_memory comes
+// back in a Ref, and handing back its raw pointer freed it
+// the moment this function returned.
+Ref<Object> read_resource(ByteReader &r,
+                          const std::vector<Ref<Object>> &done) {
     if (r.u8() == 1) {
         const std::string path = r.str();
-        if (!r.ok()) return nullptr;
+        if (!r.ok()) return {};
         Ref<Resource> res = ResourceLoader::load(path);
         if (!res) {
             // A MISSING ASSET IS A HOLE, NOT A REFUSAL -- the same
@@ -251,17 +315,44 @@ Object *read_resource(ByteReader &r) {
             // crate missing can be repaired; one that will not open
             // cannot.
             WR_WARN("scene: '%s' could not be loaded", path.c_str());
-            return nullptr;
+            return {};
         }
         // The caller wraps this in a Ref, which retains it. The
         // inline path below returns a fresh object at refcount zero
         // and gets the same treatment, so both end up held exactly
         // once -- retaining here as well would leak every shared
         // resource in the level.
-        return res.get();
+        return Ref<Object>(res.get());
     }
     const std::string cls = r.str();
-    if (!r.ok()) return nullptr;
+    if (!r.ok()) return {};
+    // A TEXTURE IS NOT INSTANTIATED, IT IS DECODED. It has no
+    // default constructor in the registry on purpose -- an empty
+    // one is not a useful thing -- so this is handled before the
+    // generic path rather than by making one and filling it in.
+    if (cls == "Texture") {
+        const uint32_t n = r.u32();
+        const bool srgb = r.u8() != 0;
+        if (!r.ok() || uint64_t(n) > r.left()) {
+            r.variant();
+            return {};
+        }
+        std::vector<uint8_t> bytes(n);
+        if (n) r.raw(bytes.data(), n);
+        if (!r.ok()) return {};
+        // Rebuilt through the same path that made it: decode, upload,
+        // and keep the bytes so it can be written again.
+        if (rhi::Device *dev = resource_device()) {
+            Ref<Texture> made = Texture::from_memory(dev, bytes.data(),
+                                                     bytes.size(), srgb, true,
+                                                     "packed");
+            if (made) return Ref<Object>(made.get());
+        }
+        // No device: a headless load, in a test or a tool. There
+        // is nothing to upload to and nothing to show, and a null
+        // here is a material with no map rather than a failure.
+        return {};
+    }
     Object *o = ClassDB::instantiate(cls);
     if (Mesh *m = o ? o->cast_to<Mesh>() : nullptr) {
         const uint32_t vcount = r.u32();
@@ -270,21 +361,21 @@ Object *read_resource(ByteReader &r) {
         if (!r.ok() || uint64_t(vcount) * sizeof(Vertex) > r.left()) {
             r.variant();  // force the failure flag
             delete o;
-            return nullptr;
+            return {};
         }
         m->vertices.resize(vcount);
         if (vcount) r.raw(m->vertices.data(), vcount * sizeof(Vertex));
         const uint32_t icount = r.u32();
         if (!r.ok() || uint64_t(icount) * sizeof(uint32_t) > r.left()) {
             delete o;
-            return nullptr;
+            return {};
         }
         m->indices.resize(icount);
         if (icount) r.raw(m->indices.data(), icount * sizeof(uint32_t));
         const uint32_t subs = r.u32();
         if (!r.ok() || subs > r.left()) {
             delete o;
-            return nullptr;
+            return {};
         }
         for (uint32_t i = 0; i < subs && r.ok(); i++) {
             SubMesh sm;
@@ -304,7 +395,7 @@ Object *read_resource(ByteReader &r) {
             }
         }
         m->compute_bounds();
-        return o;
+        return Ref<Object>(o);
     }
     if (AnimationClip *c = o->cast_to<AnimationClip>()) {
         c->name = r.str();
@@ -314,7 +405,7 @@ Object *read_resource(ByteReader &r) {
         // Each track is at least a name and three counts.
         if (!r.ok() || uint64_t(n) * 8 > r.left()) {
             delete o;
-            return nullptr;
+            return {};
         }
         for (uint32_t i = 0; i < n && r.ok(); i++) {
             AnimationClip::BoneTrack t;
@@ -342,7 +433,7 @@ Object *read_resource(ByteReader &r) {
             }
             c->tracks.push_back(std::move(t));
         }
-        return o;
+        return Ref<Object>(o);
     }
     if (Skeleton *sk = o->cast_to<Skeleton>()) {
         const uint32_t n = r.u32();
@@ -350,7 +441,7 @@ Object *read_resource(ByteReader &r) {
         // is a corrupt file rather than a very large rig.
         if (!r.ok() || uint64_t(n) * 8 > r.left()) {
             delete o;
-            return nullptr;
+            return {};
         }
         sk->bones.resize(n);
         for (uint32_t i = 0; i < n && r.ok(); i++) {
@@ -359,24 +450,39 @@ Object *read_resource(ByteReader &r) {
             sk->bones[i].rest = r.xform();
             sk->bones[i].inverse_bind = r.xform();
         }
-        return o;
+        return Ref<Object>(o);
     }
     const uint32_t props = r.u32();
     if (!r.ok() || props > r.left()) {
         if (o) delete o;
-        return nullptr;
+        return {};
     }
     for (uint32_t i = 0; i < props && r.ok(); i++) {
         const std::string pname = r.str();
         const Variant v = r.variant();
         if (o && o->has_property(pname)) o->set(pname, v);
     }
+    // The resources this one holds, by table index. Written after
+    // the plain properties and read the same way; the table put
+    // dependencies first, so every index names something already
+    // built.
+    const uint32_t refs = r.u32();
+    if (!r.ok() || refs > r.left()) {
+        if (o) delete o;
+        return {};
+    }
+    for (uint32_t i = 0; i < refs && r.ok(); i++) {
+        const std::string pname = r.str();
+        const uint32_t at = r.u32();
+        if (!o || at >= done.size() || !done[at]) continue;
+        if (o->has_property(pname)) o->set(pname, Variant(done[at].get()));
+    }
     if (o) {
         // Materials cache GPU state keyed on their fields; loading
         // new values behind that cache would show the old ones.
         if (Material *mat = o->cast_to<Material>()) mat->touch();
     }
-    return o;
+    return Ref<Object>(o);
 }
 
 // A path relative to the subtree being written, because that is
@@ -777,7 +883,7 @@ std::vector<uint8_t> serialise_tree(Node *root) {
     ResourceTable table;
     collect_resources(root, &table, root);
     w.u32(uint32_t(table.objects.size()));
-    for (Object *o : table.objects) write_resource(w, o);
+    for (Object *o : table.objects) write_resource(w, o, &table);
     w.u32(1);
     write_node(w, root, table, root->path(), root);
     return std::move(w.bytes);
@@ -803,7 +909,7 @@ Node *deserialise_tree(const uint8_t *data, size_t size) {
     std::vector<Ref<Object>> resources;
     resources.reserve(resource_count);
     for (uint32_t i = 0; i < resource_count && r.ok(); i++)
-        resources.push_back(Ref<Object>(read_resource(r)));
+        resources.push_back(read_resource(r, resources));
     if (!r.ok()) {
         WR_ERROR("scene: the resource table is truncated");
         return nullptr;

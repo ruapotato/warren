@@ -1908,15 +1908,49 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
     if (pending_uploads_.empty()) return;
     std::vector<Pending> batch;
     batch.swap(pending_uploads_);
-    for (const Pending &p : batch) {
+    // WHAT WILL NOT FIT WAITS, it is not thrown away.
+    //
+    // A frame that loads a model asks to upload every one of its
+    // textures at once -- six 512x512 maps with mips is eight
+    // megabytes against an eight megabyte ring -- and dropping the
+    // overflow leaves those textures as whatever was in the image
+    // when it was created. Nothing fails, nothing is logged where
+    // anyone looks, and the model is silently untextured.
+    //
+    // Deferring costs a frame or two at a load, which is exactly
+    // when a frame or two is free.
+    std::vector<Pending> deferred;
+    const VkBufferRes *ring = buffers.get(frames_[frame_index_].staging);
+    const uint64_t ring_size = ring ? ring->size : 0;
+    for (Pending &p : batch) {
+        if (!deferred.empty()) {
+            // Once one has been held over, everything after it waits
+            // too: uploads to the same resource must stay in order.
+            deferred.push_back(std::move(p));
+            continue;
+        }
         int64_t at = stage(p.bytes.data(), p.bytes.size(),
                            p.dst_texture.valid() ? 256 : 16);
         if (at < 0) {
-            WR_ERROR("vk: staging ring full; an upload of %zu bytes was dropped",
-                     p.bytes.size());
+            if (p.bytes.size() > ring_size) {
+                // Bigger than the whole ring: waiting will not help.
+                WR_ERROR("vk: an upload of %zu bytes exceeds the %llu byte "
+                         "staging ring and was dropped",
+                         p.bytes.size(), (unsigned long long)ring_size);
+                continue;
+            }
+            deferred.push_back(std::move(p));
             continue;
         }
         record_copy(cb, uint64_t(at), p);
+    }
+    if (!deferred.empty()) {
+        // Ahead of anything queued since, for the same ordering
+        // reason.
+        deferred.insert(deferred.end(),
+                        std::make_move_iterator(pending_uploads_.begin()),
+                        std::make_move_iterator(pending_uploads_.end()));
+        pending_uploads_.swap(deferred);
     }
     // After the copies, in the same buffer: a chain built from a
     // level zero that has not landed yet would be a chain of

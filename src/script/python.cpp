@@ -11,6 +11,7 @@
 #include "procgen/sdf.h"
 #include "procgen/texture.h"
 #include "render/environment.h"
+#include "resource/resource.h"
 #include "render/material.h"
 #include "render/mesh.h"
 #include "platform/input.h"
@@ -210,6 +211,21 @@ PyObject *py_key_down(PyObject *, PyObject *args) {
     if (!PyArg_ParseTuple(args, "i", &code)) return nullptr;
     return PyBool_FromLong(Input::key_down(Key(code)) ? 1 : 0);
 }
+PyObject *py_load(PyObject *, PyObject *args) {
+    const char *path = nullptr;
+    const char *hint = "";
+    if (!PyArg_ParseTuple(args, "s|s", &path, &hint)) return nullptr;
+    // The cache is part of the contract: loading a path twice gives
+    // the same object, not two equal ones, which is what lets a
+    // hundred bodies share one mesh and one material.
+    Ref<Resource> r = ResourceLoader::load(path, hint);
+    if (!r) {
+        WR_WARN("python: nothing could load '%s'", path);
+        Py_RETURN_NONE;
+    }
+    return object_to_python(r.get());
+}
+
 PyObject *py_environment(PyObject *, PyObject *) {
     // One per engine, made on first ask and kept -- a script that
     // holds on to it must keep working, and handing back a fresh
@@ -326,6 +342,8 @@ PyMethodDef k_module_methods[] = {
     {"surface", (PyCFunction)py_surface, METH_VARARGS | METH_KEYWORDS,
      "Build a Material from a procedural surface description."},
     {"group", py_group, METH_VARARGS, "Every node in a group."},
+    {"load", py_load, METH_VARARGS,
+     "Load a resource by path. Cached: the same path is the same object."},
     {"environment", py_environment, METH_NOARGS,
      "The sky, the sun and the fog."},
     {"key_down", py_key_down, METH_VARARGS, "Is a key held?"},

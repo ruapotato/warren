@@ -41,11 +41,12 @@ class Director:
     # vanished.
     LOST_AFTER = 25.0
 
-    def __init__(self, design, town, bodies, parent, seed=1):
+    def __init__(self, design, town, bodies, parent, seed=1, sound=None):
         self.design = design
         self.town = town
         self.bodies = bodies
         self.parent = parent
+        self.sound = sound
         self.rng = random.Random(seed)
 
         self.round_no = 0
@@ -81,6 +82,9 @@ class Director:
         r = self.design.round_at(self.round_no)
         self.queue = list(r.crowd)
         self.next_spawn = now + 1.5
+        if self.sound:
+            self.sound.flat("round_final" if r.boss else "round_start",
+                            volume=0.85)
         wr.log(f"round {self.round_no}: {len(self.queue)} of them, "
                f"{r.gap:.2f}s apart, at most {r.cap} at once"
                + (f" -- {r.special}" if r.special else ""))
@@ -94,6 +98,9 @@ class Director:
             elif now >= self.resting_until:
                 self.resting_until = 0.0
                 self.begin(now)
+            elif self.round_no and self.sound and self.resting_until - now \
+                    > self.BREATH - 0.2:
+                self.sound.flat("round_end", volume=0.8)
             return
 
         r = self.round
@@ -155,6 +162,10 @@ class Director:
                    f"({on.x:.1f},{on.y:.1f},{on.z:.1f})")
         z = Zombie(self.design, self.bodies, species_key, self.round_no,
                    on, self.parent, self.rng)
+        z.sound = self.sound
+        if self.sound:
+            self.sound.at("hound_spawn" if z.species.kind == "scene"
+                          else "undead_spot", on, volume=0.6)
         self.alive.append(z)
         self._stuck_since[id(z)] = now
         return True

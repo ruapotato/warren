@@ -115,6 +115,18 @@ Ref<Material> Material::make(const Color &a, float rough, float metal) {
 
 static void register_material_class() {
     ClassBuilder<Material>()
+        // THE MAPS, as properties. Two reasons: a script has to be
+        // able to put a texture on a material, and the scene format
+        // writes a resource by its reflected properties -- so a map
+        // that is not a property is a map that does not survive
+        // being packed.
+        .prop("albedo_map", &Material::get_albedo_map,
+              &Material::set_albedo_map)
+        .prop("normal_map", &Material::get_normal_map,
+              &Material::set_normal_map)
+        .prop("orm_map", &Material::get_orm_map, &Material::set_orm_map)
+        .prop("emissive_map", &Material::get_emissive_map,
+              &Material::set_emissive_map)
         .field("albedo", &Material::albedo)
         .field("metallic", &Material::metallic, "range:0,1")
         .field("roughness", &Material::roughness, "range:0,1")

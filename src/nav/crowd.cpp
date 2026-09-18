@@ -247,6 +247,8 @@ bool Crowd::set_target(uint32_t id, const Vec3 &target) {
     a->arrived = false;
     a->leg = 1;
     a->on_link = false;
+    a->best_progress = 1e30f;
+    a->stuck_for = 0.0f;
     return mesh_->find_path(a->position, target, &a->path, &a->path_partial,
                             a->filter);
 }
@@ -286,16 +288,29 @@ void Crowd::follow_paths(float dt) {
         if (a.on_link) {
             // Mid-ladder is not stuck, however slowly it climbs.
             a.stuck_for = 0.0f;
-        } else if (a.velocity.length() < a.max_speed * 0.1f) {
-            a.stuck_for += dt;
+        } else if (a.leg < a.path.size()) {
+            Vec3 d = a.path[a.leg].position - a.position;
+            d.y = 0.0f;
+            const float left = d.length();
+            // A quarter of a metre of real progress resets the
+            // clock. Less than that over a second and a half, and
+            // whatever the body is doing, it is not arriving.
+            if (left < a.best_progress - 0.25f) {
+                a.best_progress = left;
+                a.stuck_for = 0.0f;
+            } else {
+                a.stuck_for += dt;
+            }
         } else {
             a.stuck_for = 0.0f;
         }
-        if (a.stuck_for > 0.5f && replanned < replans_per_step) {
+        if (a.stuck_for > 1.5f && replanned < replans_per_step) {
             a.stuck_for = 0.0f;
+            a.best_progress = 1e30f;
             if (mesh_ && mesh_->find_path(a.position, a.target, &a.path,
                                           &a.path_partial, a.filter)) {
                 a.leg = 1;
+                a.best_progress = 1e30f;
                 ++replanned;
             }
         }
@@ -330,6 +345,8 @@ void Crowd::follow_paths(float dt) {
                                                                  : corner_radius);
             if (d.length() > reach) break;
             ++a.leg;
+            // A new leg is a new thing to get closer to.
+            a.best_progress = 1e30f;
         }
         if (a.leg >= a.path.size()) {
             a.arrived = true;

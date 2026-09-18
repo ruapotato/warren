@@ -16,6 +16,7 @@
 
 #include "core/log.h"
 #include "render/material.h"
+#include "render/texture.h"
 #include "render/mesh.h"
 #include "resource/packed_scene.h"
 #include "scene/nodes.h"
@@ -276,6 +277,57 @@ int main() {
         if (back) { back->queue_free(); delete back; }
         holder->queue_free();
         delete holder;
+    }
+
+    // ------------------------------------- a resource holding a resource
+    //
+    // A material's textures are resources of its own, and the scene
+    // format used to walk one level: it collected a node's material
+    // and stopped. Every model imported from glTF came back
+    // untextured, nothing was logged, and the material was there
+    // with its map simply gone -- which reads as a lighting problem
+    // for as long as you are willing to believe it is one.
+    //
+    // No device here, so the texture cannot be decoded or uploaded;
+    // what is checked is that its BYTES travel. That is the part
+    // that was missing.
+    {
+        Node3D *root = new Node3D();
+        root->set_name("Gallery");
+
+        MeshInstance3D *mi = new MeshInstance3D();
+        mi->set_name("Wall");
+        mi->mesh = Mesh::box(Vec3(1, 1, 1));
+        Ref<Material> mat(new Material());
+        mat->albedo = Color(1, 1, 1, 1);
+        mi->set_material(0, mat.get());
+        root->add_child(mi);
+
+        const std::vector<uint8_t> bare = serialise_tree(root);
+
+        // A texture carrying a recognisable run of bytes. Not a real
+        // PNG: nothing here decodes it, and a pattern is easier to
+        // find in a blob than a valid file would be.
+        std::vector<uint8_t> payload(4096);
+        for (size_t i = 0; i < payload.size(); i++)
+            payload[i] = uint8_t(0xA5 ^ (i & 0xFF));
+        Ref<Texture> tex(new Texture());
+        tex->keep_source(payload.data(), payload.size(), true);
+        mat->albedo_map = tex;
+        mat->touch();
+
+        const std::vector<uint8_t> dressed = serialise_tree(root);
+        check(dressed.size() >= bare.size() + payload.size(),
+              "a material's texture is written with the scene");
+
+        // And the actual bytes, not merely that it got bigger.
+        auto at = std::search(dressed.begin(), dressed.end(),
+                              payload.begin(), payload.end());
+        check(at != dressed.end(),
+              "and it is the texture's own bytes that are written");
+
+        root->queue_free();
+        delete root;
     }
 
     PackedScene::set_resolver(nullptr);

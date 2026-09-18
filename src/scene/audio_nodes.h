@@ -42,6 +42,11 @@ class AudioPlayer3D : public Node3D {
 
 public:
     Ref<AudioClip> clip;
+    // Through a raw pointer, for the reflection: a Ref is not a
+    // Variant and a script has to be able to say which sound this
+    // is going to make.
+    AudioClip *get_clip() const { return clip.get(); }
+    void set_clip(AudioClip *c) { clip = Ref<AudioClip>(c); }
     float volume = 1.0f;
     float pitch = 1.0f;
     bool loop = false;
@@ -102,6 +107,8 @@ class AudioPlayer : public Node {
 
 public:
     Ref<AudioClip> clip;
+    AudioClip *get_clip() const { return clip.get(); }
+    void set_clip(AudioClip *c) { clip = Ref<AudioClip>(c); }
     float volume = 1.0f;
     float pitch = 1.0f;
     bool loop = false;
