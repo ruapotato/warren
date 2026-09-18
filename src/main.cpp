@@ -7,8 +7,13 @@
 #include <string>
 
 #include "app/engine.h"
+#if MANIFOLD_PYTHON
+#include "script/python.h"
+#endif
 #include "core/log.h"
 #include "scene/nodes.h"
+#include "plugin/host.h"
+#include "script/stubs.h"
 #include "scene/bodies.h"
 #include "scene/portal.h"
 
@@ -476,6 +481,7 @@ int main(int argc, char **argv) {
     cfg.window.height = 900;
     cfg.window.backend = rhi::Backend::Vulkan;
     std::string demo = "portals";
+    std::string stub_path;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -511,6 +517,14 @@ int main(int argc, char **argv) {
             cfg.render.max_portal_depth = std::stoi(next("4"));
         } else if (a == "--no-scissor") {
             cfg.render.portal_scissor = false;
+        } else if (a == "--script") {
+            cfg.startup_script = next("");
+        } else if (a == "--script-path") {
+            cfg.script_paths.push_back(next("."));
+        } else if (a == "--stubs") {
+            stub_path = next("manifold.pyi");
+        } else if (a == "--no-python") {
+            cfg.python = false;
         } else if (a == "--plugins") {
             cfg.plugin_directory = next("plugins");
         } else if (a == "--no-plugins") {
@@ -538,6 +552,10 @@ int main(int argc, char **argv) {
                 "  --portal-depth N      recursion limit (default 4)\n"
                 "  --no-scissor          disable the portal scissor (slow)\n"
                 "  --no-vsync            uncapped\n"
+                "  --script FILE         run a Python script once the scene exists\n"
+                "  --script-path DIR     add a directory to sys.path\n"
+                "  --no-python           do not start the interpreter\n"
+                "  --stubs FILE          write manifold.pyi and exit\n"
                 "  --plugins DIR         where to look for plugins\n"
                 "  --no-plugins          do not load any\n"
                 "  --threads N           worker threads (0 = cores - 1)\n"
@@ -546,6 +564,26 @@ int main(int argc, char **argv) {
                 "WASD to move, QE or space/ctrl for up and down, shift to hurry.\n");
             return 0;
         }
+    }
+
+    // --stubs is not a mode of the engine, it is a question about
+    // the class registry: which classes exist, with what methods. No
+    // window, no device, no frame loop -- just registration, plugins
+    // (which tolerate a context with nothing in it, and register
+    // their own classes), and the file.
+    if (!stub_path.empty()) {
+        ClassDB::register_all();
+        PluginHost host;
+        if (cfg.plugin_directory != "-") {
+            PluginContext ctx;
+            const std::string dir = PluginHost::resolve_directory(cfg.plugin_directory);
+            ctx.directory = dir.c_str();
+            host.load_directory(dir, ctx);
+            ClassDB::register_all();
+        }
+        const bool ok = write_python_stubs(stub_path);
+        host.unload_all();
+        return ok ? 0 : 1;
     }
 
     Engine engine;

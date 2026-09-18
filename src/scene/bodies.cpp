@@ -247,6 +247,7 @@ static void register_body_classes() {
     ClassBuilder<StaticBody3D>()
         .method("build_from_mesh", &StaticBody3D::build_from_mesh,
                 {Variant(int64_t(1))})
+        .args("world", "mesh", "layer")
         .method("release", &StaticBody3D::release);
 
     ClassBuilder<CharacterBody3D>()
@@ -260,7 +261,7 @@ static void register_body_classes() {
         .field("min_size", &CharacterBody3D::min_size)
         .field("max_size", &CharacterBody3D::max_size)
         .prop("size", &CharacterBody3D::get_size, &CharacterBody3D::set_size)
-        .method("move_and_slide", &CharacterBody3D::move_and_slide)
+        .method("move_and_slide", &CharacterBody3D::move_and_slide).args("world", "dt")
         .method("is_on_floor", &CharacterBody3D::on_floor)
         .method("is_on_wall", &CharacterBody3D::on_wall)
         .method("is_on_ceiling", &CharacterBody3D::on_ceiling)
@@ -268,7 +269,7 @@ static void register_body_classes() {
         .method("world_radius", &CharacterBody3D::world_radius)
         .method("world_height", &CharacterBody3D::world_height)
         .method("eye_height", &CharacterBody3D::eye_height)
-        .method("scaled", &CharacterBody3D::scaled)
+        .method("scaled", &CharacterBody3D::scaled).args("value")
         .method("portals_traversed", &CharacterBody3D::portals_traversed)
         .signal("portal_traversed", {VType::Object, VType::Float});
 }

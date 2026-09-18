@@ -73,6 +73,8 @@ private:
 struct PropertyInfo {
     std::string name;
     VType type = VType::Nil;
+    // For an Object-typed property, which class -- empty otherwise.
+    std::string class_name;
     std::function<Variant(const Object *)> get;
     std::function<void(Object *, const Variant &)> set;
     std::string hint;  // free text for an editor: "range:0,1", "file", ...
@@ -82,6 +84,15 @@ struct MethodInfo {
     std::string name;
     VType ret = VType::Nil;
     std::vector<VType> args;
+    // Optional, and supplied by .args(...) at the call site, because
+    // C++ does not keep parameter names anywhere reflection can read
+    // them. Where they are present they become the names in the
+    // generated stubs and the keywords a script may call with.
+    std::vector<std::string> arg_names;
+    // For Object-typed arguments and returns, which class; empty
+    // where the type is not an object. Parallel to `args`.
+    std::string ret_class;
+    std::vector<std::string> arg_classes;
     std::vector<Variant> defaults;  // tail-aligned
     // Vararg methods take whatever they are given.
     bool vararg = false;

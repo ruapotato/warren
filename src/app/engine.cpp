@@ -13,6 +13,9 @@
 #include "core/jobs.h"
 #include "core/log.h"
 #include "scene/nodes.h"
+#if MANIFOLD_PYTHON
+#include "script/python.h"
+#endif
 
 namespace mf {
 
@@ -65,17 +68,7 @@ bool Engine::init(const EngineConfig &cfg) {
     // PLUGINS BEFORE THE SCENE. A plugin registers node classes, and
     // a scene built before it loaded could not name them.
     if (cfg.plugin_directory != "-") {
-        std::string dir = cfg.plugin_directory;
-        if (dir.empty()) {
-            // BESIDE THE EXECUTABLE, not beside the shell. A game is
-            // launched from a shortcut, a debugger or a package
-            // manager, and none of them set the working directory to
-            // where the binary lives.
-            char *base = SDL_GetBasePath();
-            std::filesystem::path root = base ? base : ".";
-            if (base) SDL_free(base);
-            dir = (root / "plugins").string();
-        }
+        std::string dir = PluginHost::resolve_directory(cfg.plugin_directory);
         PluginContext pc;
         pc.engine = this;
         pc.device = device_;
@@ -86,7 +79,30 @@ bool Engine::init(const EngineConfig &cfg) {
         if (n) MF_INFO("%s", plugins_.report().c_str());
     }
 
+#if MANIFOLD_PYTHON
+    if (cfg.python) {
+        std::vector<std::string> paths = cfg.script_paths;
+        char *base = SDL_GetBasePath();
+        if (base) {
+            paths.push_back((std::filesystem::path(base) / "scripts").string());
+            SDL_free(base);
+        }
+        // AFTER THE PLUGINS. A class registered by a plugin has to
+        // exist before the module is built, or a script cannot name
+        // it -- and refresh_classes covers anything registered later.
+        if (Python::init(this, paths)) Python::refresh_classes();
+    }
+#endif
+
     if (on_ready) on_ready(*this);
+
+#if MANIFOLD_PYTHON
+    // AFTER on_ready, so the script finds a scene to work on.
+    if (cfg.python && !cfg.startup_script.empty()) {
+        Python::refresh_classes();
+        Python::run_file(cfg.startup_script);
+    }
+#endif
     running_ = true;
     clock_ = Clock();
     if (config_.max_frames && config_.fixed_delta <= 0.0f) {
@@ -99,11 +115,23 @@ bool Engine::init(const EngineConfig &cfg) {
 
 void Engine::shutdown() {
     if (device_) device_->wait_idle();
-    // Plugins first: one may hold GPU resources or nodes, and both
-    // must go before the things they came from.
+
+    // THE ORDER HERE IS LOAD-BEARING.
+    //
+    // 1. The tree, first. Destroying a node runs its script's
+    //    destructor, which releases a Python reference -- so Python
+    //    must still be alive. It also runs the voxel terrain's
+    //    destructor, which waits for its meshing jobs -- so the
+    //    workers must still be alive.
+    // 2. Python, once nothing holds a reference into it.
+    // 3. Plugins, once the nodes they registered are gone.
+    // 4. Jobs, once nothing is waiting on one.
+    tree_.reset();
+#if MANIFOLD_PYTHON
+    Python::shutdown();
+#endif
     plugins_.unload_all();
     Jobs::shutdown();
-    tree_.reset();
     physics_.reset();
     renderer_.shutdown();
     if (device_) {

@@ -207,6 +207,10 @@ if(MANIFOLD_TESTS)
     add_executable(${name} ${t})
     target_link_libraries(${name} PRIVATE manifold)
     add_test(NAME ${name} COMMAND ${name})
+    # 77 is the POSIX convention for "skipped", which a test uses when
+    # the thing it covers was not built (Python, say). A skip is not a
+    # pass and it is not a failure; ctest should say so.
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77)
   endforeach()
 endif()
 

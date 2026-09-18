@@ -78,6 +78,32 @@ SPIR-V with `glslangValidator` for Vulkan and cross-compiled from that
 same SPIR-V to GLSL 460 with `spirv-cross` for OpenGL. The two backends
 cannot drift, because one is built from the other's output.
 
+**Physics knows about portals.** A swept capsule that crosses an
+aperture continues out of the far side with its velocity rotated and
+its length remaining — `PhysicsWorld::trace` returns the accumulated
+warp, so a character walks through a portal in one `move_and_slide`
+rather than teleporting between frames. A body that crosses an unequal
+pair is rescaled by the ratio, and its collision radius, step height
+and eye height all follow from that one number.
+
+**One declaration, every binding.** A class says what it has once, in
+C++:
+
+```cpp
+ClassBuilder<Portal3D>(...)
+    .prop("width", &Portal3D::width)
+    .method("link_to", &Portal3D::link_to).args("other")
+    .method("within_aperture", &Portal3D::within_aperture, {Variant(0.0)})
+        .args("world_point", "margin");
+```
+
+and from that come the Python type, the property inspector, the scene
+serialiser, the error message when a script calls something that is
+not there, and the `.pyi` an editor completes against. Bindings
+written by hand are how an engine's scripting layer ends up a release
+behind its engine; generated from the table the engine itself
+dispatches through, they cannot be.
+
 ## Building
 
 Needs a C++20 compiler, CMake 3.20, Python 3, SDL2, and — for the
@@ -97,11 +123,63 @@ ctest --test-dir build --output-on-failure
 ```sh
 build/bin/manifold --demo portals              # Vulkan by default
 build/bin/manifold --demo portals --backend gl
+build/bin/manifold --demo terrain              # the voxel plugin
 build/bin/manifold --help
 ```
 
 Right mouse captures the cursor, escape releases it. WASD moves, Q/E or
 space/ctrl go up and down, shift hurries.
+
+## Scripting
+
+Python 3 is embedded, and the `manifold` module is built at start-up by
+walking the class registry — so every class, method and property the
+engine has is scriptable the moment it is declared, plugins included.
+Engine classes can be subclassed, and `_ready`, `_process`,
+`_physics_process` and `_exit` are called by the scene tree:
+
+```python
+import math
+import manifold as mf
+
+class Spinner(mf.Node3D):
+    def _ready(self):
+        self.t = 0.0
+    def _process(self, dt):
+        self.t += dt
+        self.position = mf.Vec3(0, 1.5 + 0.4 * math.sin(self.t), -3)
+        self.rotate(mf.Vec3(0, 1, 0), dt)
+```
+
+```sh
+build/bin/manifold --demo portals --script scripts/spinner.py
+build/bin/manifold --stubs scripts/manifold.pyi   # type stubs, then exit
+```
+
+`--stubs` writes a PEP 484 stub file from the same registry, with real
+argument names and return classes, so an editor completes `mf.` without
+a hand-maintained shadow of the API. It loads plugins first, so their
+classes are in there too. `tests/test_python` compiles the result and
+checks it covers every registered class, which is what keeps it from
+rotting.
+
+## Plugins
+
+A plugin is a shared library exporting three C functions. It registers
+node classes into the same `ClassDB` the engine uses, which is why the
+engine is built as one shared library — two copies of the registry
+would mean the plugin's classes register somewhere nobody reads. See
+`docs/plugins.md`.
+
+The voxel terrain plugin ships in the box: a signed distance field,
+dual contouring with QEF vertex placement, chunk streaming on the job
+system, and runtime digging and building.
+
+```python
+t = mf.instantiate("VoxelTerrain3D")
+t.set_viewer(mf.camera())
+t.dig(mf.Vec3(0, 12, 0), 6.0)
+```
 
 ## Layout
 
@@ -114,10 +192,17 @@ src/rhi/gl/        OpenGL 4.5 backend
 src/rhi/vk/        Vulkan 1.3 backend
 src/render/        meshes, materials, textures, the renderer
 src/render/shaders/  one source per program, both backends
-src/scene/         node tree, cameras, lights, Portal3D
+src/scene/         node tree, cameras, lights, Portal3D, bodies
+src/physics/       shapes, BVH, sweeps, portal-aware tracing
+src/script/        the Python bridge and the stub generator
+src/plugin/        the plugin ABI and host
+src/app/           Engine: the loop that ties it together
+plugins/voxel/     dual-contoured voxel terrain
 tools/             the three code generators
-tests/             maths, backend parity, the portal stencil sequence
+tests/             maths, backend parity, the portal stencil
+                   sequence, portal traversal, the Python bridge
 docs/conventions.md  the rules, stated once
+docs/plugins.md      how to write one
 ```
 
 Three things are generated at build time from manifests checked into
@@ -133,11 +218,13 @@ Early, and honest about it.
 
 Working: both backends at verified parity, the reverse-Z oblique
 projection, the scene tree with reflection, PBR forward shading, a
-procedural sky, filmic tonemapping, MSAA, and **recursive
-stencil-clipped portals with per-pair size ratios**.
+procedural sky, filmic tonemapping, MSAA, **recursive stencil-clipped
+portals with per-pair size ratios**, portal-aware swept physics with
+size-changing traversal, a work-stealing job system, the plugin ABI,
+streaming dual-contoured voxel terrain, and Python scripting with
+generated type stubs.
 
-Not yet: shadows (the cascade plumbing is in, the pass is not),
-physics, portal traversal for bodies, the plugin ABI, the Python
-bindings, and the voxel terrain plugin.
+Not yet: shadows (the cascade plumbing is in, the pass is not), LOD for
+the terrain, audio, networking, and an editor.
 
 See `docs/conventions.md` before touching the renderer.

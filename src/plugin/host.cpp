@@ -1,4 +1,5 @@
 #include "host.h"
+#include <SDL2/SDL.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -212,6 +213,13 @@ std::string PluginHost::report() const {
         s += p.started ? "" : "  (failed)";
     }
     return s;
+}
+
+std::string PluginHost::default_directory() {
+    char *base = SDL_GetBasePath();
+    std::filesystem::path root = base ? base : ".";
+    if (base) SDL_free(base);
+    return (root / "plugins").string();
 }
 
 }  // namespace mf

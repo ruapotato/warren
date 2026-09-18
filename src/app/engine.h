@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 #include <string>
 
 #include "platform/window.h"
@@ -30,6 +31,12 @@ struct EngineConfig {
     std::string plugin_directory;
     // Worker threads. 0 leaves one core for the main thread.
     int worker_threads = 0;
+    // Python. Started after the plugins, so a plugin's classes are
+    // scriptable too.
+    bool python = true;
+    std::vector<std::string> script_paths;
+    // Run this once the scene exists.
+    std::string startup_script;
     // Stop after this many frames. For tests and for screenshots.
     uint64_t max_frames = 0;
     // A FIXED FRAME TIME, so a capture is reproducible.

@@ -55,6 +55,37 @@ VType vtype_of() {
     }
 }
 
+// WHICH Object SUBCLASS, for the ones that are objects.
+//
+// VType::Object says "some engine object" and loses the rest of what
+// the C++ signature already knew. Nothing at run time needs the
+// difference -- the call site checks the cast -- but a generated
+// signature reading `-> Node | None` instead of `-> Object | None`
+// is the difference between stubs worth having and stubs worth
+// ignoring. Null for everything that is not an object.
+template <class T>
+const char *vclass_of() {
+    using U = std::remove_cv_t<std::remove_reference_t<T>>;
+    if constexpr (is_ref_ptr<U>::value)
+        return is_ref_ptr<U>::inner::class_name_static();
+    else if constexpr (std::is_pointer_v<U>) {
+        using Inner = std::remove_cv_t<std::remove_pointer_t<U>>;
+        if constexpr (std::is_base_of_v<Object, Inner>)
+            return Inner::class_name_static();
+        else
+            return nullptr;
+    } else {
+        return nullptr;
+    }
+}
+
+// A class name, or "" -- the form the registry stores.
+template <class T>
+std::string vclass_name() {
+    const char *n = vclass_of<T>();
+    return n ? n : std::string();
+}
+
 Object *variant_object_checked(const Variant &v, const char *want_class);
 
 // RETURNS BY VALUE, ALWAYS.
@@ -182,13 +213,43 @@ public:
 
     ClassInfo *info() const { return ci_; }
 
+    // NAMES FOR THE ARGUMENTS OF THE METHOD JUST BOUND.
+    //
+    // C++ throws parameter names away, so reflection cannot recover
+    // them and a generated signature reads `f(a0, a1)`. Chaining
+    // .args("from", "to") after a .method() supplies them, which is
+    // what the stub generator prints and what a keyword call matches.
+    // Optional everywhere: a method without them still works, it just
+    // reads worse.
+    template <class... S>
+    ClassBuilder &args(S... names) {
+        static_assert(sizeof...(S) > 0, "args() with no names does nothing");
+        if (!last_method_.empty()) {
+            auto it = ci_->methods.find(last_method_);
+            if (it != ci_->methods.end()) {
+                std::vector<std::string> given = {std::string(names)...};
+                // A mismatch is a mistake at the call site that would
+                // otherwise produce a signature quietly missing a
+                // parameter, so it is truncated or padded rather than
+                // shifting the names onto the wrong arguments.
+                given.resize(it->second.args.size());
+                for (size_t i = 0; i < given.size(); i++)
+                    if (given[i].empty()) given[i] = "a" + std::to_string(i);
+                it->second.arg_names = std::move(given);
+            }
+        }
+        return *this;
+    }
+
     template <class R, class... A>
     ClassBuilder &method(const char *name, R (C::*fn)(A...),
                          std::vector<Variant> defaults = {}) {
         MethodInfo mi;
         mi.name = name;
         mi.ret = vtype_of<R>();
+        mi.ret_class = vclass_name<R>();
         mi.args = {vtype_of<A>()...};
+        mi.arg_classes = {vclass_name<A>()...};
         mi.defaults = std::move(defaults);
         mi.call = [fn](Object *self, const Variant *args, int argc) -> Variant {
             (void)argc;
@@ -204,7 +265,9 @@ public:
         MethodInfo mi;
         mi.name = name;
         mi.ret = vtype_of<R>();
+        mi.ret_class = vclass_name<R>();
         mi.args = {vtype_of<A>()...};
+        mi.arg_classes = {vclass_name<A>()...};
         mi.defaults = std::move(defaults);
         mi.call = [fn](Object *self, const Variant *args, int argc) -> Variant {
             (void)argc;
@@ -235,6 +298,7 @@ public:
         PropertyInfo pi;
         pi.name = name;
         pi.type = vtype_of<G>();
+        pi.class_name = vclass_name<G>();
         pi.hint = hint;
         pi.get = [getter](const Object *o) {
             return variant_from((static_cast<const C *>(o)->*getter)());
@@ -253,6 +317,7 @@ public:
         PropertyInfo pi;
         pi.name = name;
         pi.type = vtype_of<G>();
+        pi.class_name = vclass_name<G>();
         pi.hint = hint;
         pi.get = [getter](const Object *o) {
             return variant_from((static_cast<const C *>(o)->*getter)());
@@ -268,6 +333,7 @@ public:
         PropertyInfo pi;
         pi.name = name;
         pi.type = vtype_of<T>();
+        pi.class_name = vclass_name<T>();
         pi.hint = hint;
         pi.get = [member](const Object *o) {
             return variant_from(static_cast<const C *>(o)->*member);
@@ -291,6 +357,7 @@ private:
     void add(MethodInfo &&mi) {
         std::string n = mi.name;
         if (!ci_->methods.count(n)) ci_->method_order.push_back(n);
+        last_method_ = n;
         ci_->methods[n] = std::move(mi);
     }
     void add(PropertyInfo &&pi) {
@@ -299,6 +366,7 @@ private:
         ci_->properties[n] = std::move(pi);
     }
     ClassInfo *ci_ = nullptr;
+    std::string last_method_;
 };
 
 }  // namespace mf

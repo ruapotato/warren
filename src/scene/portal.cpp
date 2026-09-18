@@ -198,7 +198,7 @@ static void register_portal_class() {
         .field("edge_colour", &Portal3D::edge_colour)
         .field("edge_width", &Portal3D::edge_width, "range:0,0.5")
         .field("open", &Portal3D::open, "range:0,1")
-        .method("link_to", &Portal3D::link_to)
+        .method("link_to", &Portal3D::link_to).args("other")
         .method("unlink", &Portal3D::unlink)
         .method("get_link", &Portal3D::link)
         .method("is_linked", &Portal3D::linked)
@@ -209,9 +209,9 @@ static void register_portal_class() {
         .method("world_height", &Portal3D::world_height)
         .method("warp_out", &Portal3D::warp_out)
         .method("scale_out", &Portal3D::scale_out)
-        .method("within_aperture", &Portal3D::within_aperture, {Variant(0.0)})
-        .method("closest_point", &Portal3D::closest_point)
-        .method("faces", &Portal3D::faces)
+        .method("within_aperture", &Portal3D::within_aperture, {Variant(0.0)}).args("world_point", "margin")
+        .method("closest_point", &Portal3D::closest_point).args("world_point")
+        .method("faces", &Portal3D::faces).args("point")
         .signal("traversed");
 }
 MF_REGISTER(register_portal_class)

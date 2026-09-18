@@ -130,17 +130,17 @@ static void register_scene_nodes() {
         .prop_ro("current", &Camera3D::current)
         .method("make_current", &Camera3D::make_current)
         .method("get_projection", &Camera3D::projection)
-        .method("set_custom_projection", &Camera3D::set_custom_projection)
+        .method("set_custom_projection", &Camera3D::set_custom_projection).args("projection")
         .method("get_view_matrix", &Camera3D::view_matrix)
-        .method("project_point", &Camera3D::project_point);
+        .method("project_point", &Camera3D::project_point).args("world", "aspect");
 
     ClassBuilder<MeshInstance3D>()
         .prop("mesh", &MeshInstance3D::get_mesh, &MeshInstance3D::set_mesh)
         .field("cast_shadows", &MeshInstance3D::cast_shadows)
         .field("receive_shadows", &MeshInstance3D::receive_shadows)
         .field("tint", &MeshInstance3D::tint)
-        .method("set_material", &MeshInstance3D::set_material)
-        .method("get_material", &MeshInstance3D::get_material)
+        .method("set_material", &MeshInstance3D::set_material).args("slot", "material")
+        .method("get_material", &MeshInstance3D::get_material).args("slot")
         .method("get_material_count", &MeshInstance3D::material_count)
         .method("get_world_bounds", &MeshInstance3D::world_bounds);
 
