@@ -1,4 +1,4 @@
-// Manifold -- driving a tree of Controls.
+// Warren -- driving a tree of Controls.
 //
 // Three passes a frame, in this order and for a reason:
 //
@@ -23,7 +23,7 @@
 #include "scene/control.h"
 #include "ui/draw_list.h"
 
-namespace mf {
+namespace wr {
 
 class SceneTree;
 
@@ -73,4 +73,4 @@ private:
 Control *ui_focused_control();
 void ui_set_focused_control(Control *c);
 
-}  // namespace mf
+}  // namespace wr

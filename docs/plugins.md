@@ -1,4 +1,4 @@
-# Writing a Manifold plugin
+# Writing a Warren plugin
 
 A plugin is a shared library the engine loads at start-up. It can
 register node classes, resource loaders and services exactly as
@@ -13,24 +13,24 @@ Three C entry points, and C++ for everything after them.
 ```cpp
 #include "plugin/plugin.h"
 
-MF_PLUGIN_DECLARE("my-plugin", "1.0.0", "Me", "What it does")
+WR_PLUGIN_DECLARE("my-plugin", "1.0.0", "Me", "What it does")
 
-MF_PLUGIN_EXPORT bool mf_plugin_init(const mf::PluginContext *ctx) {
+WR_PLUGIN_EXPORT bool mf_plugin_init(const wr::PluginContext *ctx) {
     // ctx->engine, ->device, ->tree, ->renderer, ->physics, ->directory
-    mf::ClassDB::register_all();   // pick up this library's MF_REGISTER
+    wr::ClassDB::register_all();   // pick up this library's WR_REGISTER
     return true;
 }
 
-MF_PLUGIN_EXPORT void mf_plugin_shutdown() {}
+WR_PLUGIN_EXPORT void mf_plugin_shutdown() {}
 
 // Optional, called once a frame before the tree is processed:
-// MF_PLUGIN_EXPORT void mf_plugin_frame(float dt) {}
+// WR_PLUGIN_EXPORT void mf_plugin_frame(float dt) {}
 ```
 
 C at the boundary because a C++ symbol's name and a C++ object's
 layout depend on the compiler, its version and its flags, and a plugin
 that cannot say "I was built for engine version X" *before* anything
-is dereferenced will crash instead of complaining. `MANIFOLD_PLUGIN_ABI`
+is dereferenced will crash instead of complaining. `WARREN_PLUGIN_ABI`
 is checked first and a mismatch is refused with a message.
 
 C++ after that, because a plugin that could only speak C would have to
@@ -41,7 +41,7 @@ headers, with a compatible compiler, as the engine it loads into.**
 ## Building one
 
 ```cmake
-manifold_add_plugin(my_plugin src/a.cpp src/b.cpp)
+warren_add_plugin(my_plugin src/a.cpp src/b.cpp)
 ```
 
 Drop the directory in `plugins/` and it is picked up. The result lands
@@ -58,28 +58,28 @@ plugin's classes register into a registry nobody reads.
 ## Registering a node class
 
 ```cpp
-class MyNode : public mf::Node3D {
-    MF_CLASS(MyNode, Node3D)
+class MyNode : public wr::Node3D {
+    WR_CLASS(MyNode, Node3D)
 public:
     float speed = 1.0f;
-    void do_something(const mf::Vec3 &where);
+    void do_something(const wr::Vec3 &where);
 };
 
 static void register_my_classes() {
-    mf::ClassBuilder<MyNode>()
+    wr::ClassBuilder<MyNode>()
         .field("speed", &MyNode::speed, "range:0,10")
         .method("do_something", &MyNode::do_something);
 }
-MF_REGISTER(register_my_classes)
+WR_REGISTER(register_my_classes)
 ```
 
 From then on the class is reachable by name — from C++, from a saved
 scene, and from Python — without the engine having heard of it:
 
 ```cpp
-mf::Object *n = mf::ClassDB::instantiate("MyNode");
-n->set_member("speed", mf::Variant(4.0));
-n->callv("do_something", {mf::Variant(mf::Vec3(1, 2, 3))});
+wr::Object *n = wr::ClassDB::instantiate("MyNode");
+n->set_member("speed", wr::Variant(4.0));
+n->callv("do_something", {wr::Variant(wr::Vec3(1, 2, 3))});
 ```
 
 The terrain demo in `src/main.cpp` builds the whole voxel terrain this
@@ -88,7 +88,7 @@ the honest test that this works.
 
 ## Threads
 
-`mf::Jobs::submit` and `mf::Jobs::parallel_for` are available to
+`wr::Jobs::submit` and `wr::Jobs::parallel_for` are available to
 plugins. The voxel terrain meshes chunks on them. Two rules:
 
 * **The GPU is the main thread's.** Creating buffers and textures is

@@ -1,11 +1,11 @@
-// Manifold -- saying what happened.
+// Warren -- saying what happened.
 #pragma once
 
 #include <cstdarg>
 #include <cstdio>
 #include <string>
 
-namespace mf {
+namespace wr {
 
 enum class LogLevel { Trace = 0, Debug, Info, Warn, Error, Fatal };
 
@@ -35,27 +35,27 @@ void log_remove_sink(LogSink sink);
 // count so a caller can tell whether anything went wrong in a block.
 int error_count();
 
-}  // namespace mf
+}  // namespace wr
 
-#define MF_TRACE(...) ::mf::log_write(::mf::LogLevel::Trace, __FILE__, __LINE__, __VA_ARGS__)
-#define MF_DEBUG(...) ::mf::log_write(::mf::LogLevel::Debug, __FILE__, __LINE__, __VA_ARGS__)
-#define MF_INFO(...)  ::mf::log_write(::mf::LogLevel::Info,  __FILE__, __LINE__, __VA_ARGS__)
-#define MF_WARN(...)  ::mf::log_write(::mf::LogLevel::Warn,  __FILE__, __LINE__, __VA_ARGS__)
-#define MF_ERROR(...) ::mf::log_write(::mf::LogLevel::Error, __FILE__, __LINE__, __VA_ARGS__)
-#define MF_FATAL(...) ::mf::log_write(::mf::LogLevel::Fatal, __FILE__, __LINE__, __VA_ARGS__)
+#define WR_TRACE(...) ::wr::log_write(::wr::LogLevel::Trace, __FILE__, __LINE__, __VA_ARGS__)
+#define WR_DEBUG(...) ::wr::log_write(::wr::LogLevel::Debug, __FILE__, __LINE__, __VA_ARGS__)
+#define WR_INFO(...)  ::wr::log_write(::wr::LogLevel::Info,  __FILE__, __LINE__, __VA_ARGS__)
+#define WR_WARN(...)  ::wr::log_write(::wr::LogLevel::Warn,  __FILE__, __LINE__, __VA_ARGS__)
+#define WR_ERROR(...) ::wr::log_write(::wr::LogLevel::Error, __FILE__, __LINE__, __VA_ARGS__)
+#define WR_FATAL(...) ::wr::log_write(::wr::LogLevel::Fatal, __FILE__, __LINE__, __VA_ARGS__)
 
 // Check a precondition and return if it fails, saying so once.
-#define MF_CHECK(cond, ...)                   \
+#define WR_CHECK(cond, ...)                   \
     do {                                      \
         if (!(cond)) {                        \
-            MF_ERROR(__VA_ARGS__);            \
+            WR_ERROR(__VA_ARGS__);            \
             return;                           \
         }                                     \
     } while (0)
-#define MF_CHECK_V(cond, ret, ...)            \
+#define WR_CHECK_V(cond, ret, ...)            \
     do {                                      \
         if (!(cond)) {                        \
-            MF_ERROR(__VA_ARGS__);            \
+            WR_ERROR(__VA_ARGS__);            \
             return ret;                       \
         }                                     \
     } while (0)

@@ -1,4 +1,4 @@
-// Manifold -- the primitives everything on screen is made of.
+// Warren -- the primitives everything on screen is made of.
 //
 // Split out from the immediate-mode context because the engine has
 // two user interfaces and they are different things on purpose:
@@ -24,7 +24,7 @@
 
 #include "core/math/vector.h"
 
-namespace mf::ui {
+namespace wr::ui {
 
 struct Rect {
     float x = 0, y = 0, w = 0, h = 0;
@@ -124,4 +124,4 @@ private:
     float width_ = 0, height_ = 0;
 };
 
-}  // namespace mf::ui
+}  // namespace wr::ui

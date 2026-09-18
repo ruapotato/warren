@@ -1,4 +1,4 @@
-// Manifold -- the editor's user interface.
+// Warren -- the editor's user interface.
 //
 // IMMEDIATE MODE, because an editor's UI is a view of state that
 // changes underneath it. A retained tree of widgets has to be told
@@ -22,7 +22,7 @@
 #include "core/math/vector.h"
 #include "ui/draw_list.h"
 
-namespace mf::ui {
+namespace wr::ui {
 
 struct Theme {
     uint32_t window = rgba(28, 30, 34, 242);
@@ -168,4 +168,4 @@ private:
     std::vector<std::pair<Id, bool>> tree_open_;
 };
 
-}  // namespace mf::ui
+}  // namespace wr::ui

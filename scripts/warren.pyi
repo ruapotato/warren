@@ -1,6 +1,6 @@
-# Manifold -- generated type stubs. Do not edit.
+# Warren -- generated type stubs. Do not edit.
 #
-# Written from the engine's own class registry by `manifold --stubs`,
+# Written from the engine's own class registry by `warren --stubs`,
 # so this file describes exactly the classes, methods and properties
 # the running engine exposes -- plugins included, if they were loaded
 # when it was generated. Regenerate it when the engine changes.
@@ -108,45 +108,6 @@ class Projection(_Value):
 class Object:
     pass
 
-class AudioClip(Object):
-    def __init__(self) -> None: ...
-    def duration(self) -> float: ...
-    def frames(self) -> int: ...
-
-class Material(Object):
-    albedo: Color
-    metallic: float  # range:0,1
-    roughness: float  # range:0,1
-    emissive: Color
-    emissive_strength: float  # range:0,32
-    normal_scale: float  # range:0,4
-    occlusion_strength: float  # range:0,1
-    uv_scale: Vec2
-    uv_offset: Vec2
-    alpha_cutoff: float  # range:0,1
-    unlit: bool
-    double_sided: bool
-    cast_shadows: bool
-    shader: str
-
-    def __init__(self) -> None: ...
-    def touch(self) -> None: ...
-
-class Mesh(Object):
-    bounds: AABB
-    vertex_count: int
-    triangle_count: int
-    uploaded: bool
-
-    def __init__(self) -> None: ...
-    def clear(self) -> None: ...
-    def compute_normals(self, smooth_angle: float = 1.0472) -> None: ...
-    def compute_tangents(self) -> None: ...
-    def compute_bounds(self) -> None: ...
-    def weld(self, epsilon: float = 1e-05) -> int: ...
-    def flip_winding(self) -> None: ...
-    def transform(self, transform: Transform3D) -> None: ...
-
 class Node(Object):
     scene_path: str
     process: bool
@@ -175,13 +136,6 @@ class Node(Object):
     def print_tree(self, indent: int = 0) -> str: ...
     # signals: tree_entered, tree_exiting
 
-class PackedScene(Object):
-    path: str
-
-    def __init__(self) -> None: ...
-    def instantiate(self) -> Node | None: ...
-    def is_valid(self) -> bool: ...
-
 class PhysicsWorld(Object):
     max_portal_hops: int
 
@@ -198,11 +152,9 @@ class PhysicsWorld(Object):
     def collider_count(self) -> int: ...
     def report(self) -> str: ...
 
-class Texture(Object):
-    width: int
-    height: int
-    path: str
-    valid: bool
+class Resource(Object):
+    resource_path: str
+    resource_name: str
 
 class Theme(Object):
     background: Color
@@ -220,6 +172,11 @@ class Theme(Object):
     font_scale: float  # range:1,6
     border_width: float  # range:0,8
     def __init__(self) -> None: ...
+
+class AudioClip(Resource):
+    def __init__(self) -> None: ...
+    def duration(self) -> float: ...
+    def frames(self) -> int: ...
 
 class AudioPlayer(Node):
     volume: float  # range:0,4
@@ -256,6 +213,40 @@ class Control(Node):
     def is_hovered(self) -> bool: ...
     # signals: mouse_entered, mouse_exited, resized
 
+class Material(Resource):
+    albedo: Color
+    metallic: float  # range:0,1
+    roughness: float  # range:0,1
+    emissive: Color
+    emissive_strength: float  # range:0,32
+    normal_scale: float  # range:0,4
+    occlusion_strength: float  # range:0,1
+    uv_scale: Vec2
+    uv_offset: Vec2
+    alpha_cutoff: float  # range:0,1
+    unlit: bool
+    double_sided: bool
+    cast_shadows: bool
+    shader: str
+
+    def __init__(self) -> None: ...
+    def touch(self) -> None: ...
+
+class Mesh(Resource):
+    bounds: AABB
+    vertex_count: int
+    triangle_count: int
+    uploaded: bool
+
+    def __init__(self) -> None: ...
+    def clear(self) -> None: ...
+    def compute_normals(self, smooth_angle: float = 1.0472) -> None: ...
+    def compute_tangents(self) -> None: ...
+    def compute_bounds(self) -> None: ...
+    def weld(self, epsilon: float = 1e-05) -> int: ...
+    def flip_winding(self) -> None: ...
+    def transform(self, transform: Transform3D) -> None: ...
+
 class NetSync(Node):
     net_id: int
     spawn_class: str
@@ -284,6 +275,19 @@ class Node3D(Node):
     def up(self) -> Vec3: ...
     def right(self) -> Vec3: ...
     def is_visible_in_tree(self) -> bool: ...
+
+class PackedScene(Resource):
+    path: str
+
+    def __init__(self) -> None: ...
+    def instantiate(self) -> Node | None: ...
+    def is_valid(self) -> bool: ...
+
+class Texture(Resource):
+    width: int
+    height: int
+    path: str
+    valid: bool
 
 class AudioListener3D(Node3D):
     def __init__(self) -> None: ...

@@ -5,7 +5,7 @@
 #include "core/log.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 
 // ------------------------------------------------------------------ Node
 
@@ -64,14 +64,14 @@ void Node::set_owner_recursive(Node *o) {
 void Node::add_child(Node *child) {
     if (!child) return;
     if (child == this) {
-        MF_ERROR("%s: a node cannot be its own child", name_.c_str());
+        WR_ERROR("%s: a node cannot be its own child", name_.c_str());
         return;
     }
     if (child->parent_ == this) return;
     // A cycle would make the tree a graph and every traversal infinite.
     for (Node *p = this; p; p = p->parent_)
         if (p == child) {
-            MF_ERROR("%s: adding %s would make a cycle", name_.c_str(),
+            WR_ERROR("%s: adding %s would make a cycle", name_.c_str(),
                      child->name_.c_str());
             return;
         }
@@ -149,7 +149,7 @@ Node *Node::get_node(const std::string &p) const {
     // as an error.
     Node *n = find_path(p);
     if (!n)
-        MF_ERROR("get_node('%s'): nothing there, from %s", p.c_str(),
+        WR_ERROR("get_node('%s'): nothing there, from %s", p.c_str(),
                  path().c_str());
     return n;
 }
@@ -438,6 +438,6 @@ static void register_node_classes() {
         .method("right", &Node3D::right)
         .method("is_visible_in_tree", &Node3D::visible_in_tree);
 }
-MF_REGISTER(register_node_classes)
+WR_REGISTER(register_node_classes)
 
-}  // namespace mf
+}  // namespace wr

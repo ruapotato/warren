@@ -1,4 +1,4 @@
-// Manifold -- scenes as things you can have more than one of.
+// Warren -- scenes as things you can have more than one of.
 //
 // A tree you can save and load is a level format. A tree you can
 // save, load and then INSTANCE FIFTY TIMES INSIDE ANOTHER TREE is
@@ -22,7 +22,7 @@
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

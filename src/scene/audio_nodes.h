@@ -1,4 +1,4 @@
-// Manifold -- sound in the world.
+// Warren -- sound in the world.
 //
 // THE POINT OF THIS FILE IS ONE FUNCTION: how far away a sound is,
 // and which direction it comes from, when the shortest way from it
@@ -18,7 +18,7 @@
 #include "scene/node.h"
 #include "scene/nodes.h"
 
-namespace mf {
+namespace wr {
 
 class PhysicsWorld;
 class Portal3D;
@@ -26,7 +26,7 @@ class Portal3D;
 // Where the listener is. Falls back to the active camera, which is
 // what a first-person game wants and saves it a node.
 class AudioListener3D : public Node3D {
-    MF_CLASS(AudioListener3D, Node3D)
+    WR_CLASS(AudioListener3D, Node3D)
 
 public:
     void make_current();
@@ -38,7 +38,7 @@ public:
 
 // A sound with a position.
 class AudioPlayer3D : public Node3D {
-    MF_CLASS(AudioPlayer3D, Node3D)
+    WR_CLASS(AudioPlayer3D, Node3D)
 
 public:
     Ref<AudioClip> clip;
@@ -98,7 +98,7 @@ private:
 
 // A sound with no position: music, a menu click, a voice-over.
 class AudioPlayer : public Node {
-    MF_CLASS(AudioPlayer, Node)
+    WR_CLASS(AudioPlayer, Node)
 
 public:
     Ref<AudioClip> clip;
@@ -162,4 +162,4 @@ void audio_system_install(AudioSystem *s);
 // same list the renderer builds and has no renderer to ask.
 void collect_portals(Node *root, std::vector<Portal3D *> *out);
 
-}  // namespace mf
+}  // namespace wr

@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace mf {
+namespace wr {
 namespace {
 const Json k_null;
 // Deep enough for any real document, shallow enough that a hostile
@@ -239,4 +239,4 @@ Json Json::parse(const char *text, size_t length, std::string *error) {
     return root;
 }
 
-}  // namespace mf
+}  // namespace wr

@@ -7,7 +7,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 rhi::VertexLayout standard_vertex_layout() {
     using namespace rhi;
@@ -126,7 +126,7 @@ void Mesh::compute_normals(float smooth_angle) {
 // Lengyel's method: accumulate per-triangle tangent and bitangent from
 // the UV derivatives, then Gram-Schmidt against the normal and store
 // the handedness in w.
-void Mesh::compute_tangents() { mf::compute_tangents(vertices, indices); }
+void Mesh::compute_tangents() { wr::compute_tangents(vertices, indices); }
 
 void compute_tangents(std::vector<Vertex> &vertices,
                       const std::vector<uint32_t> &indices) {
@@ -225,7 +225,7 @@ bool Mesh::upload(rhi::Device *dev, const char *name) {
     using namespace rhi;
     if (!dev) return false;
     if (vertices.empty() || indices.empty()) {
-        MF_WARN("mesh '%s' has nothing to upload", name ? name : "?");
+        WR_WARN("mesh '%s' has nothing to upload", name ? name : "?");
         return false;
     }
     release(dev);
@@ -253,7 +253,7 @@ bool Mesh::upload(rhi::Device *dev, const char *name) {
 
     if (!skin.empty()) {
         if (skin.size() != vertices.size()) {
-            MF_ERROR("mesh '%s': %zu skin entries for %zu vertices",
+            WR_ERROR("mesh '%s': %zu skin entries for %zu vertices",
                      name ? name : "?", skin.size(), vertices.size());
         } else {
             BufferDesc sd;
@@ -566,6 +566,6 @@ static void register_mesh_class() {
         .prop_ro("triangle_count", &Mesh::triangle_count)
         .prop_ro("uploaded", &Mesh::uploaded);
 }
-MF_REGISTER(register_mesh_class)
+WR_REGISTER(register_mesh_class)
 
-}  // namespace mf
+}  // namespace wr

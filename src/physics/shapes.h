@@ -1,4 +1,4 @@
-// Manifold -- collision shapes.
+// Warren -- collision shapes.
 //
 // Four primitives and a triangle mesh, which between them cover
 // everything a game actually collides: a capsule is a character, a
@@ -14,7 +14,7 @@
 
 #include "core/math/transform.h"
 
-namespace mf {
+namespace wr {
 
 enum class ShapeType : uint8_t { Sphere, Capsule, Box, Mesh };
 
@@ -139,4 +139,4 @@ void closest_points_on_segments(const Vec3 &p1, const Vec3 &q1, const Vec3 &p2,
 bool ray_triangle(const Vec3 &origin, const Vec3 &dir, const Vec3 &a,
                   const Vec3 &b, const Vec3 &c, float *out_t);
 
-}  // namespace mf
+}  // namespace wr

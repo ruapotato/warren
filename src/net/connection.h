@@ -1,4 +1,4 @@
-// Manifold -- one peer talking to another over datagrams.
+// Warren -- one peer talking to another over datagrams.
 //
 // UDP gives you "sometimes, in any order, possibly twice". A game
 // needs three different things out of that and a stack that offers
@@ -30,7 +30,7 @@
 
 #include "net/socket.h"
 
-namespace mf::net {
+namespace wr::net {
 
 enum class Channel : uint8_t {
     Unreliable = 0,
@@ -204,4 +204,4 @@ inline bool sequence_newer(uint16_t a, uint16_t b) {
     return (a > b && a - b <= 0x8000) || (b > a && b - a > 0x8000);
 }
 
-}  // namespace mf::net
+}  // namespace wr::net

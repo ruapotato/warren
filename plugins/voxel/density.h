@@ -1,4 +1,4 @@
-// Manifold voxel -- what the ground is.
+// Warren voxel -- what the ground is.
 //
 // The terrain is a SIGNED DISTANCE FIELD: a function from a point in
 // space to how far it is from the surface, negative inside the rock
@@ -18,7 +18,7 @@
 
 #include "core/math/transform.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 // What a cell is made of: an index into the terrain's palette, with 0
 // always air. NOT called Material, because the engine already has a
@@ -221,4 +221,4 @@ private:
     std::vector<AABB> bounds_;
 };
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

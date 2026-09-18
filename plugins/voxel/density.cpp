@@ -4,7 +4,7 @@
 
 #include "noise.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 // --------------------------------------------------------- TerrainDensity
 
@@ -256,4 +256,4 @@ float EditedDensity::bound(const AABB &box) const {
     return base_ ? base_->bound(box) : INF;
 }
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

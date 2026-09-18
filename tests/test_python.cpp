@@ -1,4 +1,4 @@
-// Manifold -- the Python bridge.
+// Warren -- the Python bridge.
 //
 // Headless: no window, no device. The binding is built from ClassDB,
 // so it can be exercised with nothing but the class registry -- which
@@ -14,11 +14,11 @@
 #include "scene/scene_tree.h"
 #include "script/stubs.h"
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 #include "script/python.h"
 #endif
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 int g_fail = 0, g_checks = 0;
@@ -32,7 +32,7 @@ void check(bool ok, const char *what) {
 }  // namespace
 
 int main() {
-#if !MANIFOLD_PYTHON
+#if !WARREN_PYTHON
     std::printf("python scripting\n  built without Python\n");
     return 77;
 #else
@@ -56,7 +56,7 @@ int main() {
 
     // --- the value types
     check(Python::run_string(R"PY(
-import manifold as mf
+import warren as mf
 
 a = mf.Vec3(1, 2, 3)
 b = mf.Vec3(0, 1, 0)
@@ -97,7 +97,7 @@ except TypeError:
 
     // --- objects, properties and methods through reflection
     check(Python::run_string(R"PY(
-import manifold as mf
+import warren as mf
 
 root = mf.root()
 assert root is not None, "there is a root"
@@ -140,7 +140,7 @@ assert "VoxelTerrain3D" not in mf.classes() or True, "plugin classes appear when
 
     // --- subclassing, which is what makes it a scripting language
     check(Python::run_string(R"PY(
-import manifold as mf
+import warren as mf
 
 class Ticker(mf.Node3D):
     def _ready(self):
@@ -163,7 +163,7 @@ assert t.ticks == 0, "_ready ran on entering the tree"
     // The tree drives it.
     for (int i = 0; i < 5; i++) tree.process(1.0f / 60.0f);
     check(Python::run_string(R"PY(
-import manifold as mf
+import warren as mf
 t = mf.root().find_child("Ticker")
 assert t is not None, "still there"
 assert t.ticks == 5, f"_process ran five times, not {t.ticks}"
@@ -174,7 +174,7 @@ assert abs(t.total - 5.0 / 60.0) < 1e-4, "with the right delta"
 
     // --- an exception in _process is contained
     check(Python::run_string(R"PY(
-import manifold as mf
+import warren as mf
 
 class Thrower(mf.Node3D):
     def _process(self, dt):
@@ -217,12 +217,12 @@ mf.root().add_child(n)
         // running: a stub that does not parse is a silent failure
         // otherwise, because nothing executes a .pyi.
         const std::filesystem::path tmp =
-            std::filesystem::temp_directory_path() / "manifold_stub_test.pyi";
+            std::filesystem::temp_directory_path() / "warren_stub_test.pyi";
         check(write_python_stubs(tmp.string()), "stubs can be written");
         check(Python::run_string(
                   "import pathlib\n"
                   "src = pathlib.Path(r'''" + tmp.string() + "''').read_text()\n"
-                  "compile(src, 'manifold.pyi', 'exec')\n",
+                  "compile(src, 'warren.pyi', 'exec')\n",
                   "stubs"),
               "the generated stubs parse as Python");
         std::error_code ec;

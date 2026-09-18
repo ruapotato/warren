@@ -1,4 +1,4 @@
-// Manifold -- things that live in files.
+// Warren -- things that live in files.
 //
 // A Resource is an Object that came from somewhere and can be shared:
 // a mesh, a material, a texture, a sound, a scene. The distinction
@@ -24,7 +24,7 @@
 
 #include "core/object.h"
 
-namespace mf {
+namespace wr {
 
 namespace rhi { class Device; }
 
@@ -35,7 +35,7 @@ void resource_set_device(rhi::Device *dev);
 rhi::Device *resource_device();
 
 class Resource : public Object {
-    MF_CLASS(Resource, Object)
+    WR_CLASS(Resource, Object)
 
 public:
     // TAKES ITSELF OUT OF THE CACHE.
@@ -111,4 +111,4 @@ public:
     static bool save(Resource *r, const std::string &path);
 };
 
-}  // namespace mf
+}  // namespace wr

@@ -1,7 +1,7 @@
-// Manifold -- Variant to Python and back.
+// Warren -- Variant to Python and back.
 #pragma once
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -12,7 +12,7 @@
 #include "scene/node.h"
 #include "core/variant.h"
 
-namespace mf {
+namespace wr {
 class Node;
 
 // A Python object standing in for a node's script. Defined here so
@@ -35,9 +35,9 @@ private:
     bool has_ready_ = false, has_process_ = false, has_physics_ = false,
          has_exit_ = false;
 };
-}  // namespace mf
+}  // namespace wr
 
-namespace mf::python {
+namespace wr::python {
 
 // ONE C TYPE, MANY PYTHON TYPES.
 //
@@ -80,6 +80,6 @@ void refresh_object_types(PyObject *module);
 // Drop the wrapper for an object that has been destroyed.
 void forget_object(Object *o);
 
-}  // namespace mf::python
+}  // namespace wr::python
 
-#endif  // MANIFOLD_PYTHON
+#endif  // WARREN_PYTHON

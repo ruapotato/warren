@@ -10,7 +10,7 @@
 #include "render/shaders/generated/shaders.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 using namespace rhi;
@@ -99,7 +99,7 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     settings_ = s;
     samples_ = uint32_t(std::max(1, s.msaa));
     if (samples_ > dev->caps().max_samples) {
-        MF_WARN("renderer: %ux MSAA asked for, %ux available", samples_,
+        WR_WARN("renderer: %ux MSAA asked for, %ux available", samples_,
                 dev->caps().max_samples);
         samples_ = dev->caps().max_samples;
     }
@@ -357,7 +357,7 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     default_material_->prepare(dev, material_layout_);
 
     if (!create_pipelines()) return false;
-    MF_INFO("renderer: %ux MSAA, portals to depth %d", samples_,
+    WR_INFO("renderer: %ux MSAA, portals to depth %d", samples_,
             settings_.max_portal_depth);
     return true;
 }
@@ -467,7 +467,7 @@ bool Renderer::create_pipelines() {
     auto shader = [&](const char *name, ShaderStage stage) -> ShaderH {
         const shaders::Blob *b = shaders::find(name, stage);
         if (!b) {
-            MF_ERROR("renderer: shader '%s' is missing from the build", name);
+            WR_ERROR("renderer: shader '%s' is missing from the build", name);
             return {};
         }
         return device_->create_shader(shaders::desc(*b));
@@ -803,7 +803,7 @@ void Renderer::upload_frame() {
 
 uint32_t Renderer::upload_view(const View &v) {
     if (view_cursor_ >= kViewRing) {
-        MF_WARN("renderer: more than %u views in a frame; the rest are dropped",
+        WR_WARN("renderer: more than %u views in a frame; the rest are dropped",
                 kViewRing);
         return 0;
     }
@@ -1246,8 +1246,8 @@ int Renderer::allocate_punctual_shadows(const Vec3 &eye) {
                 shadow_tiles_.push_back({uint32_t(next + f), xf, proj});
             }
         }
-        if (getenv("MF_TRACE_TILES"))
-            MF_INFO("tile: light %u %s at (%.2f %.2f %.2f) range %.1f -> tiles "
+        if (getenv("WR_TRACE_TILES"))
+            WR_INFO("tile: light %u %s at (%.2f %.2f %.2f) range %.1f -> tiles "
                     "%d..%d", li, spot ? "spot" : "omni", double(pos.x),
                     double(pos.y), double(pos.z), double(L.position_range.w),
                     next, next + need - 1);
@@ -1304,8 +1304,8 @@ void Renderer::punctual_shadow_pass(rhi::CommandList *cmd) {
     // atlas is redrawn, which is the same cost as before -- so this
     // is a saving on static scenes and never a loss on dynamic ones.
     const uint64_t hash = shadow_hash();
-    if (getenv("MF_TRACE_ATLAS") && atlas_valid_ && hash != atlas_hash_)
-        MF_INFO("atlas: rebaking (%zu lights, %zu casters)", lights_.size(),
+    if (getenv("WR_TRACE_ATLAS") && atlas_valid_ && hash != atlas_hash_)
+        WR_INFO("atlas: rebaking (%zu lights, %zu casters)", lights_.size(),
                 renderables_.size());
     if (atlas_valid_ && hash == atlas_hash_) {
         stats_.punctual_shadows_reused = true;
@@ -1314,7 +1314,7 @@ void Renderer::punctual_shadow_pass(rhi::CommandList *cmd) {
     atlas_hash_ = hash;
     atlas_valid_ = true;
 
-    MF_GPU_SCOPE(cmd, "punctual shadows");
+    WR_GPU_SCOPE(cmd, "punctual shadows");
 
     const uint32_t size = device_->texture_desc(shadow_atlas_).width;
     const uint32_t tile = size / std::max(1u, atlas_tiles_per_row_);
@@ -1412,7 +1412,7 @@ bool Renderer::environment_is_stale() const {
 
 void Renderer::bake_environment(rhi::CommandList *cmd) {
     if (!pipe_.skycube.valid() || !env_cube_.valid()) return;
-    MF_GPU_SCOPE(cmd, "environment");
+    WR_GPU_SCOPE(cmd, "environment");
 
     const uint32_t size = device_->texture_desc(env_cube_).width;
 
@@ -1823,7 +1823,7 @@ void Renderer::fit_cascades(const std::vector<View> &views) {
 
 void Renderer::shadow_pass(rhi::CommandList *cmd) {
     if (!pipe_.shadow.valid() || !shadow_map_.valid()) return;
-    MF_GPU_SCOPE(cmd, "shadows");
+    WR_GPU_SCOPE(cmd, "shadows");
 
     for (int c = 0; c < cascade_count_; c++) {
         RenderingInfo ri;
@@ -1923,7 +1923,7 @@ bool Renderer::dump_shadow_map(const std::string &path) const {
         const size_t got = device_->read_texture(
             shadow_map_, depth.data(), depth.size() * sizeof(float), 0, c);
         if (got != depth.size() * sizeof(float)) {
-            MF_ERROR("shadow dump: could not read cascade %u", c);
+            WR_ERROR("shadow dump: could not read cascade %u", c);
             return false;
         }
         for (uint32_t y = 0; y < shadow_size_; y++)
@@ -1934,10 +1934,10 @@ bool Renderer::dump_shadow_map(const std::string &path) const {
     }
     if (!stbi_write_png(path.c_str(), int(shadow_size_ * n), int(shadow_size_), 1,
                         out.data(), int(shadow_size_ * n))) {
-        MF_ERROR("shadow dump: could not write '%s'", path.c_str());
+        WR_ERROR("shadow dump: could not write '%s'", path.c_str());
         return false;
     }
-    MF_INFO("shadow dump: %s (%u cascades at %u)", path.c_str(), n, shadow_size_);
+    WR_INFO("shadow dump: %s (%u cascades at %u)", path.c_str(), n, shadow_size_);
 
     // And the punctual atlas beside it, under the same stem.
     if (shadow_atlas_.valid()) {
@@ -1954,7 +1954,7 @@ bool Renderer::dump_shadow_map(const std::string &path) const {
             ap.insert(dot == std::string::npos ? ap.size() : dot, "_atlas");
             if (stbi_write_png(ap.c_str(), int(as), int(as), 1, ao.data(),
                                int(as)))
-                MF_INFO("shadow dump: %s (atlas %ux%u, %zu tiles used)",
+                WR_INFO("shadow dump: %s (atlas %ux%u, %zu tiles used)",
                         ap.c_str(), as, as, shadow_tiles_.size());
         }
     }
@@ -2018,7 +2018,7 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
 
     // --- the scene, into the HDR target
     {
-        MF_GPU_SCOPE(cmd, "scene");
+        WR_GPU_SCOPE(cmd, "scene");
         RenderingInfo ri;
         ColourAttachment ca;
         ca.texture = colour_hdr_;
@@ -2046,7 +2046,7 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
 
     // --- tonemap to the swapchain
     {
-        MF_GPU_SCOPE(cmd, "tonemap");
+        WR_GPU_SCOPE(cmd, "tonemap");
         TextureH src = samples_ > 1 ? colour_resolve_ : colour_hdr_;
         cmd->texture_barrier(src, TextureUsage::ColourTarget, TextureUsage::Sampled);
         RenderingInfo ri;
@@ -2088,4 +2088,4 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     stats_.cpu_ms = (Clock::now() - t0) * 1000.0;
 }
 
-}  // namespace mf
+}  // namespace wr

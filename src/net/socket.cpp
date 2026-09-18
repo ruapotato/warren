@@ -12,9 +12,9 @@
 #  include <ws2tcpip.h>
 #  pragma comment(lib, "ws2_32.lib")
 using socket_t = SOCKET;
-#  define MF_INVALID_SOCKET INVALID_SOCKET
-#  define MF_CLOSE closesocket
-#  define MF_WOULD_BLOCK (WSAGetLastError() == WSAEWOULDBLOCK)
+#  define WR_INVALID_SOCKET INVALID_SOCKET
+#  define WR_CLOSE closesocket
+#  define WR_WOULD_BLOCK (WSAGetLastError() == WSAEWOULDBLOCK)
 #else
 #  include <arpa/inet.h>
 #  include <errno.h>
@@ -24,12 +24,12 @@ using socket_t = SOCKET;
 #  include <sys/socket.h>
 #  include <unistd.h>
 using socket_t = int;
-#  define MF_INVALID_SOCKET (-1)
-#  define MF_CLOSE ::close
-#  define MF_WOULD_BLOCK (errno == EAGAIN || errno == EWOULDBLOCK)
+#  define WR_INVALID_SOCKET (-1)
+#  define WR_CLOSE ::close
+#  define WR_WOULD_BLOCK (errno == EAGAIN || errno == EWOULDBLOCK)
 #endif
 
-namespace mf::net {
+namespace wr::net {
 namespace {
 
 // Winsock has to be started, once, before any socket call, and the
@@ -40,7 +40,7 @@ struct SocketStartup {
 #if defined(_WIN32)
         WSADATA data;
         if (WSAStartup(MAKEWORD(2, 2), &data) != 0)
-            MF_ERROR("net: WSAStartup failed");
+            WR_ERROR("net: WSAStartup failed");
 #endif
     }
     ~SocketStartup() {
@@ -107,8 +107,8 @@ bool UdpTransport::open(uint16_t port) {
     ensure_started();
     close();
     socket_t s = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (s == MF_INVALID_SOCKET) {
-        MF_ERROR("net: could not create a socket");
+    if (s == WR_INVALID_SOCKET) {
+        WR_ERROR("net: could not create a socket");
         return false;
     }
 
@@ -117,8 +117,8 @@ bool UdpTransport::open(uint16_t port) {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(port);
     if (::bind(s, (sockaddr *)&addr, sizeof(addr)) != 0) {
-        MF_ERROR("net: could not bind port %u", port);
-        MF_CLOSE(s);
+        WR_ERROR("net: could not bind port %u", port);
+        WR_CLOSE(s);
         return false;
     }
 
@@ -143,7 +143,7 @@ bool UdpTransport::open(uint16_t port) {
 
 void UdpTransport::close() {
     if (handle_ == -1) return;
-    MF_CLOSE((socket_t)handle_);
+    WR_CLOSE((socket_t)handle_);
     handle_ = -1;
     local_ = Address{};
 }
@@ -297,4 +297,4 @@ void SimulatedNetwork::reset() {
     sent = delivered = dropped = duplicated = 0;
 }
 
-}  // namespace mf::net
+}  // namespace wr::net

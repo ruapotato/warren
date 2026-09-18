@@ -1,9 +1,9 @@
-// Manifold -- rotations.
+// Warren -- rotations.
 #pragma once
 
 #include "vector.h"
 
-namespace mf {
+namespace wr {
 
 struct Basis;
 
@@ -81,4 +81,4 @@ inline Quat slerp(const Quat &a, Quat b, float t) {
     return (a * wa + b * wb).normalized();
 }
 
-}  // namespace mf
+}  // namespace wr

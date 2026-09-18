@@ -1,4 +1,4 @@
-// Manifold -- image-based lighting, and whether the sky is baked the
+// Warren -- image-based lighting, and whether the sky is baked the
 // right way up.
 //
 // A cubemap has six faces, each with a uv orientation, and the
@@ -36,8 +36,8 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 

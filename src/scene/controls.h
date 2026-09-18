@@ -1,4 +1,4 @@
-// Manifold -- the controls themselves.
+// Warren -- the controls themselves.
 //
 // A container's job is to decide where its children go, which means
 // it OVERRIDES their anchors rather than reading them. That is the
@@ -14,12 +14,12 @@
 #include "render/texture.h"
 #include "scene/control.h"
 
-namespace mf {
+namespace wr {
 
 // --------------------------------------------------------- containers
 
 class Container : public Control {
-    MF_CLASS(Container, Control)
+    WR_CLASS(Container, Control)
 
 public:
     // A container's minimum size is what it needs to hold its
@@ -40,7 +40,7 @@ protected:
 // Children in a row or a column. Expanding children share whatever
 // is left over in proportion to their stretch ratios.
 class BoxContainer : public Container {
-    MF_CLASS(BoxContainer, Container)
+    WR_CLASS(BoxContainer, Container)
 
 public:
     bool vertical = false;
@@ -53,20 +53,20 @@ protected:
 };
 
 class HBoxContainer : public BoxContainer {
-    MF_CLASS(HBoxContainer, BoxContainer)
+    WR_CLASS(HBoxContainer, BoxContainer)
 public:
     HBoxContainer() { vertical = false; }
 };
 
 class VBoxContainer : public BoxContainer {
-    MF_CLASS(VBoxContainer, BoxContainer)
+    WR_CLASS(VBoxContainer, BoxContainer)
 public:
     VBoxContainer() { vertical = true; }
 };
 
 // A fixed number of columns, rows as deep as their tallest cell.
 class GridContainer : public Container {
-    MF_CLASS(GridContainer, Container)
+    WR_CLASS(GridContainer, Container)
 
 public:
     int columns = 2;
@@ -78,7 +78,7 @@ protected:
 };
 
 class MarginContainer : public Container {
-    MF_CLASS(MarginContainer, Container)
+    WR_CLASS(MarginContainer, Container)
 
 public:
     float margin_left = -1, margin_top = -1, margin_right = -1,
@@ -90,7 +90,7 @@ protected:
 };
 
 class CenterContainer : public Container {
-    MF_CLASS(CenterContainer, Container)
+    WR_CLASS(CenterContainer, Container)
 
 protected:
     void arrange(const std::vector<Control *> &children) override;
@@ -98,7 +98,7 @@ protected:
 
 // A margin container that also draws a panel behind itself.
 class PanelContainer : public Container {
-    MF_CLASS(PanelContainer, Container)
+    WR_CLASS(PanelContainer, Container)
 
 public:
     bool use_theme_colour = true;
@@ -113,7 +113,7 @@ protected:
 // ------------------------------------------------------------ widgets
 
 class Panel : public Control {
-    MF_CLASS(Panel, Control)
+    WR_CLASS(Panel, Control)
 
 public:
     bool use_theme_colour = true;
@@ -123,7 +123,7 @@ public:
 };
 
 class ColorRect : public Control {
-    MF_CLASS(ColorRect, Control)
+    WR_CLASS(ColorRect, Control)
 
 public:
     Color colour = Color::white();
@@ -131,7 +131,7 @@ public:
 };
 
 class Label : public Control {
-    MF_CLASS(Label, Control)
+    WR_CLASS(Label, Control)
 
 public:
     std::string text = "Label";
@@ -150,7 +150,7 @@ public:
 };
 
 class Button : public Control {
-    MF_CLASS(Button, Control)
+    WR_CLASS(Button, Control)
 
 public:
     Button();
@@ -170,7 +170,7 @@ private:
 };
 
 class CheckBox : public Button {
-    MF_CLASS(CheckBox, Button)
+    WR_CLASS(CheckBox, Button)
 
 public:
     CheckBox();
@@ -179,7 +179,7 @@ public:
 };
 
 class ProgressBar : public Control {
-    MF_CLASS(ProgressBar, Control)
+    WR_CLASS(ProgressBar, Control)
 
 public:
     float value = 0.5f;
@@ -191,7 +191,7 @@ public:
 };
 
 class Slider : public Control {
-    MF_CLASS(Slider, Control)
+    WR_CLASS(Slider, Control)
 
 public:
     Slider();
@@ -211,7 +211,7 @@ private:
 };
 
 class LineEdit : public Control {
-    MF_CLASS(LineEdit, Control)
+    WR_CLASS(LineEdit, Control)
 
 public:
     LineEdit();
@@ -233,7 +233,7 @@ private:
 };
 
 class TextureRect : public Control {
-    MF_CLASS(TextureRect, Control)
+    WR_CLASS(TextureRect, Control)
 
 public:
     Ref<Texture> texture;
@@ -242,4 +242,4 @@ public:
     Vec2 minimum_size() const override;
 };
 
-}  // namespace mf
+}  // namespace wr

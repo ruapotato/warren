@@ -1,4 +1,4 @@
-// Manifold -- the keyboard, the mouse, and names for what they mean.
+// Warren -- the keyboard, the mouse, and names for what they mean.
 //
 // Actions, not keys, the way Godot does it: gameplay asks for "jump",
 // the binding table says what jump is, and rebinding is a data change.
@@ -11,7 +11,7 @@
 
 #include "core/math/vector.h"
 
-namespace mf {
+namespace wr {
 
 // SDL scancodes, named. Only the ones a game reaches for; the raw
 // scancode is accepted anywhere a Key is.
@@ -80,4 +80,4 @@ public:
     static void _focus_lost();
 };
 
-}  // namespace mf
+}  // namespace wr

@@ -1,13 +1,13 @@
-// Manifold -- the runtime.
+// Warren -- the runtime.
 //
-//   manifold --demo portals          two rooms, a mismatched pair
-//   manifold --backend gl            force a backend
-//   manifold --shot out.png --frames 60
+//   warren --demo portals          two rooms, a mismatched pair
+//   warren --backend gl            force a backend
+//   warren --shot out.png --frames 60
 #include <cstring>
 #include <string>
 
 #include "app/engine.h"
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 #include "script/python.h"
 #endif
 #include "core/log.h"
@@ -20,7 +20,7 @@
 #include "scene/controls.h"
 #include "scene/portal.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 
@@ -93,7 +93,7 @@ public:
         int before = body_->portals_traversed();
         body_->move_and_slide(world_, dt);
         if (body_->portals_traversed() != before)
-            MF_INFO("through a portal: x%.2f, now %.2fx size (%.2fm tall)",
+            WR_INFO("through a portal: x%.2f, now %.2fx size (%.2fm tall)",
                     double(body_->last_portal_scale()), double(body_->get_size()),
                     double(body_->eye_height()));
     }
@@ -294,7 +294,7 @@ void build_portal_demo(Engine &e) {
     large->add_child(b);
     a->link_to(b);
 
-    MF_INFO("portal pair: %.2fm and %.2fm -- walking through scales by %.2fx",
+    WR_INFO("portal pair: %.2fm and %.2fm -- walking through scales by %.2fx",
             double(a->world_width()), double(b->world_width()),
             double(Portal3D::scale_ratio(a, b)));
 
@@ -430,7 +430,7 @@ void build_portal_demo(Engine &e) {
 
         Label *title = new Label();
         title->set_name("Title");
-        title->text = "MANIFOLD";
+        title->text = "WARREN";
         title->size_flags_vertical = Control::SizeShrinkCentre;
         rows->add_child(title);
 
@@ -484,7 +484,7 @@ void build_portal_demo(Engine &e) {
     r->ambient_energy = 0.7f;
     r->fog_colour = Color::hex(0x7C8A9A);
     r->fog_density = 0.008f;
-    MF_INFO("%s", g_world->report().c_str());
+    WR_INFO("%s", g_world->report().c_str());
 }
 
 // TERRAIN, BUILT ENTIRELY THROUGH REFLECTION.
@@ -504,7 +504,7 @@ void build_terrain_demo(Engine &e) {
 
     Object *obj = ClassDB::instantiate("VoxelTerrain3D");
     if (!obj) {
-        MF_ERROR("the voxel plugin is not loaded; run with --plugins DIR");
+        WR_ERROR("the voxel plugin is not loaded; run with --plugins DIR");
         return;
     }
     Node3D *terrain = static_cast<Node3D *>(obj);
@@ -553,7 +553,7 @@ void build_terrain_demo(Engine &e) {
         }
         if (slope < 0.6f && h < 80.0f) break;
     }
-    MF_INFO("terrain: spawning at (%.0f, %.1f, %.0f), flatness %.2f",
+    WR_INFO("terrain: spawning at (%.0f, %.1f, %.0f), flatness %.2f",
             double(spawn.x), double(ground), double(spawn.y), double(best_score));
 
     CharacterBody3D *player = new CharacterBody3D();
@@ -621,7 +621,7 @@ void build_flythrough(Engine &e) {
 
 int main(int argc, char **argv) {
     EngineConfig cfg;
-    cfg.window.title = "Manifold";
+    cfg.window.title = "Warren";
     cfg.window.width = 1600;
     cfg.window.height = 900;
     cfg.window.backend = rhi::Backend::Vulkan;
@@ -710,7 +710,7 @@ int main(int argc, char **argv) {
         } else if (a == "--shadow-dump") {
             shadow_dump = next("shadows.png");
         } else if (a == "--stubs") {
-            stub_path = next("manifold.pyi");
+            stub_path = next("warren.pyi");
         } else if (a == "--no-python") {
             cfg.python = false;
         } else if (a == "--plugins") {
@@ -727,7 +727,7 @@ int main(int argc, char **argv) {
             log_set_level(LogLevel::Debug);
         } else if (a == "--help" || a == "-h") {
             std::printf(
-                "manifold [options]\n"
+                "warren [options]\n"
                 "  --backend vulkan|gl   which renderer (default vulkan)\n"
                 "  --demo portals        which scene\n"
                 "  --shot FILE           save a png and carry on\n"
@@ -743,7 +743,7 @@ int main(int argc, char **argv) {
                 "  --script FILE         run a Python script once the scene exists\n"
                 "  --script-path DIR     add a directory to sys.path\n"
                 "  --no-python           do not start the interpreter\n"
-                "  --stubs FILE          write manifold.pyi and exit\n"
+                "  --stubs FILE          write warren.pyi and exit\n"
                 "  --no-sky              flat clear instead of the sky\n"
                 "  --clear RRGGBB        the clear colour, for spotting holes\n"
                 "  --bench               time 600 frames and print percentiles\n"
@@ -796,7 +796,7 @@ int main(int argc, char **argv) {
         if (demo == "portals") build_portal_demo(e);
         else if (demo == "fly") build_flythrough(e);
         else if (demo == "terrain") build_terrain_demo(e);
-        else MF_ERROR("unknown demo '%s'", demo.c_str());
+        else WR_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;
     engine.on_frame = [&](Engine &e, float dt) {
@@ -811,7 +811,7 @@ int main(int argc, char **argv) {
                               double(b->get_size()), double(b->eye_height()));
                 extra = buf;
             }
-            e.window()->set_title("Manifold -- " + e.status_line() + extra);
+            e.window()->set_title("Warren -- " + e.status_line() + extra);
         }
     };
     engine.record_timings(bench);
@@ -852,29 +852,29 @@ int main(int argc, char **argv) {
     if (!shadow_dump.empty()) engine.renderer()->dump_shadow_map(shadow_dump);
     {
         if (Node *t = engine.tree()->root()->find_by_class("VoxelTerrain3D")) {
-            MF_INFO("%s", t->callv("report", {}).to_string().c_str());
+            WR_INFO("%s", t->callv("report", {}).to_string().c_str());
             if (Node *n = engine.tree()->root()->find_by_class("CharacterBody3D")) {
                 Vec3 p = static_cast<Node3D *>(n)->global_position();
                 Array where{Variant(p)};
-                MF_INFO("field at the player: %.3f (negative is inside rock)",
+                WR_INFO("field at the player: %.3f (negative is inside rock)",
                         t->callv("distance_at", where).to_float());
             }
         }
-        MF_INFO("%s", engine.physics()->report().c_str());
+        WR_INFO("%s", engine.physics()->report().c_str());
         if (Node *n = engine.tree()->root()->find_by_class("CharacterBody3D")) {
             CharacterBody3D *b = static_cast<CharacterBody3D *>(n);
             Vec3 p = b->global_position();
-            MF_INFO("player: (%.2f %.2f %.2f) floor=%d size=%.2f crossings=%d",
+            WR_INFO("player: (%.2f %.2f %.2f) floor=%d size=%.2f crossings=%d",
                     double(p.x), double(p.y), double(p.z), int(b->on_floor()),
                     double(b->get_size()), b->portals_traversed());
         }
         const RenderStats &st = engine.renderer()->stats();
-        MF_INFO("last frame: %u views, %u draws, %u tris, portals: %u seen / %u "
+        WR_INFO("last frame: %u views, %u draws, %u tris, portals: %u seen / %u "
                 "culled, deepest %u, %.2f ms cpu",
                 st.views, st.draw_calls, st.triangles, st.portals_considered,
                 st.portals_culled, st.max_depth_reached, st.cpu_ms);
     }
-    MF_INFO("%s", engine.device() ? engine.device()->resource_report().c_str() : "");
+    WR_INFO("%s", engine.device() ? engine.device()->resource_report().c_str() : "");
     engine.shutdown();
     return rc;
 }

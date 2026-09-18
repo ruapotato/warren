@@ -1,4 +1,4 @@
-// Manifold -- the backend parity probe.
+// Warren -- the backend parity probe.
 //
 // Deliberately exercises the things the two backends are most likely to
 // disagree about: which way +Y points, which way a triangle winds,

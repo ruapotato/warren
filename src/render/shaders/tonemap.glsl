@@ -1,4 +1,4 @@
-// Manifold -- HDR to the screen.
+// Warren -- HDR to the screen.
 //
 // One pass, at the very end, and the only place in the engine where
 // light stops being linear. The swapchain is an sRGB format, so the

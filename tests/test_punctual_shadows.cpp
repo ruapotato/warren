@@ -1,4 +1,4 @@
-// Manifold -- shadows from point and spot lights, and all six faces
+// Warren -- shadows from point and spot lights, and all six faces
 // of the cube pointing the way they should.
 //
 // An omni light's shadow is six frusta rendered into six tiles of an
@@ -32,8 +32,8 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 

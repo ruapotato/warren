@@ -5,7 +5,7 @@
 #include "core/log.h"
 #include "scene/portal.h"
 
-namespace mf {
+namespace wr {
 
 // ------------------------------------------------------------ StaticBody3D
 
@@ -273,6 +273,6 @@ static void register_body_classes() {
         .method("portals_traversed", &CharacterBody3D::portals_traversed)
         .signal("portal_traversed", {VType::Object, VType::Float});
 }
-MF_REGISTER(register_body_classes)
+WR_REGISTER(register_body_classes)
 
-}  // namespace mf
+}  // namespace wr

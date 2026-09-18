@@ -1,4 +1,4 @@
-// Manifold voxel -- noise.
+// Warren voxel -- noise.
 //
 // Self-contained and deterministic: the same seed and the same
 // coordinate give the same value on every machine, every run, and at
@@ -12,7 +12,7 @@
 
 #include "core/math/vector.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 // A good integer hash (Wang / Murmur finaliser). Fast, and its low
 // bits are as good as its high ones, which a shift-and-xor hash's are
@@ -86,4 +86,4 @@ float ridged(const Vec3 &p, uint32_t seed, int octaves, float lacunarity = 2.0f,
 // point. For caves and for rock.
 float worley(const Vec3 &p, uint32_t seed);
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

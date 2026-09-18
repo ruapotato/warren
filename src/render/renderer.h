@@ -1,4 +1,4 @@
-// Manifold -- the frame.
+// Warren -- the frame.
 //
 // PORTALS ARE NOT A POST-PROCESS HERE. They are not a texture rendered
 // from a second camera and pasted onto a quad, which is how an engine
@@ -31,7 +31,7 @@
 #include "scene/nodes.h"
 #include "scene/portal.h"
 
-namespace mf {
+namespace wr {
 
 class SceneTree;
 
@@ -353,4 +353,4 @@ private:
     Camera3D *camera_ = nullptr;
 };
 
-}  // namespace mf
+}  // namespace wr

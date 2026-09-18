@@ -5,7 +5,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 Window::~Window() { close(); }
 
@@ -13,7 +13,7 @@ bool Window::open(const WindowConfig &cfg) {
     if (window_) close();
 
     if (SDL_WasInit(SDL_INIT_VIDEO) == 0 && SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
-        MF_FATAL("SDL video init failed: %s", SDL_GetError());
+        WR_FATAL("SDL video init failed: %s", SDL_GetError());
         return false;
     }
     backend_ = cfg.backend;
@@ -46,7 +46,7 @@ bool Window::open(const WindowConfig &cfg) {
                                SDL_WINDOWPOS_CENTERED, cfg.width, cfg.height,
                                flags);
     if (!window_) {
-        MF_ERROR("could not create a %s window: %s",
+        WR_ERROR("could not create a %s window: %s",
                  rhi::backend_name(backend_), SDL_GetError());
         return false;
     }
@@ -186,4 +186,4 @@ float Clock::tick() {
     return delta_;
 }
 
-}  // namespace mf
+}  // namespace wr

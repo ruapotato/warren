@@ -1,4 +1,4 @@
-// Manifold -- a scene as a thing you can have more than one of.
+// Warren -- a scene as a thing you can have more than one of.
 //
 // THIS IS THE FEATURE THAT MAKES A SCENE TREE A TOOL RATHER THAN A
 // DATA STRUCTURE.
@@ -33,10 +33,10 @@
 #include "resource/resource.h"
 #include "scene/node.h"
 
-namespace mf {
+namespace wr {
 
 class PackedScene : public Resource {
-    MF_CLASS(PackedScene, Resource)
+    WR_CLASS(PackedScene, Resource)
 
 public:
     // The serialised tree. Public because a tool may want to write
@@ -77,4 +77,4 @@ public:
 std::vector<uint8_t> serialise_tree(Node *root);
 Node *deserialise_tree(const uint8_t *data, size_t size);
 
-}  // namespace mf
+}  // namespace wr

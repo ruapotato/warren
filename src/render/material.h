@@ -1,4 +1,4 @@
-// Manifold -- what a surface is made of.
+// Warren -- what a surface is made of.
 #pragma once
 
 #include <string>
@@ -8,7 +8,7 @@
 #include "render/texture.h"
 #include "rhi/rhi.h"
 
-namespace mf {
+namespace wr {
 
 // Which pass a material belongs in. The renderer sorts by this first,
 // because the order the three are drawn in is not negotiable: opaque
@@ -28,7 +28,7 @@ struct MaterialUniforms {
 static_assert(sizeof(MaterialUniforms) == 80, "must match MaterialData");
 
 class Material : public Resource {
-    MF_CLASS(Material, Resource)
+    WR_CLASS(Material, Resource)
 
 public:
     Material() = default;
@@ -96,4 +96,4 @@ private:
     rhi::TextureH bound_[4];
 };
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- engine objects in Python.
+// Warren -- engine objects in Python.
 //
 // Every ClassDB class gets a Python type, built from the registry
 // rather than written by hand, with the same inheritance. A Python
@@ -8,7 +8,7 @@
 // whole of what a scripting language has to do.
 #include "pyvalue.h"
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 
 #include <cstring>
 #include <string>
@@ -17,7 +17,7 @@
 #include "core/log.h"
 #include "scene/node.h"
 
-namespace mf::python {
+namespace wr::python {
 namespace {
 
 struct ObjectWrapper {
@@ -291,9 +291,9 @@ PyMethodDef k_wrapper_methods[] = {
 
 // --------------------------------------------------- the script bridge
 
-}  // namespace mf::python
+}  // namespace wr::python
 
-namespace mf {
+namespace wr {
 
 // A STRONG REFERENCE, AND THE CYCLE IT MAKES IS BROKEN ON PURPOSE.
 //
@@ -356,7 +356,7 @@ void PythonScript::call(const char *method, float dt) {
         // must not take the frame loop with it, and it must not print
         // the same traceback sixty times a second either -- so the
         // offending callback is switched off.
-        MF_ERROR("script '%s': %s raised; it will not be called again",
+        WR_ERROR("script '%s': %s raised; it will not be called again",
                  name_.c_str(), method);
         PyErr_Print();
         if (!std::strcmp(method, "_process")) has_process_ = false;
@@ -367,9 +367,9 @@ void PythonScript::call(const char *method, float dt) {
     Py_DECREF(result);
 }
 
-}  // namespace mf
+}  // namespace wr
 
-namespace mf::python {
+namespace wr::python {
 namespace {
 
 void attach_script_if_needed(Object *obj, PyObject *self) {
@@ -412,7 +412,7 @@ PyTypeObject *class_type(ClassInfo *ci, PyObject *module) {
         {Py_tp_members, (void *)k_wrapper_members},
         {0, nullptr}};
 
-    std::string full = "manifold." + ci->name;
+    std::string full = "warren." + ci->name;
     char *name = strdup(full.c_str());
     PyType_Spec spec{name, sizeof(ObjectWrapper), 0,
                      Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, slots};
@@ -420,7 +420,7 @@ PyTypeObject *class_type(ClassInfo *ci, PyObject *module) {
     PyObject *type = PyType_FromSpecWithBases(&spec, bases);
     Py_XDECREF(bases);
     if (!type) {
-        MF_ERROR("python: could not build a type for %s", ci->name.c_str());
+        WR_ERROR("python: could not build a type for %s", ci->name.c_str());
         PyErr_Print();
         return nullptr;
     }
@@ -432,7 +432,7 @@ PyTypeObject *class_type(ClassInfo *ci, PyObject *module) {
 
 bool register_object_types(PyObject *module) {
     g_module = module;
-    PyType_Spec bound{"manifold.EngineMethod", sizeof(BoundMethod), 0,
+    PyType_Spec bound{"warren.EngineMethod", sizeof(BoundMethod), 0,
                       Py_TPFLAGS_DEFAULT, k_bound_slots};
     PyObject *bt = PyType_FromSpec(&bound);
     if (!bt) return false;
@@ -489,6 +489,6 @@ Object *object_from_python(PyObject *o) {
     return nullptr;
 }
 
-}  // namespace mf::python
+}  // namespace wr::python
 
-#endif  // MANIFOLD_PYTHON
+#endif  // WARREN_PYTHON

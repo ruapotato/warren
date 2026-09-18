@@ -1,4 +1,4 @@
-// Manifold -- geometry.
+// Warren -- geometry.
 #pragma once
 
 #include <string>
@@ -8,7 +8,7 @@
 #include "resource/resource.h"
 #include "rhi/rhi.h"
 
-namespace mf {
+namespace wr {
 
 // THE ONE VERTEX FORMAT.
 //
@@ -61,7 +61,7 @@ void compute_tangents(std::vector<Vertex> &vertices,
 AABB compute_bounds(const std::vector<Vertex> &vertices);
 
 class Mesh : public Resource {
-    MF_CLASS(Mesh, Resource)
+    WR_CLASS(Mesh, Resource)
 
 public:
     Mesh() = default;
@@ -147,4 +147,4 @@ private:
     rhi::Device *owner_ = nullptr;
 };
 
-}  // namespace mf
+}  // namespace wr

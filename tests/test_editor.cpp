@@ -1,4 +1,4 @@
-// Manifold -- the editor's two testable halves.
+// Warren -- the editor's two testable halves.
 //
 // A UI is hard to test and a scene file is not, so this concentrates
 // on the parts where a bug is silent: the inspector deriving controls
@@ -30,7 +30,7 @@
 #include "scene/scene_tree.h"
 #include "ui/ui.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

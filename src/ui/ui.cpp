@@ -6,7 +6,7 @@
 
 #include "ui/font.h"
 
-namespace mf::ui {
+namespace wr::ui {
 namespace {
 
 // FNV-1a over the label. Two widgets with the same label in the same
@@ -507,4 +507,4 @@ void Context::progress(float fraction, const char *overlay) {
     rect_outline(r, theme.border);
 }
 
-}  // namespace mf::ui
+}  // namespace wr::ui

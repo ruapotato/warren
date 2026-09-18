@@ -6,7 +6,7 @@
 
 #include "core/log.h"
 
-namespace mf::net {
+namespace wr::net {
 
 void Connection::open(Transport *transport, const Address &peer,
                       const ConnectionConfig &cfg) {
@@ -79,7 +79,7 @@ void Connection::send_raw(Channel channel, const void *payload, size_t size,
 
     if (channel == Channel::Reliable) {
         if (pending_.size() >= cfg_.max_pending) {
-            MF_WARN("net: %zu reliable messages unacked; dropping the oldest",
+            WR_WARN("net: %zu reliable messages unacked; dropping the oldest",
                     pending_.size());
             pending_.pop_front();
         }
@@ -106,7 +106,7 @@ bool Connection::send(Channel channel, const void *data, size_t size) {
         // also leaves the compiler unable to see that the memcpy
         // below is bounded -- which it says so about.
         if (size + 4 > room) {
-            MF_ERROR("net: a reliable message of %zu bytes exceeds the %zu a "
+            WR_ERROR("net: a reliable message of %zu bytes exceeds the %zu a "
                      "datagram holds; fragmentation is not implemented",
                      size, room - 4);
             return false;
@@ -123,7 +123,7 @@ bool Connection::send(Channel channel, const void *data, size_t size) {
     }
 
     if (size > room) {
-        MF_ERROR("net: a %zu byte message exceeds the %zu a datagram holds",
+        WR_ERROR("net: a %zu byte message exceeds the %zu a datagram holds",
                  size, room);
         return false;
     }
@@ -325,4 +325,4 @@ std::string Connection::report() const {
     return b;
 }
 
-}  // namespace mf::net
+}  // namespace wr::net

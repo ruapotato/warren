@@ -9,7 +9,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 // Per-device, because two devices would otherwise share handles from
@@ -68,7 +68,7 @@ Ref<Texture> Texture::from_memory(rhi::Device *dev, const void *data, size_t siz
     stbi_uc *pixels = stbi_load_from_memory((const stbi_uc *)data, int(size), &w, &h,
                                             &channels, 4);
     if (!pixels) {
-        MF_ERROR("texture '%s': %s", name ? name : "?", stbi_failure_reason());
+        WR_ERROR("texture '%s': %s", name ? name : "?", stbi_failure_reason());
         return {};
     }
     Ref<Texture> t = from_pixels(dev, pixels,
@@ -84,7 +84,7 @@ Ref<Texture> Texture::load(rhi::Device *dev, const std::string &path, bool srgb,
     int w = 0, h = 0, channels = 0;
     stbi_uc *pixels = stbi_load(path.c_str(), &w, &h, &channels, 4);
     if (!pixels) {
-        MF_ERROR("could not load '%s': %s", path.c_str(), stbi_failure_reason());
+        WR_ERROR("could not load '%s': %s", path.c_str(), stbi_failure_reason());
         return {};
     }
     Ref<Texture> t = from_pixels(dev, pixels, uint32_t(w), uint32_t(h),
@@ -230,6 +230,6 @@ static void register_texture_class() {
         .prop_ro("path", &Texture::path)
         .prop_ro("valid", &Texture::valid);
 }
-MF_REGISTER(register_texture_class)
+WR_REGISTER(register_texture_class)
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-manifold_add_plugin(voxel
+warren_add_plugin(voxel
   plugin.cpp
   noise.cpp
   density.cpp

@@ -15,7 +15,7 @@
 #include "resource/resource.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 
 
 namespace {
@@ -151,7 +151,7 @@ Object *read_resource(ByteReader &r) {
             // rule as a missing scene. A level that opens with one
             // crate missing can be repaired; one that will not open
             // cannot.
-            MF_WARN("scene: '%s' could not be loaded", path.c_str());
+            WR_WARN("scene: '%s' could not be loaded", path.c_str());
             return nullptr;
         }
         // The caller wraps this in a Ref, which retains it. The
@@ -455,7 +455,7 @@ Node *read_instance(ByteReader &r,
         // A MISSING SCENE IS NOT A CORRUPT FILE. The rest of the
         // level should still open, with a hole where the door was,
         // because that is repairable and a refusal to load is not.
-        MF_WARN("scene: '%s' is not available; '%s' will be missing",
+        WR_WARN("scene: '%s' is not available; '%s' will be missing",
                 path.c_str(), name.c_str());
     } else {
         n->set_name(name);
@@ -474,7 +474,7 @@ Node *read_instance(ByteReader &r,
             if (target && target->has_property(pname)) target->set(pname, v);
         }
         if (n && !target)
-            MF_WARN("scene: '%s' overrides '%s', which %s no longer has",
+            WR_WARN("scene: '%s' overrides '%s', which %s no longer has",
                     name.c_str(), node_path.c_str(), path.c_str());
     }
 
@@ -506,7 +506,7 @@ Node *read_node(ByteReader &r, const std::vector<Ref<Object>> &resources,
         // difference between a level you can repair and one you have
         // lost.
         if (o) delete o;
-        MF_WARN("scene: no class '%s'; its node '%s' is skipped", cls.c_str(),
+        WR_WARN("scene: no class '%s'; its node '%s' is skipped", cls.c_str(),
                 name.c_str());
     } else {
         n->set_name(name);
@@ -573,18 +573,18 @@ std::vector<uint8_t> serialise_tree(Node *root) {
 Node *deserialise_tree(const uint8_t *data, size_t size) {
     ByteReader r(data, size);
     if (r.u32() != kSceneMagic) {
-        MF_ERROR("scene: not a Manifold scene file");
+        WR_ERROR("scene: not a Warren scene file");
         return nullptr;
     }
     const uint32_t version = r.u32();
     if (version != kSceneVersion) {
-        MF_ERROR("scene: version %u, this build reads %u", version,
+        WR_ERROR("scene: version %u, this build reads %u", version,
                  kSceneVersion);
         return nullptr;
     }
     const uint32_t resource_count = r.u32();
     if (!r.ok() || resource_count > 1u << 20) {
-        MF_ERROR("scene: an implausible resource count");
+        WR_ERROR("scene: an implausible resource count");
         return nullptr;
     }
     std::vector<Ref<Object>> resources;
@@ -592,7 +592,7 @@ Node *deserialise_tree(const uint8_t *data, size_t size) {
     for (uint32_t i = 0; i < resource_count && r.ok(); i++)
         resources.push_back(Ref<Object>(read_resource(r)));
     if (!r.ok()) {
-        MF_ERROR("scene: the resource table is truncated");
+        WR_ERROR("scene: the resource table is truncated");
         return nullptr;
     }
     if (r.u32() == 0) return nullptr;
@@ -600,7 +600,7 @@ Node *deserialise_tree(const uint8_t *data, size_t size) {
     std::vector<PendingLink> links;
     Node *n = read_node(r, resources, &links);
     if (!r.ok()) {
-        MF_ERROR("scene: the file ended in the middle of a node");
+        WR_ERROR("scene: the file ended in the middle of a node");
         if (n) n->queue_free();
         return nullptr;
     }
@@ -608,7 +608,7 @@ Node *deserialise_tree(const uint8_t *data, size_t size) {
         if (!link.from) continue;
         Node *target = link.path == "." ? n : n->find_path(link.path);
         if (!target) {
-            MF_WARN("scene: '%s' points at '%s', which is not in the file",
+            WR_WARN("scene: '%s' points at '%s', which is not in the file",
                     link.from->name().c_str(), link.path.c_str());
             continue;
         }
@@ -652,7 +652,7 @@ Node *PackedScene::instantiate() const {
 Ref<PackedScene> PackedScene::load(const std::string &p) {
     FILE *f = std::fopen(p.c_str(), "rb");
     if (!f) {
-        MF_ERROR("scene: could not open '%s'", p.c_str());
+        WR_ERROR("scene: could not open '%s'", p.c_str());
         return {};
     }
     std::fseek(f, 0, SEEK_END);
@@ -670,13 +670,13 @@ Ref<PackedScene> PackedScene::load(const std::string &p) {
 bool PackedScene::save(const std::string &p) {
     FILE *f = std::fopen(p.c_str(), "wb");
     if (!f) {
-        MF_ERROR("scene: could not write '%s'", p.c_str());
+        WR_ERROR("scene: could not write '%s'", p.c_str());
         return false;
     }
     const size_t n = std::fwrite(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);
     if (n != bytes.size()) {
-        MF_ERROR("scene: short write to '%s'", p.c_str());
+        WR_ERROR("scene: short write to '%s'", p.c_str());
         return false;
     }
     path = p;
@@ -689,6 +689,6 @@ static void register_packed_scene() {
         .method("instantiate", &PackedScene::instantiate)
         .method("is_valid", &PackedScene::valid);
 }
-MF_REGISTER(register_packed_scene)
+WR_REGISTER(register_packed_scene)
 
-}  // namespace mf
+}  // namespace wr

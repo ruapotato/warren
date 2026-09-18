@@ -1,4 +1,4 @@
-// Manifold -- the tree, and the loop that drives it.
+// Warren -- the tree, and the loop that drives it.
 #pragma once
 
 #include <string>
@@ -7,7 +7,7 @@
 
 #include "scene/node.h"
 
-namespace mf {
+namespace wr {
 
 class Camera3D;
 
@@ -69,4 +69,4 @@ private:
     bool ticking_ = false;
 };
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- keeping two machines' worlds the same.
+// Warren -- keeping two machines' worlds the same.
 //
 // REPLICATION IS A LIST OF PROPERTY NAMES, and that is only possible
 // because the engine already knows what its classes have. A node says
@@ -30,7 +30,7 @@
 #include "net/connection.h"
 #include "scene/node.h"
 
-namespace mf {
+namespace wr {
 
 class SceneTree;
 
@@ -39,7 +39,7 @@ class SceneTree;
 // a Python subclass -- can be replicated without changing what it
 // derives from.
 class NetSync : public Node {
-    MF_CLASS(NetSync, Node)
+    WR_CLASS(NetSync, Node)
 
 public:
     // Assigned by the server and quoted in every snapshot. Zero
@@ -119,4 +119,4 @@ private:
     double clock_ = 0.0;
 };
 
-}  // namespace mf
+}  // namespace wr

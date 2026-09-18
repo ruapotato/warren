@@ -1,4 +1,4 @@
-// Manifold -- user interface as part of the scene.
+// Warren -- user interface as part of the scene.
 //
 // A Control is a rectangle in the scene tree. That sentence is the
 // whole design and everything below follows from it: a UI made of
@@ -28,7 +28,7 @@
 #include "scene/node.h"
 #include "ui/draw_list.h"
 
-namespace mf {
+namespace wr {
 
 class Theme;
 
@@ -49,7 +49,7 @@ struct UiEvent {
 };
 
 class Control : public Node {
-    MF_CLASS(Control, Node)
+    WR_CLASS(Control, Node)
 
 public:
     // --- placement ------------------------------------------------------
@@ -167,7 +167,7 @@ private:
 // control with no Theme above it gets the default, so a UI works
 // before anyone has thought about how it looks.
 class Theme : public Object {
-    MF_CLASS(Theme, Object)
+    WR_CLASS(Theme, Object)
 
 public:
     Color background = Color::hex(0x1C1E22);
@@ -190,10 +190,10 @@ public:
 
 // A node that supplies a theme to everything beneath it.
 class ThemeProvider : public Control {
-    MF_CLASS(ThemeProvider, Control)
+    WR_CLASS(ThemeProvider, Control)
 
 public:
     Ref<Theme> theme_resource;
 };
 
-}  // namespace mf
+}  // namespace wr

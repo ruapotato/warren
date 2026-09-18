@@ -1,4 +1,4 @@
-// Manifold -- the sky.
+// Warren -- the sky.
 //
 // A procedural gradient with a sun, drawn as one triangle at the far
 // plane after the opaque pass. Depth-tested but not depth-written, so

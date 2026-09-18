@@ -1,6 +1,6 @@
 #include "ui/font.h"
 
-namespace mf::ui {
+namespace wr::ui {
 namespace {
 
 // Five columns per glyph, bit 0 the top row of seven.
@@ -117,4 +117,4 @@ const uint8_t *glyph_columns(int codepoint) {
     return kFont[codepoint - kFirstGlyph];
 }
 
-}  // namespace mf::ui
+}  // namespace wr::ui

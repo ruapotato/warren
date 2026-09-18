@@ -1,4 +1,4 @@
-// Manifold -- do the two backends agree?
+// Warren -- do the two backends agree?
 //
 // "Vulkan and OpenGL are both first class" is a claim, and this is what
 // makes it checkable. The same scene is built through the same RHI
@@ -22,8 +22,8 @@
 #include "render/shaders/generated/shaders.h"
 #include "rhi/rhi.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 
@@ -149,7 +149,7 @@ Rendered render_with(Backend backend, bool validation) {
     Rendered out;
     WindowConfig wc;
     wc.backend = backend;
-    wc.title = "manifold parity";
+    wc.title = "warren parity";
     wc.width = int(kWidth);
     wc.height = int(kHeight);
     wc.resizable = false;
@@ -244,7 +244,7 @@ Rendered render_with(Backend backend, bool validation) {
     const shaders::Blob *vsb = shaders::find("parity", ShaderStage::Vertex);
     const shaders::Blob *fsb = shaders::find("parity", ShaderStage::Fragment);
     if (!vsb || !fsb) {
-        MF_ERROR("parity shader missing from the build");
+        WR_ERROR("parity shader missing from the build");
         destroy_device(dev);
         return out;
     }
@@ -609,10 +609,10 @@ int main(int argc, char **argv) {
 
     std::printf("backend parity\n");
     Rendered gl, vk;
-#if MANIFOLD_OPENGL
+#if WARREN_OPENGL
     gl = render_with(Backend::OpenGL, validation);
 #endif
-#if MANIFOLD_VULKAN
+#if WARREN_VULKAN
     vk = render_with(Backend::Vulkan, validation);
 #endif
 

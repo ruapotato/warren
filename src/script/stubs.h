@@ -1,4 +1,4 @@
-// Manifold -- type stubs for the Python binding.
+// Warren -- type stubs for the Python binding.
 //
 // The binding is generated from ClassDB at run time, which means an
 // editor has nothing to read: no .py file declares mf.Node3D. This
@@ -11,13 +11,13 @@
 
 #include <string>
 
-namespace mf {
+namespace wr {
 
-// The whole `manifold` module as a PEP 484 stub. Includes any classes
+// The whole `warren` module as a PEP 484 stub. Includes any classes
 // a plugin registered, so generate it after plugins load.
 std::string python_stubs();
 // Writes it, making parent directories. False (and a logged error) if
 // the file could not be written.
 bool write_python_stubs(const std::string &path);
 
-}  // namespace mf
+}  // namespace wr

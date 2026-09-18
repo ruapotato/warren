@@ -1,4 +1,4 @@
-// Manifold -- the depth-only pass a shadow cascade is built from.
+// Warren -- the depth-only pass a shadow cascade is built from.
 //
 // THE LIGHT IS A VIEW. A cascade is uploaded through the same ViewData
 // block a camera uses, with an orthographic projection and the sun's

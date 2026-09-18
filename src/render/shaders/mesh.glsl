@@ -1,4 +1,4 @@
-// Manifold -- the standard surface shader.
+// Warren -- the standard surface shader.
 //
 // Forward, physically based, one directional light with cascaded
 // shadows plus clustered punctual lights. Forward rather than deferred

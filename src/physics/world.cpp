@@ -7,7 +7,7 @@
 #include "render/mesh.h"
 #include "scene/portal.h"
 
-namespace mf {
+namespace wr {
 
 PhysicsWorld::PhysicsWorld() = default;
 PhysicsWorld::~PhysicsWorld() = default;
@@ -26,7 +26,7 @@ void PhysicsWorld::refresh_bounds(Collider &c) {
 ColliderId PhysicsWorld::add_mesh(const Mesh &mesh, const Transform3D &transform,
                                   uint32_t layer, Node3D *owner) {
     if (mesh.vertices.empty() || mesh.indices.empty()) {
-        MF_WARN("physics: a collider was asked for from an empty mesh");
+        WR_WARN("physics: a collider was asked for from an empty mesh");
         return {};
     }
     std::vector<Vec3> positions;
@@ -668,7 +668,7 @@ static void register_physics_classes() {
         .prop("max_portal_hops", &PhysicsWorld::max_portal_hops,
               &PhysicsWorld::set_max_portal_hops);
 }
-MF_REGISTER(register_physics_classes)
+WR_REGISTER(register_physics_classes)
 
 std::string PhysicsWorld::report() const {
     char b[256];
@@ -680,4 +680,4 @@ std::string PhysicsWorld::report() const {
     return b;
 }
 
-}  // namespace mf
+}  // namespace wr

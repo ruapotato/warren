@@ -1,7 +1,7 @@
 #include "basis.h"
 #include "transform.h"
 
-namespace mf {
+namespace wr {
 
 Basis Quat::to_basis() const {
     float xx = x * x, yy = y * y, zz = z * z;
@@ -94,4 +94,4 @@ Basis Basis::looking_at(const Vec3 &dir, const Vec3 &up) {
     return {x, y, z};
 }
 
-}  // namespace mf
+}  // namespace wr

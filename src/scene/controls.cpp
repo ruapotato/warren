@@ -7,7 +7,7 @@
 #include "core/bind.h"
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 // PACKED AS sRGB BYTES, BECAUSE THAT IS WHAT EIGHT BITS ARE FOR.
@@ -642,6 +642,6 @@ static void register_controls() {
     ClassBuilder<TextureRect>()
         .field("modulate", &TextureRect::modulate);
 }
-MF_REGISTER(register_controls)
+WR_REGISTER(register_controls)
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- generational handle storage, shared by both backends.
+// Warren -- generational handle storage, shared by both backends.
 #pragma once
 
 #include <cstdint>
@@ -6,7 +6,7 @@
 
 #include "core/log.h"
 
-namespace mf::rhi {
+namespace wr::rhi {
 
 // A slot map. Handles carry a generation, so a handle to a destroyed
 // resource is rejected instead of quietly addressing whatever was put
@@ -51,7 +51,7 @@ public:
     T *get_checked(H h, const char *what) {
         T *p = get(h);
         if (!p)
-            MF_ERROR("rhi: %s handle %u/%u is not live", what, h.index,
+            WR_ERROR("rhi: %s handle %u/%u is not live", what, h.index,
                      h.generation);
         return p;
     }
@@ -94,4 +94,4 @@ private:
     size_t live_count_ = 0;
 };
 
-}  // namespace mf::rhi
+}  // namespace wr::rhi

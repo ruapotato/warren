@@ -1,4 +1,4 @@
-// Manifold -- going through a portal, and coming out a different size.
+// Warren -- going through a portal, and coming out a different size.
 //
 // The claim this file checks is the one the engine is named for: a
 // pair of apertures of different sizes is not a funnel you cannot fit
@@ -19,7 +19,7 @@
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

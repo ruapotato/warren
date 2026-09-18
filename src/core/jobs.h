@@ -1,4 +1,4 @@
-// Manifold -- work on other threads.
+// Warren -- work on other threads.
 //
 // Small on purpose. A game engine needs three things from a job
 // system -- run this, run these N in parallel, tell me when they are
@@ -12,7 +12,7 @@
 #include <memory>
 #include <string>
 
-namespace mf {
+namespace wr {
 
 // A count of outstanding work. Shared, so a job can keep it alive
 // after whoever submitted it has moved on.
@@ -56,4 +56,4 @@ public:
     static std::string report();
 };
 
-}  // namespace mf
+}  // namespace wr

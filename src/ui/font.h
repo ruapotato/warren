@@ -1,4 +1,4 @@
-// Manifold -- the editor's typeface.
+// Warren -- the editor's typeface.
 //
 // A 5x7 dot matrix, embedded as five columns of seven bits per
 // glyph. An engine that needs a font file before it can print
@@ -14,7 +14,7 @@
 
 #include <cstdint>
 
-namespace mf::ui {
+namespace wr::ui {
 
 constexpr int kGlyphWidth = 5;
 constexpr int kGlyphHeight = 7;
@@ -28,4 +28,4 @@ constexpr int kLastGlyph = 126;     // tilde
 // nothing at all.
 const uint8_t *glyph_columns(int codepoint);
 
-}  // namespace mf::ui
+}  // namespace wr::ui

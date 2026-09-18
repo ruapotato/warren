@@ -8,7 +8,7 @@
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 namespace {
 AudioListener3D *g_listener = nullptr;
 AudioSystem *g_system = nullptr;
@@ -310,6 +310,6 @@ static void register_audio_nodes() {
         .method("stop", &AudioPlayer::stop)
         .method("is_playing", &AudioPlayer::playing);
 }
-MF_REGISTER(register_audio_nodes)
+WR_REGISTER(register_audio_nodes)
 
-}  // namespace mf
+}  // namespace wr

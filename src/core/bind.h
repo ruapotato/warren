@@ -1,4 +1,4 @@
-// Manifold -- turning C++ member functions into callable reflection.
+// Warren -- turning C++ member functions into callable reflection.
 //
 // `ClassBuilder<Camera3D>().method("set_projection", &Camera3D::set_projection)`
 // and the method is callable from Python, listable in an inspector and
@@ -20,7 +20,7 @@
 #include "core/object.h"
 #include "core/variant.h"
 
-namespace mf {
+namespace wr {
 
 template <class>
 inline constexpr bool always_false_v = false;
@@ -402,4 +402,4 @@ private:
     std::string last_property_;
 };
 
-}  // namespace mf
+}  // namespace wr

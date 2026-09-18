@@ -1,4 +1,4 @@
-// Manifold -- the specular half of image-based lighting.
+// Warren -- the specular half of image-based lighting.
 //
 // One mip of the environment cube per roughness: mip 0 is the sharp
 // reflection, the last one is nearly diffuse. A rough surface then

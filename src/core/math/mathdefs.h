@@ -1,4 +1,4 @@
-// Manifold -- shared numeric ground.
+// Warren -- shared numeric ground.
 //
 // CONVENTIONS, STATED ONCE, TRUE EVERYWHERE.
 //
@@ -35,7 +35,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace mf {
+namespace wr {
 
 inline constexpr float PI = 3.14159265358979323846f;
 inline constexpr float TAU = PI * 2.0f;
@@ -77,4 +77,4 @@ inline float lerp_angle(float a, float b, float t) {
     return a + angle_delta(a, b) * t;
 }
 
-}  // namespace mf
+}  // namespace wr

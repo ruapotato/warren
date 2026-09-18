@@ -1,4 +1,4 @@
-// Manifold -- datagrams, and a way to abuse them on purpose.
+// Warren -- datagrams, and a way to abuse them on purpose.
 //
 // THE SIMULATED TRANSPORT IS NOT A TEST FIXTURE, IT IS THE POINT.
 //
@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace mf::net {
+namespace wr::net {
 
 // An IPv4 endpoint. IPv6 is not here yet and the struct is the only
 // thing that would have to change.
@@ -136,4 +136,4 @@ private:
     uint64_t order_ = 0;
 };
 
-}  // namespace mf::net
+}  // namespace wr::net

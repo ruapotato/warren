@@ -1,4 +1,4 @@
-// Manifold -- reading glTF 2.0.
+// Warren -- reading glTF 2.0.
 //
 // The interchange format, so that a character modelled in Blender
 // can be walked around in this engine. .gltf (JSON beside a .bin)
@@ -37,7 +37,7 @@
 #include "resource/resource.h"
 #include "scene/nodes.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 struct Buffer {
@@ -100,14 +100,14 @@ bool load_buffers(Gltf *g) {
         if (uri.empty()) {
             // The GLB chunk, already filled in by the caller.
             if (i < g->buffers.size() && !g->buffers[i].bytes.empty()) continue;
-            MF_ERROR("gltf: buffer %zu has no uri and no binary chunk", i);
+            WR_ERROR("gltf: buffer %zu has no uri and no binary chunk", i);
             return false;
         }
         if (uri.rfind("data:", 0) == 0) {
             const size_t comma = uri.find(',');
             if (comma == std::string::npos) return false;
             if (!decode_base64(uri.substr(comma + 1), &out.bytes)) {
-                MF_ERROR("gltf: buffer %zu has a malformed data uri", i);
+                WR_ERROR("gltf: buffer %zu has a malformed data uri", i);
                 return false;
             }
         } else {
@@ -125,7 +125,7 @@ bool load_buffers(Gltf *g) {
             }
             out.bytes = read_file(g->base / decoded);
             if (out.bytes.empty()) {
-                MF_ERROR("gltf: could not read '%s'", decoded.c_str());
+                WR_ERROR("gltf: could not read '%s'", decoded.c_str());
                 return false;
             }
         }
@@ -193,7 +193,7 @@ bool read_accessor(const Gltf &g, int index, std::vector<float> *out,
     const size_t step = stride ? stride : element;
     const size_t start = view_offset + acc_offset;
     if (start + step * size_t(count - 1) + element > bytes.size()) {
-        MF_ERROR("gltf: accessor %d reads past the end of its buffer", index);
+        WR_ERROR("gltf: accessor %d reads past the end of its buffer", index);
         return false;
     }
 
@@ -358,7 +358,7 @@ BuiltMesh build_mesh(const Gltf &g, int index,
         // garbage; skipping them and saying so does not.
         const int mode = prim["mode"].integer(4);
         if (mode != 4) {
-            MF_WARN("gltf: primitive %zu of mesh %d is mode %d, not triangles;"
+            WR_WARN("gltf: primitive %zu of mesh %d is mode %d, not triangles;"
                     " skipped", p, index, mode);
             continue;
         }
@@ -538,7 +538,7 @@ Ref<Resource> load_gltf(const std::string &path) {
 
     std::vector<uint8_t> bytes = read_file(path);
     if (bytes.empty()) {
-        MF_ERROR("gltf: could not read '%s'", path.c_str());
+        WR_ERROR("gltf: could not read '%s'", path.c_str());
         return {};
     }
 
@@ -549,7 +549,7 @@ Ref<Resource> load_gltf(const std::string &path) {
         std::memcpy(&version, bytes.data() + 4, 4);
         std::memcpy(&total, bytes.data() + 8, 4);
         if (version != 2) {
-            MF_ERROR("gltf: '%s' is glb version %u, not 2", path.c_str(),
+            WR_ERROR("gltf: '%s' is glb version %u, not 2", path.c_str(),
                      version);
             return {};
         }
@@ -560,7 +560,7 @@ Ref<Resource> load_gltf(const std::string &path) {
             std::memcpy(&kind, bytes.data() + at + 4, 4);
             at += 8;
             if (at + length > bytes.size()) {
-                MF_ERROR("gltf: '%s' has a chunk running past the end",
+                WR_ERROR("gltf: '%s' has a chunk running past the end",
                          path.c_str());
                 return {};
             }
@@ -582,14 +582,14 @@ Ref<Resource> load_gltf(const std::string &path) {
     std::string error;
     g.doc = Json::parse(json_text, &error);
     if (g.doc.is_null()) {
-        MF_ERROR("gltf: '%s' is not valid JSON (%s)", path.c_str(),
+        WR_ERROR("gltf: '%s' is not valid JSON (%s)", path.c_str(),
                  error.c_str());
         return {};
     }
     const int version_major =
         std::atoi(g.doc["asset"]["version"].string("0").c_str());
     if (version_major != 2) {
-        MF_ERROR("gltf: '%s' is version '%s'; this reads 2.x", path.c_str(),
+        WR_ERROR("gltf: '%s' is version '%s'; this reads 2.x", path.c_str(),
                  g.doc["asset"]["version"].string("?").c_str());
         return {};
     }
@@ -639,7 +639,7 @@ Ref<Resource> load_gltf(const std::string &path) {
     size_t triangles = 0;
     for (const auto &kv : mesh_cache)
         if (kv.second.mesh) triangles += kv.second.mesh->indices.size() / 3;
-    MF_INFO("gltf: %s -- %zu meshes, %zu materials, %zu triangles",
+    WR_INFO("gltf: %s -- %zu meshes, %zu materials, %zu triangles",
             std::filesystem::path(path).filename().string().c_str(),
             mesh_cache.size(), material_cache.size(), triangles);
     return Ref<Resource>(packed.get());
@@ -653,4 +653,4 @@ struct RegisterGltf {
 RegisterGltf g_register_gltf;
 
 }  // namespace
-}  // namespace mf
+}  // namespace wr

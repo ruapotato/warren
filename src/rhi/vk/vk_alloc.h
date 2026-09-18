@@ -1,4 +1,4 @@
-// Manifold -- Vulkan device memory.
+// Warren -- Vulkan device memory.
 //
 // Vulkan hands out memory in whole allocations and caps how many a
 // process may hold -- 4096 on a lot of drivers, which a scene of any
@@ -17,7 +17,7 @@
 
 #include "rhi/vk/vkfn.h"
 
-namespace mf::vk {
+namespace wr::vk {
 
 struct Allocation {
     VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -89,4 +89,4 @@ private:
     uint64_t dedicated_bytes_ = 0;
 };
 
-}  // namespace mf::vk
+}  // namespace wr::vk

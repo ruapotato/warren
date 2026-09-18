@@ -1,4 +1,4 @@
-// Manifold -- the nodes a scene is actually made of.
+// Warren -- the nodes a scene is actually made of.
 #pragma once
 
 #include <vector>
@@ -7,7 +7,7 @@
 #include "render/mesh.h"
 #include "scene/node.h"
 
-namespace mf {
+namespace wr {
 
 // A CAMERA IS A TRANSFORM AND A PROJECTION MATRIX.
 //
@@ -19,7 +19,7 @@ namespace mf {
 // the side; it is the plain form of what every other setter is a
 // shortcut for.
 class Camera3D : public Node3D {
-    MF_CLASS(Camera3D, Node3D)
+    WR_CLASS(Camera3D, Node3D)
 
 public:
     enum class Mode : uint8_t {
@@ -117,7 +117,7 @@ private:
 
 // Geometry in the world.
 class MeshInstance3D : public Node3D {
-    MF_CLASS(MeshInstance3D, Node3D)
+    WR_CLASS(MeshInstance3D, Node3D)
 
 public:
     MeshInstance3D() = default;
@@ -148,7 +148,7 @@ public:
 // --------------------------------------------------------------- lights
 
 class Light3D : public Node3D {
-    MF_CLASS(Light3D, Node3D)
+    WR_CLASS(Light3D, Node3D)
 
 public:
     Color colour = Color::white();
@@ -162,7 +162,7 @@ public:
 };
 
 class DirectionalLight3D : public Light3D {
-    MF_CLASS(DirectionalLight3D, Light3D)
+    WR_CLASS(DirectionalLight3D, Light3D)
 
 public:
     DirectionalLight3D() { energy = 4.0f; }
@@ -179,7 +179,7 @@ public:
 };
 
 class OmniLight3D : public Light3D {
-    MF_CLASS(OmniLight3D, Light3D)
+    WR_CLASS(OmniLight3D, Light3D)
 
 public:
     float range = 10.0f;
@@ -190,11 +190,11 @@ public:
 };
 
 class SpotLight3D : public OmniLight3D {
-    MF_CLASS(SpotLight3D, OmniLight3D)
+    WR_CLASS(SpotLight3D, OmniLight3D)
 
 public:
     float angle = deg2rad(35.0f);
     float angle_softness = 0.2f;
 };
 
-}  // namespace mf
+}  // namespace wr

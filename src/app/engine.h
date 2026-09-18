@@ -1,4 +1,4 @@
-// Manifold -- the thing that owns the loop.
+// Warren -- the thing that owns the loop.
 #pragma once
 
 #include <functional>
@@ -18,7 +18,7 @@
 #include "ui/ui_renderer.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 
 struct EngineConfig {
     WindowConfig window;
@@ -138,4 +138,4 @@ private:
     std::vector<double> frame_ms_, render_cpu_ms_;
 };
 
-}  // namespace mf
+}  // namespace wr

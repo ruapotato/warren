@@ -9,7 +9,7 @@
 #include "render/texture.h"
 #include "ui/font.h"
 
-namespace mf::ui {
+namespace wr::ui {
 namespace {
 
 // THE ATLAS IS ALMOST ENTIRELY WHITE, and that is the trick that
@@ -32,7 +32,7 @@ bool Renderer::init(rhi::Device *dev, rhi::Format target_format,
     const shaders::Blob *vs_blob = shaders::find("ui", ShaderStage::Vertex);
     const shaders::Blob *fs_blob = shaders::find("ui", ShaderStage::Fragment);
     if (!vs_blob || !fs_blob) {
-        MF_ERROR("ui: the ui shader is missing from the build");
+        WR_ERROR("ui: the ui shader is missing from the build");
         return false;
     }
     ShaderH vs = dev->create_shader(shaders::desc(*vs_blob));
@@ -171,4 +171,4 @@ void Renderer::draw(rhi::CommandList *cmd, const DrawData &data,
     cmd->set_scissor({0, 0, width, height});
 }
 
-}  // namespace mf::ui
+}  // namespace wr::ui

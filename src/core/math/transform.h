@@ -1,9 +1,9 @@
-// Manifold -- affine transforms, and the planes and boxes they move.
+// Warren -- affine transforms, and the planes and boxes they move.
 #pragma once
 
 #include "basis.h"
 
-namespace mf {
+namespace wr {
 
 // Basis plus translation. This is the type a portal warp is, and almost
 // everything the engine does with space is one of these composed with
@@ -225,4 +225,4 @@ struct Rect2 {
     }
 };
 
-}  // namespace mf
+}  // namespace wr

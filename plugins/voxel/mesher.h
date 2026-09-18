@@ -1,4 +1,4 @@
-// Manifold voxel -- turning a field into triangles.
+// Warren voxel -- turning a field into triangles.
 //
 // DUAL CONTOURING, not marching cubes.
 //
@@ -21,7 +21,7 @@
 #include "density.h"
 #include "render/mesh.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 struct MeshRequest {
     const DensitySource *density = nullptr;
@@ -68,4 +68,4 @@ struct Palette {
     static Palette &instance();
 };
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

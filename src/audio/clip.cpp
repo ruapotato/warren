@@ -1,4 +1,4 @@
-// Manifold -- loading and making sounds.
+// Warren -- loading and making sounds.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -8,7 +8,7 @@
 #include "core/bind.h"
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 struct Reader {
@@ -44,17 +44,17 @@ struct Reader {
 Ref<AudioClip> AudioClip::from_wav_memory(const uint8_t *data, size_t size,
                                           const char *name) {
     if (!data || size < 44) {
-        MF_ERROR("wav: '%s' is too short to be a RIFF file", name);
+        WR_ERROR("wav: '%s' is too short to be a RIFF file", name);
         return {};
     }
     Reader r{data, size};
     if (std::memcmp(r.p, "RIFF", 4) != 0) {
-        MF_ERROR("wav: '%s' is not RIFF", name);
+        WR_ERROR("wav: '%s' is not RIFF", name);
         return {};
     }
     r.skip(8);  // "RIFF", size
     if (std::memcmp(r.p, "WAVE", 4) != 0) {
-        MF_ERROR("wav: '%s' is RIFF but not WAVE", name);
+        WR_ERROR("wav: '%s' is RIFF but not WAVE", name);
         return {};
     }
     r.skip(4);
@@ -90,12 +90,12 @@ Ref<AudioClip> AudioClip::from_wav_memory(const uint8_t *data, size_t size,
     }
 
     if (!pcm || !channels || !rate) {
-        MF_ERROR("wav: '%s' has no usable fmt/data chunk", name);
+        WR_ERROR("wav: '%s' has no usable fmt/data chunk", name);
         return {};
     }
     // 1 = integer PCM, 3 = IEEE float.
     if (format != 1 && format != 3) {
-        MF_ERROR("wav: '%s' is compressed (format %u), which is not supported",
+        WR_ERROR("wav: '%s' is compressed (format %u), which is not supported",
                  name, format);
         return {};
     }
@@ -136,7 +136,7 @@ Ref<AudioClip> AudioClip::from_wav_memory(const uint8_t *data, size_t size,
                 }
                 break;
             default:
-                MF_ERROR("wav: '%s' is %u-bit, which is not supported", name,
+                WR_ERROR("wav: '%s' is %u-bit, which is not supported", name,
                          bits);
                 return {};
         }
@@ -147,7 +147,7 @@ Ref<AudioClip> AudioClip::from_wav_memory(const uint8_t *data, size_t size,
 Ref<AudioClip> AudioClip::load_wav(const std::string &path) {
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f) {
-        MF_ERROR("wav: could not open '%s'", path.c_str());
+        WR_ERROR("wav: could not open '%s'", path.c_str());
         return {};
     }
     std::fseek(f, 0, SEEK_END);
@@ -200,6 +200,6 @@ static void register_audio_clip() {
         .method("duration", &AudioClip::duration)
         .method("frames", &AudioClip::frames);
 }
-MF_REGISTER(register_audio_clip)
+WR_REGISTER(register_audio_clip)
 
-}  // namespace mf
+}  // namespace wr

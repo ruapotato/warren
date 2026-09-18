@@ -1,4 +1,4 @@
-// Manifold -- loading plugins.
+// Warren -- loading plugins.
 #pragma once
 
 #include <string>
@@ -6,7 +6,7 @@
 
 #include "plugin/plugin.h"
 
-namespace mf {
+namespace wr {
 
 struct LoadedPlugin {
     std::string path;
@@ -55,4 +55,4 @@ private:
     std::vector<LoadedPlugin> plugins_;
 };
 
-}  // namespace mf
+}  // namespace wr

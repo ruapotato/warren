@@ -1,4 +1,4 @@
-// Manifold -- the plugin contract.
+// Warren -- the plugin contract.
 //
 // A plugin is a shared library that the engine loads at start-up and
 // that can register node classes, resource loaders, render passes and
@@ -24,16 +24,16 @@
 #include <cstdint>
 
 #if defined(_WIN32)
-#define MF_PLUGIN_EXPORT extern "C" __declspec(dllexport)
+#define WR_PLUGIN_EXPORT extern "C" __declspec(dllexport)
 #else
-#define MF_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
+#define WR_PLUGIN_EXPORT extern "C" __attribute__((visibility("default")))
 #endif
 
 // Bumped whenever anything a plugin can see changes shape. A plugin
 // built against a different number is refused.
-#define MANIFOLD_PLUGIN_ABI 1
+#define WARREN_PLUGIN_ABI 1
 
-namespace mf {
+namespace wr {
 
 class Engine;
 class SceneTree;
@@ -46,7 +46,7 @@ class Device;
 // What a plugin is told about itself. Static; read before anything
 // else is called, so it must not depend on initialisation.
 struct PluginInfo {
-    uint32_t abi = MANIFOLD_PLUGIN_ABI;
+    uint32_t abi = WARREN_PLUGIN_ABI;
     const char *name = "unnamed";
     const char *version = "0.0.0";
     const char *author = "";
@@ -57,7 +57,7 @@ struct PluginInfo {
 
 // What a plugin is given. Everything a built-in subsystem has.
 struct PluginContext {
-    uint32_t abi = MANIFOLD_PLUGIN_ABI;
+    uint32_t abi = WARREN_PLUGIN_ABI;
     Engine *engine = nullptr;
     rhi::Device *device = nullptr;
     SceneTree *tree = nullptr;
@@ -67,23 +67,23 @@ struct PluginContext {
     const char *directory = nullptr;
 };
 
-}  // namespace mf
+}  // namespace wr
 
 // --- what a plugin must export -----------------------------------------
 //
-//   const mf::PluginInfo *mf_plugin_info(void);
-//   bool mf_plugin_init(const mf::PluginContext *ctx);
+//   const wr::PluginInfo *mf_plugin_info(void);
+//   bool mf_plugin_init(const wr::PluginContext *ctx);
 //   void mf_plugin_shutdown(void);
 //
 // and may export:
 //
 //   void mf_plugin_frame(float dt);      // once per frame, before the tree
 //
-// MF_PLUGIN_DECLARE writes the first two for the common case.
+// WR_PLUGIN_DECLARE writes the first two for the common case.
 
-#define MF_PLUGIN_DECLARE(NAME, VERSION, AUTHOR, DESCRIPTION)              \
-    static const ::mf::PluginInfo k_mf_plugin_info = {                     \
-        MANIFOLD_PLUGIN_ABI, NAME, VERSION, AUTHOR, DESCRIPTION, nullptr}; \
-    MF_PLUGIN_EXPORT const ::mf::PluginInfo *mf_plugin_info(void) {        \
+#define WR_PLUGIN_DECLARE(NAME, VERSION, AUTHOR, DESCRIPTION)              \
+    static const ::wr::PluginInfo k_mf_plugin_info = {                     \
+        WARREN_PLUGIN_ABI, NAME, VERSION, AUTHOR, DESCRIPTION, nullptr}; \
+    WR_PLUGIN_EXPORT const ::wr::PluginInfo *mf_plugin_info(void) {        \
         return &k_mf_plugin_info;                                          \
     }

@@ -1,4 +1,4 @@
-// Manifold -- the sky, baked into a cubemap face.
+// Warren -- the sky, baked into a cubemap face.
 //
 // The same sky_radiance the backdrop uses, evaluated for the
 // direction each texel of one cube face looks in. Six of these and

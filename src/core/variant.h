@@ -1,4 +1,4 @@
-// Manifold -- one value, any type.
+// Warren -- one value, any type.
 //
 // The bridge between C++ and Python, and the currency of the reflection
 // system. Deliberately not clever: a tag, a 48-byte buffer big enough
@@ -15,7 +15,7 @@
 
 #include "math/projection.h"
 
-namespace mf {
+namespace wr {
 
 class Object;
 class Variant;
@@ -72,18 +72,18 @@ public:
     Variant(double v) : t_(VType::Float) { as<double>() = v; }
     Variant(const char *v) : t_(VType::String), str_(v ? v : "") {}
     Variant(std::string v) : t_(VType::String), str_(std::move(v)) {}
-    Variant(const mf::Vec2 &v) : t_(VType::Vec2) { as<mf::Vec2>() = v; }
-    Variant(const mf::Vec3 &v) : t_(VType::Vec3) { as<mf::Vec3>() = v; }
-    Variant(const mf::Vec4 &v) : t_(VType::Vec4) { as<mf::Vec4>() = v; }
-    Variant(const mf::Color &v) : t_(VType::Color) { as<mf::Color>() = v; }
-    Variant(const mf::Quat &v) : t_(VType::Quat) { as<mf::Quat>() = v; }
-    Variant(const mf::Basis &v) : t_(VType::Basis) { as<mf::Basis>() = v; }
-    Variant(const mf::Transform3D &v) : t_(VType::Transform) { as<mf::Transform3D>() = v; }
-    Variant(const mf::Plane &v) : t_(VType::Plane) { as<mf::Plane>() = v; }
-    Variant(const mf::AABB &v) : t_(VType::AABB) { as<mf::AABB>() = v; }
-    Variant(const mf::Rect2 &v) : t_(VType::Rect2) { as<mf::Rect2>() = v; }
-    Variant(const mf::Projection &v) : t_(VType::Projection) { as<mf::Projection>() = v; }
-    Variant(mf::Object *o);
+    Variant(const wr::Vec2 &v) : t_(VType::Vec2) { as<wr::Vec2>() = v; }
+    Variant(const wr::Vec3 &v) : t_(VType::Vec3) { as<wr::Vec3>() = v; }
+    Variant(const wr::Vec4 &v) : t_(VType::Vec4) { as<wr::Vec4>() = v; }
+    Variant(const wr::Color &v) : t_(VType::Color) { as<wr::Color>() = v; }
+    Variant(const wr::Quat &v) : t_(VType::Quat) { as<wr::Quat>() = v; }
+    Variant(const wr::Basis &v) : t_(VType::Basis) { as<wr::Basis>() = v; }
+    Variant(const wr::Transform3D &v) : t_(VType::Transform) { as<wr::Transform3D>() = v; }
+    Variant(const wr::Plane &v) : t_(VType::Plane) { as<wr::Plane>() = v; }
+    Variant(const wr::AABB &v) : t_(VType::AABB) { as<wr::AABB>() = v; }
+    Variant(const wr::Rect2 &v) : t_(VType::Rect2) { as<wr::Rect2>() = v; }
+    Variant(const wr::Projection &v) : t_(VType::Projection) { as<wr::Projection>() = v; }
+    Variant(wr::Object *o);
     Variant(const Array &a) : t_(VType::Array), heap_(std::make_shared<Array>(a)) {}
     Variant(Array &&a) : t_(VType::Array), heap_(std::make_shared<Array>(std::move(a))) {}
     Variant(const Dict &d) : t_(VType::Dict), heap_(std::make_shared<Dict>(d)) {}
@@ -106,18 +106,18 @@ public:
     int64_t to_int() const;
     double to_float() const;
     std::string to_string() const;  // always works; this is the printer
-    mf::Vec2 to_vec2() const;
-    mf::Vec3 to_vec3() const;
-    mf::Vec4 to_vec4() const;
-    mf::Color to_color() const;
-    mf::Quat to_quat() const;
-    mf::Basis to_basis() const;
-    mf::Transform3D to_transform() const;
-    mf::Plane to_plane() const;
-    mf::AABB to_aabb() const;
-    mf::Rect2 to_rect2() const;
-    mf::Projection to_projection() const;
-    mf::Object *to_object() const;
+    wr::Vec2 to_vec2() const;
+    wr::Vec3 to_vec3() const;
+    wr::Vec4 to_vec4() const;
+    wr::Color to_color() const;
+    wr::Quat to_quat() const;
+    wr::Basis to_basis() const;
+    wr::Transform3D to_transform() const;
+    wr::Plane to_plane() const;
+    wr::AABB to_aabb() const;
+    wr::Rect2 to_rect2() const;
+    wr::Projection to_projection() const;
+    wr::Object *to_object() const;
 
     // Containers, by reference, creating on demand so that a caller can
     // build one up without a dance.
@@ -150,4 +150,4 @@ private:
     std::shared_ptr<void> heap_;
 };
 
-}  // namespace mf
+}  // namespace wr

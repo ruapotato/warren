@@ -1,9 +1,12 @@
-# Manifold
+# Warren
 
 A game engine for spaces that are locally Euclidean and globally
 whatever you wire them to be.
 
-**Portals are not a feature bolted onto Manifold. They are the reason
+*A warren is a network of connected tunnels, which is what a portal
+graph is and what the voxel terrain digs.*
+
+**Portals are not a feature bolted onto Warren. They are the reason
 it exists**, and the engine is built from the bottom up so that they
 can be done the right way — which turns out to require decisions in the
 projection maths, the clip space, the depth format and the render
@@ -37,7 +40,7 @@ hide it, the resolution ladders and clip biases that manage the
 compromise — is downstream of not being allowed to touch sixteen
 floats.
 
-So in Manifold, `Camera3D` holds a `Projection`. `perspective()` and
+So in Warren, `Camera3D` holds a `Projection`. `perspective()` and
 `orthographic()` are constructors for one, not the definition of a
 camera. And `Projection::with_oblique_near(plane)` is a public method
 that any code may call.
@@ -58,7 +61,7 @@ reverse-Z) and stencil-bearing (for portals); an adapter without it is
 rejected at start-up rather than rendered to incorrectly.
 
 **The oblique near plane, re-derived.** Lengyel's published form
-assumes OpenGL's `[-1, 1]` depth. Manifold derives it again from the
+assumes OpenGL's `[-1, 1]` depth. Warren derives it again from the
 clip condition itself, which is shorter and more general: it works for
 off-axis frusta, for an already-oblique projection (a portal seen
 through a portal) and for orthographic ones (a shadow cascade clipped
@@ -171,11 +174,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 ```sh
-build/bin/manifold --demo portals              # Vulkan by default
-build/bin/manifold --demo portals --backend gl
-build/bin/manifold --demo terrain              # the voxel plugin
-build/bin/manifold --demo terrain --bench      # time it and print percentiles
-build/bin/manifold --help
+build/bin/warren --demo portals              # Vulkan by default
+build/bin/warren --demo portals --backend gl
+build/bin/warren --demo terrain              # the voxel plugin
+build/bin/warren --demo terrain --bench      # time it and print percentiles
+build/bin/warren --help
 ```
 
 `--bench` runs 600 frames unthrottled and reports percentiles rather
@@ -194,7 +197,7 @@ space/ctrl go up and down, shift hurries.
 
 ## Scripting
 
-Python 3 is embedded, and the `manifold` module is built at start-up by
+Python 3 is embedded, and the `warren` module is built at start-up by
 walking the class registry — so every class, method and property the
 engine has is scriptable the moment it is declared, plugins included.
 Engine classes can be subclassed, and `_ready`, `_process`,
@@ -202,7 +205,7 @@ Engine classes can be subclassed, and `_ready`, `_process`,
 
 ```python
 import math
-import manifold as mf
+import warren as mf
 
 class Spinner(mf.Node3D):
     def _ready(self):
@@ -214,8 +217,8 @@ class Spinner(mf.Node3D):
 ```
 
 ```sh
-build/bin/manifold --demo portals --script scripts/spinner.py
-build/bin/manifold --stubs scripts/manifold.pyi   # type stubs, then exit
+build/bin/warren --demo portals --script scripts/spinner.py
+build/bin/warren --stubs scripts/warren.pyi   # type stubs, then exit
 ```
 
 `--stubs` writes a PEP 484 stub file from the same registry, with real
@@ -272,9 +275,9 @@ appears where you are looking rather than in a terminal behind the
 window.
 
 ```sh
-build/bin/manifold --demo portals --editor
-build/bin/manifold --demo portals --save-scene level.mfs
-build/bin/manifold --load-scene level.mfs
+build/bin/warren --demo portals --editor
+build/bin/warren --demo portals --save-scene level.mfs
+build/bin/warren --load-scene level.mfs
 ```
 
 A scene file stores the tree, every property whose value differs

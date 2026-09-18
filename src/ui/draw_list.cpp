@@ -4,7 +4,7 @@
 
 #include "ui/font.h"
 
-namespace mf::ui {
+namespace wr::ui {
 
 void DrawList::begin(float width, float height) {
     data.clear();
@@ -185,4 +185,4 @@ void DrawList::text_in(const Rect &r, const std::string &s, uint32_t colour,
     }
 }
 
-}  // namespace mf::ui
+}  // namespace wr::ui

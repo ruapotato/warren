@@ -1,6 +1,6 @@
 #include "python.h"
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 
 #include <cstring>
 #include <filesystem>
@@ -11,7 +11,7 @@
 #include "pyvalue.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 Engine *g_engine = nullptr;
@@ -40,19 +40,19 @@ SceneTree *current_tree() {
 PyObject *py_log(PyObject *, PyObject *args) {
     const char *s = nullptr;
     if (!PyArg_ParseTuple(args, "s", &s)) return nullptr;
-    MF_INFO("%s", s);
+    WR_INFO("%s", s);
     Py_RETURN_NONE;
 }
 PyObject *py_warn(PyObject *, PyObject *args) {
     const char *s = nullptr;
     if (!PyArg_ParseTuple(args, "s", &s)) return nullptr;
-    MF_WARN("%s", s);
+    WR_WARN("%s", s);
     Py_RETURN_NONE;
 }
 PyObject *py_error(PyObject *, PyObject *args) {
     const char *s = nullptr;
     if (!PyArg_ParseTuple(args, "s", &s)) return nullptr;
-    MF_ERROR("%s", s);
+    WR_ERROR("%s", s);
     Py_RETURN_NONE;
 }
 
@@ -180,8 +180,8 @@ PyMethodDef k_module_methods[] = {
     {nullptr, nullptr, 0, nullptr}};
 
 PyModuleDef k_module = {PyModuleDef_HEAD_INIT,
-                        "manifold",
-                        "The Manifold engine.",
+                        "warren",
+                        "The Warren engine.",
                         -1,
                         k_module_methods,
                         nullptr,
@@ -237,7 +237,7 @@ PyObject *init_module() {
     // exception", which names neither the module's fault nor the
     // line. Anything non-fatal above is cleared here.
     if (PyErr_Occurred()) {
-        MF_WARN("python: the manifold module set an error while initialising");
+        WR_WARN("python: the warren module set an error while initialising");
         PyErr_Print();
         PyErr_Clear();
     }
@@ -246,7 +246,7 @@ PyObject *init_module() {
 
 void print_error(const char *what) {
     if (!PyErr_Occurred()) return;
-    MF_ERROR("python: %s", what);
+    WR_ERROR("python: %s", what);
     PyErr_Print();
 }
 
@@ -260,8 +260,8 @@ bool Python::init(Engine *engine, const std::vector<std::string> &search_paths) 
 
     // BEFORE Py_Initialize, or the module cannot be imported from a
     // script that runs during start-up.
-    if (PyImport_AppendInittab("manifold", init_module) == -1) {
-        MF_ERROR("python: could not register the manifold module");
+    if (PyImport_AppendInittab("warren", init_module) == -1) {
+        WR_ERROR("python: could not register the warren module");
         return false;
     }
 
@@ -278,19 +278,19 @@ bool Python::init(Engine *engine, const std::vector<std::string> &search_paths) 
     PyStatus status = Py_InitializeFromConfig(&config);
     PyConfig_Clear(&config);
     if (PyStatus_Exception(status)) {
-        MF_ERROR("python: %s", status.err_msg ? status.err_msg : "failed to start");
+        WR_ERROR("python: %s", status.err_msg ? status.err_msg : "failed to start");
         return false;
     }
 
-    g_module = PyImport_ImportModule("manifold");
+    g_module = PyImport_ImportModule("warren");
     if (!g_module) {
-        print_error("the manifold module would not import");
+        print_error("the warren module would not import");
         return false;
     }
     g_running = true;
 
     for (const std::string &p : search_paths) add_search_path(p);
-    MF_INFO("python: %s, %zu classes exposed", version().c_str(),
+    WR_INFO("python: %s, %zu classes exposed", version().c_str(),
             ClassDB::all().size());
     return true;
 }
@@ -347,12 +347,12 @@ bool Python::run_file(const std::string &path) {
     if (!g_running) return false;
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) {
-        MF_ERROR("python: no such file '%s'", path.c_str());
+        WR_ERROR("python: no such file '%s'", path.c_str());
         return false;
     }
     FILE *f = std::fopen(path.c_str(), "rb");
     if (!f) {
-        MF_ERROR("python: could not open '%s'", path.c_str());
+        WR_ERROR("python: could not open '%s'", path.c_str());
         return false;
     }
     std::string source;
@@ -386,7 +386,7 @@ bool Python::attach_script(Node *node, const std::string &module_or_path) {
         cls = PyObject_GetAttrString(mod, "Script");
     }
     if (!cls) {
-        MF_ERROR("python: '%s' defines neither a class '%s' nor 'Script'",
+        WR_ERROR("python: '%s' defines neither a class '%s' nor 'Script'",
                  module.c_str(), module.c_str());
         Py_DECREF(mod);
         return false;
@@ -481,6 +481,6 @@ std::string Python::report() {
            std::to_string(ClassDB::all().size()) + " classes exposed";
 }
 
-}  // namespace mf
+}  // namespace wr
 
-#endif  // MANIFOLD_PYTHON
+#endif  // WARREN_PYTHON

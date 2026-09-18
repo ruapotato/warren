@@ -5,7 +5,7 @@
 
 #include "core/log.h"
 
-namespace mf::vk {
+namespace wr::vk {
 
 bool Allocator::init(VkPhysicalDevice physical, VkDevice device,
                      VkDeviceSize block_size) {
@@ -19,7 +19,7 @@ bool Allocator::init(VkPhysicalDevice physical, VkDevice device,
 void Allocator::shutdown() {
     for (Block &b : blocks_) {
         if (b.live)
-            MF_WARN("vk: memory block of type %u freed with %u live allocations",
+            WR_WARN("vk: memory block of type %u freed with %u live allocations",
                     b.type_index, b.live);
         if (b.mapped) vkUnmapMemory(device_, b.memory);
         if (b.memory) vkFreeMemory(device_, b.memory, nullptr);
@@ -64,7 +64,7 @@ int Allocator::new_block(uint32_t type_index, VkDeviceSize size) {
         b.size = size;
         ai.allocationSize = size;
         if (vkAllocateMemory(device_, &ai, nullptr, &b.memory) != VK_SUCCESS) {
-            MF_ERROR("vk: out of memory allocating %llu bytes of type %u",
+            WR_ERROR("vk: out of memory allocating %llu bytes of type %u",
                      (unsigned long long)size, type_index);
             return -1;
         }
@@ -103,7 +103,7 @@ Allocation Allocator::allocate(const VkMemoryRequirements &req, MemoryUsage usag
         // A machine with no device-local type at all: use anything.
         type = find_memory_type(req.memoryTypeBits, 0, 0);
     if (type < 0) {
-        MF_ERROR("vk: no memory type satisfies bits 0x%x", req.memoryTypeBits);
+        WR_ERROR("vk: no memory type satisfies bits 0x%x", req.memoryTypeBits);
         return {};
     }
 
@@ -115,7 +115,7 @@ Allocation Allocator::allocate(const VkMemoryRequirements &req, MemoryUsage usag
         ai.memoryTypeIndex = uint32_t(type);
         Allocation a;
         if (vkAllocateMemory(device_, &ai, nullptr, &a.memory) != VK_SUCCESS) {
-            MF_ERROR("vk: dedicated allocation of %llu bytes failed",
+            WR_ERROR("vk: dedicated allocation of %llu bytes failed",
                      (unsigned long long)req.size);
             return {};
         }
@@ -229,4 +229,4 @@ std::string Allocator::report() const {
     return b;
 }
 
-}  // namespace mf::vk
+}  // namespace wr::vk

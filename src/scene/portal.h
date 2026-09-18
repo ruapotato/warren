@@ -1,4 +1,4 @@
-// Manifold -- a hole in space.
+// Warren -- a hole in space.
 //
 // A Portal3D is a rectangular aperture of arbitrary size linked to
 // another one. Looking into it you see what the other one sees; walking
@@ -24,10 +24,10 @@
 
 #include "scene/nodes.h"
 
-namespace mf {
+namespace wr {
 
 class Portal3D : public Node3D {
-    MF_CLASS(Portal3D, Node3D)
+    WR_CLASS(Portal3D, Node3D)
 
 public:
     Portal3D();
@@ -114,4 +114,4 @@ private:
     Portal3D *link_ = nullptr;
 };
 
-}  // namespace mf
+}  // namespace wr

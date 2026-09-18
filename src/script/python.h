@@ -1,4 +1,4 @@
-// Manifold -- Python.
+// Warren -- Python.
 //
 // The engine's reflection is the binding. Every class registered with
 // ClassDB appears in Python automatically, with its properties as
@@ -7,7 +7,7 @@
 // twice, and the bindings cannot lag the engine because there are no
 // bindings -- there is a bridge.
 //
-//     import manifold as mf
+//     import warren as mf
 //
 //     class Spinner(mf.Node3D):
 //         def _ready(self):
@@ -29,14 +29,14 @@
 #include "core/object.h"
 #include "scene/node.h"
 
-namespace mf {
+namespace wr {
 
 class Engine;
 class SceneTree;
 
 class Python {
 public:
-    // Brings up the interpreter and builds the `manifold` module from
+    // Brings up the interpreter and builds the `warren` module from
     // whatever ClassDB currently holds. Safe to call once.
     // `engine` may be null: the bridge needs a scene tree, not an
     // engine, and one can be supplied on its own with set_tree().
@@ -68,4 +68,4 @@ public:
     static std::string report();
 };
 
-}  // namespace mf
+}  // namespace wr

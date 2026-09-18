@@ -1,4 +1,4 @@
-// Manifold -- the diffuse half of image-based lighting.
+// Warren -- the diffuse half of image-based lighting.
 //
 // Integrating incoming light over the hemisphere around a normal,
 // weighted by the cosine, gives what a Lambertian surface facing that

@@ -4,7 +4,7 @@
 
 #include "log.h"
 
-namespace mf {
+namespace wr {
 
 // ------------------------------------------------------------- ClassInfo
 
@@ -74,11 +74,11 @@ ClassInfo *ClassDB::create(const std::string &name, ClassInfo *base) {
 Object *ClassDB::instantiate(const std::string &name) {
     ClassInfo *ci = get(name);
     if (!ci) {
-        MF_ERROR("ClassDB: no class named '%s'", name.c_str());
+        WR_ERROR("ClassDB: no class named '%s'", name.c_str());
         return nullptr;
     }
     if (!ci->construct) {
-        MF_ERROR("ClassDB: '%s' is abstract and cannot be instantiated",
+        WR_ERROR("ClassDB: '%s' is abstract and cannot be instantiated",
                  name.c_str());
         return nullptr;
     }
@@ -107,7 +107,7 @@ void ClassDB::register_all() {
     g_registered = true;
     for (auto fn : registrars())
         if (fn) fn();
-    MF_INFO("ClassDB: %zu classes registered", registry().size());
+    WR_INFO("ClassDB: %zu classes registered", registry().size());
 }
 
 // ---------------------------------------------------------------- Object
@@ -200,7 +200,7 @@ Variant Object::call(const std::string &method, const Variant *args, int argc,
     const MethodInfo *mi = get_class_info()->find_method(method);
     if (!mi) {
         if (err) *err = CallError::NoMethod;
-        MF_ERROR("%s has no method '%s'", get_class_name(), method.c_str());
+        WR_ERROR("%s has no method '%s'", get_class_name(), method.c_str());
         return Variant();
     }
     std::vector<Variant> storage;
@@ -208,7 +208,7 @@ Variant Object::call(const std::string &method, const Variant *args, int argc,
     CallError e = CallError::Ok;
     if (!detail::marshal_args(*mi, args, argc, storage, &final_args, &e)) {
         if (err) *err = e;
-        MF_ERROR("%s.%s: %s (given %d, wants %d..%zu)", get_class_name(),
+        WR_ERROR("%s.%s: %s (given %d, wants %d..%zu)", get_class_name(),
                  method.c_str(), call_error_name(e), argc, mi->required(),
                  mi->args.size());
         return Variant();
@@ -223,7 +223,7 @@ bool Object::has_method(const std::string &method) const {
 bool Object::set(const std::string &prop, const Variant &value) {
     const PropertyInfo *pi = get_class_info()->find_property(prop);
     if (!pi || !pi->set) {
-        MF_ERROR("%s has no writable property '%s'", get_class_name(),
+        WR_ERROR("%s has no writable property '%s'", get_class_name(),
                  prop.c_str());
         return false;
     }
@@ -234,7 +234,7 @@ bool Object::set(const std::string &prop, const Variant &value) {
 Variant Object::get(const std::string &prop) const {
     const PropertyInfo *pi = get_class_info()->find_property(prop);
     if (!pi || !pi->get) {
-        MF_ERROR("%s has no readable property '%s'", get_class_name(),
+        WR_ERROR("%s has no readable property '%s'", get_class_name(),
                  prop.c_str());
         return Variant();
     }
@@ -257,7 +257,7 @@ std::vector<std::string> Object::property_list() const {
 
 uint64_t Object::connect(const std::string &signal, Object *target, Callback cb) {
     if (!get_class_info()->find_signal(signal))
-        MF_WARN("%s: connecting to undeclared signal '%s'", get_class_name(),
+        WR_WARN("%s: connecting to undeclared signal '%s'", get_class_name(),
                 signal.c_str());
     Connection c;
     c.token = g_next_token++;
@@ -291,10 +291,10 @@ Object *variant_object_checked(const Variant &v, const char *want_class) {
     Object *o = v.to_object();
     if (!o) return nullptr;
     if (want_class && *want_class && !o->is_class(want_class)) {
-        MF_ERROR("expected a %s, got a %s", want_class, o->get_class_name());
+        WR_ERROR("expected a %s, got a %s", want_class, o->get_class_name());
         return nullptr;
     }
     return o;
 }
 
-}  // namespace mf
+}  // namespace wr

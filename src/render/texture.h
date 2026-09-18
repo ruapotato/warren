@@ -1,4 +1,4 @@
-// Manifold -- images on the GPU.
+// Warren -- images on the GPU.
 #pragma once
 
 #include <string>
@@ -8,10 +8,10 @@
 #include "resource/resource.h"
 #include "rhi/rhi.h"
 
-namespace mf {
+namespace wr {
 
 class Texture : public Resource {
-    MF_CLASS(Texture, Resource)
+    WR_CLASS(Texture, Resource)
 
 public:
     Texture() = default;
@@ -81,4 +81,4 @@ struct SamplerCache {
     static void release(rhi::Device *dev);
 };
 
-}  // namespace mf
+}  // namespace wr

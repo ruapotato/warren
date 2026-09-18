@@ -17,11 +17,11 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 #include "script/python.h"
 #endif
 
-namespace mf {
+namespace wr {
 namespace {
 Editor *g_editor = nullptr;
 
@@ -42,7 +42,7 @@ void Editor::init(Engine *engine) {
     engine_ = engine;
     g_editor = this;
     log_add_sink(&editor_log_sink);
-    log_line("Manifold editor. F1 toggles, ` focuses the console.");
+    log_line("Warren editor. F1 toggles, ` focuses the console.");
 }
 
 void Editor::shutdown() {
@@ -292,7 +292,7 @@ void Editor::panel_console(ui::Context &ui) {
         ui.text_coloured(colour, "%s", line.c_str());
     }
     ui.separator();
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
     if (ui.input_text(">>>##cmd", &command_) && !command_.empty()) {
         log_line(">>> " + command_);
         // An expression prints its value; a statement does not.
@@ -370,7 +370,7 @@ bool Editor::save_scene(const std::string &path) {
     Ref<PackedScene> packed(new PackedScene());
     if (!packed->pack(scene)) return false;
     if (!packed->save(path)) return false;
-    MF_INFO("scene: saved %s (%zu bytes)", path.c_str(), packed->bytes.size());
+    WR_INFO("scene: saved %s (%zu bytes)", path.c_str(), packed->bytes.size());
     return true;
 }
 
@@ -383,7 +383,7 @@ bool Editor::load_scene(const std::string &path) {
     Ref<Resource> r = ResourceLoader::load(path);
     PackedScene *packed = r ? r->cast_to<PackedScene>() : nullptr;
     if (!packed || !packed->valid()) {
-        MF_ERROR("scene: '%s' did not load as a scene", path.c_str());
+        WR_ERROR("scene: '%s' did not load as a scene", path.c_str());
         return false;
     }
     Node *scene = packed->instantiate();
@@ -424,12 +424,12 @@ bool Editor::load_scene(const std::string &path) {
         cam->look_at(centre);
         scene->add_child(cam);
         cam->make_current();
-        MF_INFO("scene: no camera in the file; framing %.2f m of content",
+        WR_INFO("scene: no camera in the file; framing %.2f m of content",
                 double(radius * 2.0f));
     }
 
-    MF_INFO("scene: loaded %s", path.c_str());
+    WR_INFO("scene: loaded %s", path.c_str());
     return true;
 }
 
-}  // namespace mf
+}  // namespace wr

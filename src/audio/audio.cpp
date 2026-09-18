@@ -10,7 +10,7 @@
 #include "core/bind.h"
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 void sdl_callback(void *userdata, Uint8 *stream, int len) {
@@ -53,14 +53,14 @@ bool AudioServer::init(const Config &cfg) {
 
     if (!cfg.open_device) {
         running_ = true;
-        MF_INFO("audio: %d Hz, %d voices, no device (offline)", cfg_.rate,
+        WR_INFO("audio: %d Hz, %d voices, no device (offline)", cfg_.rate,
                 cfg_.max_voices);
         return true;
     }
 
     if (SDL_WasInit(SDL_INIT_AUDIO) == 0 &&
         SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-        MF_WARN("audio: no audio subsystem (%s); running silent", SDL_GetError());
+        WR_WARN("audio: no audio subsystem (%s); running silent", SDL_GetError());
         running_ = true;
         return true;
     }
@@ -79,7 +79,7 @@ bool AudioServer::init(const Config &cfg) {
         // dedicated server: all of them should run the game, and a
         // game that refuses to start because it cannot make a noise
         // is a worse outcome than a quiet one.
-        MF_WARN("audio: no device (%s); running silent", SDL_GetError());
+        WR_WARN("audio: no device (%s); running silent", SDL_GetError());
         running_ = true;
         return true;
     }
@@ -87,7 +87,7 @@ bool AudioServer::init(const Config &cfg) {
     cfg_.buffer_frames = have.samples;
     SDL_PauseAudioDevice(device_, 0);
     running_ = true;
-    MF_INFO("audio: %d Hz, %d frames a buffer, %d voices, device '%s'",
+    WR_INFO("audio: %d Hz, %d frames a buffer, %d voices, device '%s'",
             cfg_.rate, cfg_.buffer_frames, cfg_.max_voices,
             SDL_GetAudioDeviceName(0, 0) ? SDL_GetAudioDeviceName(0, 0) : "?");
     return true;
@@ -250,4 +250,4 @@ std::string AudioServer::report() const {
     return b;
 }
 
-}  // namespace mf
+}  // namespace wr

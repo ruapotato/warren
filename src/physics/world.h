@@ -1,4 +1,4 @@
-// Manifold -- collision.
+// Warren -- collision.
 //
 // PORTAL-AWARE FROM THE BOTTOM UP. A ray that meets an aperture does
 // not stop: it is warped and carries on out of the other end, and the
@@ -18,7 +18,7 @@
 #include "core/object.h"
 #include "physics/shapes.h"
 
-namespace mf {
+namespace wr {
 
 class Node3D;
 class Portal3D;
@@ -88,7 +88,7 @@ struct Collider {
 // An Object, so a script can raycast, trace through portals and add
 // colliders without a C++ shim for each.
 class PhysicsWorld : public Object {
-    MF_CLASS(PhysicsWorld, Object)
+    WR_CLASS(PhysicsWorld, Object)
 
 public:
     PhysicsWorld();
@@ -246,4 +246,4 @@ private:
     int max_hops_ = 4;
 };
 
-}  // namespace mf
+}  // namespace wr

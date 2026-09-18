@@ -1,12 +1,12 @@
-// Manifold -- the reflectance model, in one place.
+// Warren -- the reflectance model, in one place.
 //
 // Used by the surface shader to light a pixel and by the environment
 // prefilter to blur a cubemap into the same lobe. Two copies of a GGX
 // distribution drift, and when they do a rough surface's reflection
 // no longer matches its highlight -- which reads as "the IBL is
 // wrong" rather than as the duplicated function it is.
-#ifndef MF_BRDF_GLSL
-#define MF_BRDF_GLSL
+#ifndef WR_BRDF_GLSL
+#define WR_BRDF_GLSL
 
 #include "common.glsl"
 
@@ -78,4 +78,4 @@ vec2 env_brdf(float n_dot_v, float rough) {
     return vec2(-1.04, 1.04) * a004 + r.zw;
 }
 
-#endif  // MF_BRDF_GLSL
+#endif  // WR_BRDF_GLSL

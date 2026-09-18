@@ -1,6 +1,6 @@
 #include "projection.h"
 
-namespace mf {
+namespace wr {
 
 // ----------------------------------------------------------- constructors
 
@@ -349,4 +349,4 @@ Projection to_projection(const Transform3D &t) {
     return p;
 }
 
-}  // namespace mf
+}  // namespace wr

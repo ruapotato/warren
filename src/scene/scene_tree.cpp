@@ -5,7 +5,7 @@
 #include "core/log.h"
 #include "scene/nodes.h"
 
-namespace mf {
+namespace wr {
 
 SceneTree::SceneTree() {
     root_ = Ref<Node>(new Node());
@@ -112,4 +112,4 @@ Camera3D *SceneTree::active_camera() {
     return camera_;
 }
 
-}  // namespace mf
+}  // namespace wr

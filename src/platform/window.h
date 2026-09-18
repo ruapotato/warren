@@ -1,4 +1,4 @@
-// Manifold -- the window and the GL context.
+// Warren -- the window and the GL context.
 #pragma once
 
 #include <string>
@@ -9,7 +9,7 @@
 
 struct SDL_Window;
 
-namespace mf {
+namespace wr {
 
 struct WindowConfig {
     // Which backend the window is being opened for. SDL needs to know
@@ -17,7 +17,7 @@ struct WindowConfig {
     // created for OpenGL -- so this is the one piece of backend
     // knowledge the platform layer carries.
     rhi::Backend backend = rhi::Backend::Vulkan;
-    std::string title = "Manifold";
+    std::string title = "Warren";
     int width = 1600;
     int height = 900;
     bool fullscreen = false;
@@ -103,4 +103,4 @@ private:
     uint64_t frame_ = 0;
 };
 
-}  // namespace mf
+}  // namespace wr

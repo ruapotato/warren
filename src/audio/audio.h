@@ -1,4 +1,4 @@
-// Manifold -- sound.
+// Warren -- sound.
 //
 // PORTALS CARRY SOUND. That is the only reason this file is
 // interesting. A mixer with distance attenuation and stereo panning
@@ -32,13 +32,13 @@
 #include "resource/resource.h"
 #include "core/object.h"
 
-namespace mf {
+namespace wr {
 
 // A decoded sound. Interleaved float samples, which is what the mixer
 // wants and what a WAV decodes to anyway; a minute of stereo at 48k
 // is 23 MB, so anything longer should be streamed and is not yet.
 class AudioClip : public Resource {
-    MF_CLASS(AudioClip, Resource)
+    WR_CLASS(AudioClip, Resource)
 
 public:
     std::vector<float> samples;
@@ -151,4 +151,4 @@ private:
     std::atomic<uint64_t> mixed_frames_{0};
 };
 
-}  // namespace mf
+}  // namespace wr

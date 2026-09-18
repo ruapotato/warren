@@ -1,4 +1,4 @@
-// Manifold -- clustered punctual lights, and the froxel grid a portal
+// Warren -- clustered punctual lights, and the froxel grid a portal
 // view needs of its own.
 //
 // Three questions, in increasing order of how particular they are to
@@ -36,8 +36,8 @@
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 

@@ -1,4 +1,4 @@
-// Manifold -- the mixer, and sound through a portal.
+// Warren -- the mixer, and sound through a portal.
 //
 // Headless: the server is opened with no device and the test pumps
 // the mixer itself, so what is checked is the samples rather than
@@ -22,7 +22,7 @@
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

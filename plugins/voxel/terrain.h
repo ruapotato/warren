@@ -1,4 +1,4 @@
-// Manifold voxel -- the terrain node.
+// Warren voxel -- the terrain node.
 //
 // Streams chunks of a signed distance field around a viewer, meshes
 // them on worker threads, gives them colliders, and lets them be dug.
@@ -16,7 +16,7 @@
 #include "scene/bodies.h"
 #include "scene/nodes.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 // A CHUNK IS A POSITION AND A LEVEL.
 //
@@ -47,7 +47,7 @@ struct ChunkCoordHash {
 };
 
 class VoxelTerrain3D : public Node3D {
-    MF_CLASS(VoxelTerrain3D, Node3D)
+    WR_CLASS(VoxelTerrain3D, Node3D)
 
 public:
     VoxelTerrain3D();
@@ -210,4 +210,4 @@ private:
     bool dirty_ = true;
 };
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

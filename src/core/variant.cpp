@@ -4,7 +4,7 @@
 
 #include "object.h"
 
-namespace mf {
+namespace wr {
 
 const char *vtype_name(VType t) {
     switch (t) {
@@ -31,14 +31,14 @@ const char *vtype_name(VType t) {
     }
 }
 
-Variant::Variant(mf::Object *o) : t_(VType::Object) {
-    as<mf::Object *>() = o;
+Variant::Variant(wr::Object *o) : t_(VType::Object) {
+    as<wr::Object *>() = o;
     if (o) o->ref_retain();
 }
 
 void Variant::clear() {
     if (t_ == VType::Object) {
-        mf::Object *o = as<mf::Object *>();
+        wr::Object *o = as<wr::Object *>();
         if (o) o->ref_release();
     }
     t_ = VType::Nil;
@@ -52,7 +52,7 @@ void Variant::copy_from(const Variant &o) {
     str_ = o.str_;
     heap_ = o.heap_;
     if (t_ == VType::Object) {
-        mf::Object *p = as<mf::Object *>();
+        wr::Object *p = as<wr::Object *>();
         if (p) p->ref_retain();
     }
 }
@@ -77,7 +77,7 @@ bool Variant::to_bool() const {
         case VType::Float: return as<double>() != 0.0;
         case VType::String: return !str_.empty() && str_ != "false" && str_ != "0";
         case VType::Nil: return false;
-        case VType::Object: return as<mf::Object *>() != nullptr;
+        case VType::Object: return as<wr::Object *>() != nullptr;
         case VType::Array: {
             const Array *a = array_ptr();
             return a && !a->empty();
@@ -211,13 +211,13 @@ Rect2 Variant::to_rect2() const { return t_ == VType::Rect2 ? as<Rect2>() : Rect
 Projection Variant::to_projection() const {
     switch (t_) {
         case VType::Projection: return as<Projection>();
-        case VType::Transform: return mf::to_projection(as<Transform3D>());
+        case VType::Transform: return wr::to_projection(as<Transform3D>());
         default: return Projection::identity();
     }
 }
 
-mf::Object *Variant::to_object() const {
-    return t_ == VType::Object ? as<mf::Object *>() : nullptr;
+wr::Object *Variant::to_object() const {
+    return t_ == VType::Object ? as<wr::Object *>() : nullptr;
 }
 
 Array &Variant::array() {
@@ -330,7 +330,7 @@ std::string Variant::to_string() const {
             return s + "]";
         }
         case VType::Object: {
-            mf::Object *o = as<mf::Object *>();
+            wr::Object *o = as<wr::Object *>();
             return o ? o->to_string() : "<null Object>";
         }
         case VType::Array: {
@@ -374,7 +374,7 @@ bool Variant::operator==(const Variant &o) const {
         case VType::Vec2: return as<Vec2>() == o.as<Vec2>();
         case VType::Vec3: return as<Vec3>() == o.as<Vec3>();
         case VType::Vec4: return as<Vec4>() == o.as<Vec4>();
-        case VType::Object: return as<mf::Object *>() == o.as<mf::Object *>();
+        case VType::Object: return as<wr::Object *>() == o.as<wr::Object *>();
         case VType::Projection: return as<Projection>() == o.as<Projection>();
         case VType::Array: {
             const Array *a = array_ptr();
@@ -391,7 +391,7 @@ bool Variant::operator==(const Variant &o) const {
     }
 }
 
-}  // namespace mf
+}  // namespace wr
 
 // BLENDING TWO VALUES OF WHATEVER TYPE THEY TURN OUT TO BE.
 //
@@ -405,7 +405,7 @@ bool Variant::operator==(const Variant &o) const {
 // -- a string, an object, an array -- holds the old value until the
 // end and then takes the new one, which is at least never a value
 // that was true at neither end.
-namespace mf {
+namespace wr {
 
 Variant Variant::lerp(const Variant &a, const Variant &b, float t) {
     if (t <= 0.0f) return a;
@@ -445,4 +445,4 @@ Variant Variant::lerp(const Variant &a, const Variant &b, float t) {
     }
 }
 
-}  // namespace mf
+}  // namespace wr

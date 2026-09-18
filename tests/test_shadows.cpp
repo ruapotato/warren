@@ -1,4 +1,4 @@
-// Manifold -- do the cascades actually shadow anything, and do both
+// Warren -- do the cascades actually shadow anything, and do both
 // backends agree about where?
 //
 // A shadow map is a render target sampled with a comparison sampler,
@@ -37,8 +37,8 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 
@@ -205,7 +205,7 @@ float luma(const Shot &s, uint32_t x, uint32_t y) {
 }
 
 // A failure in a rendering test is much easier to act on when it can
-// be looked at. MF_SHADOW_DUMP=prefix writes the frames it compared.
+// be looked at. WR_SHADOW_DUMP=prefix writes the frames it compared.
 void write_ppm(const char *path, const Shot &s) {
     FILE *f = std::fopen(path, "wb");
     if (!f) return;
@@ -216,7 +216,7 @@ void write_ppm(const char *path, const Shot &s) {
 }
 
 void maybe_dump(const char *name, const Shot &s) {
-    const char *prefix = getenv("MF_SHADOW_DUMP");
+    const char *prefix = getenv("WR_SHADOW_DUMP");
     if (!prefix || !s.ok) return;
     char path[256];
     std::snprintf(path, sizeof(path), "%s%s.ppm", prefix, name);

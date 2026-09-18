@@ -1,4 +1,4 @@
-// Manifold -- the OpenGL 4.5 backend.
+// Warren -- the OpenGL 4.5 backend.
 //
 // OpenGL is not the fallback here. It is the backend that runs
 // everywhere, on drivers a decade old, on machines where Vulkan's
@@ -23,7 +23,7 @@
 #include "rhi/handle_pool.h"
 #include "rhi/rhi.h"
 
-namespace mf::rhi {
+namespace wr::rhi {
 namespace {
 
 // ------------------------------------------------------------ conversion
@@ -367,7 +367,7 @@ private:
 bool GlDevice::init(const DeviceDesc &d) {
     window_ = (SDL_Window *)d.window;
     if (!window_) {
-        MF_FATAL("gl: no window");
+        WR_FATAL("gl: no window");
         return false;
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
@@ -375,14 +375,14 @@ bool GlDevice::init(const DeviceDesc &d) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     context_ = SDL_GL_CreateContext(window_);
     if (!context_) {
-        MF_FATAL("gl: no 4.5 core context: %s", SDL_GetError());
+        WR_FATAL("gl: no 4.5 core context: %s", SDL_GetError());
         return false;
     }
     int missing = gl::load((void *(*)(const char *))SDL_GL_GetProcAddress);
     if (missing) {
         int n = 0;
         const char *const *names = gl::missing(&n);
-        MF_FATAL("gl: driver is missing %d entry points, first %s", n,
+        WR_FATAL("gl: driver is missing %d entry points, first %s", n,
                  n ? names[0] : "?");
         return false;
     }
@@ -501,7 +501,7 @@ void *GlDevice::map(BufferH h) {
     GlBuffer *b = buffers.get_checked(h, "buffer");
     if (!b) return nullptr;
     if (b->access == MemoryAccess::GpuOnly) {
-        MF_ERROR("gl: buffer '%s' is GpuOnly and cannot be mapped", b->name.c_str());
+        WR_ERROR("gl: buffer '%s' is GpuOnly and cannot be mapped", b->name.c_str());
         return nullptr;
     }
     if (!b->mapped) {
@@ -523,7 +523,7 @@ void GlDevice::write_buffer(BufferH h, const void *data, uint64_t size,
     GlBuffer *b = buffers.get_checked(h, "buffer");
     if (!b || !data || !size) return;
     if (offset + size > b->size) {
-        MF_ERROR("gl: write of %llu at %llu overflows buffer '%s' (%llu bytes)",
+        WR_ERROR("gl: write of %llu at %llu overflows buffer '%s' (%llu bytes)",
                  (unsigned long long)size, (unsigned long long)offset,
                  b->name.c_str(), (unsigned long long)b->size);
         return;
@@ -632,7 +632,7 @@ size_t GlDevice::read_texture(TextureH h, void *out, size_t capacity, uint32_t m
     uint32_t hh = std::max(1u, t->desc.height >> mip);
     size_t need = size_t(w) * hh * format_block_size(t->desc.format);
     if (capacity < need) {
-        MF_ERROR("gl: read_texture needs %zu bytes, given %zu", need, capacity);
+        WR_ERROR("gl: read_texture needs %zu bytes, given %zu", need, capacity);
         return 0;
     }
     glFinish();
@@ -703,7 +703,7 @@ void GlDevice::destroy(SamplerH h) {
 
 ShaderH GlDevice::create_shader(const ShaderDesc &d) {
     if (!d.glsl) {
-        MF_ERROR("gl: shader '%s' has no GLSL variant -- was it built with "
+        WR_ERROR("gl: shader '%s' has no GLSL variant -- was it built with "
                  "spirv-cross?", d.name ? d.name : "?");
         return {};
     }
@@ -754,7 +754,7 @@ static GLuint compile_program(const std::vector<std::pair<GLenum, const GlShader
             glGetShaderiv(s, GL_INFO_LOG_LENGTH, &len);
             std::string log(size_t(len > 1 ? len : 1), '\0');
             glGetShaderInfoLog(s, len, nullptr, log.data());
-            MF_ERROR("gl: '%s' stage failed to compile:\n%s", name, log.c_str());
+            WR_ERROR("gl: '%s' stage failed to compile:\n%s", name, log.c_str());
             glDeleteShader(s);
             for (GLuint o : objs) glDeleteShader(o);
             return 0;
@@ -772,7 +772,7 @@ static GLuint compile_program(const std::vector<std::pair<GLenum, const GlShader
         glGetProgramiv(p, GL_INFO_LOG_LENGTH, &len);
         std::string log(size_t(len > 1 ? len : 1), '\0');
         glGetProgramInfoLog(p, len, nullptr, log.data());
-        MF_ERROR("gl: '%s' failed to link:\n%s", name, log.c_str());
+        WR_ERROR("gl: '%s' failed to link:\n%s", name, log.c_str());
         glDeleteProgram(p);
         return 0;
     }
@@ -782,7 +782,7 @@ static GLuint compile_program(const std::vector<std::pair<GLenum, const GlShader
 
 PipelineH GlDevice::create_pipeline(const PipelineDesc &d) {
     if (d.push_constant_size > 128) {
-        MF_ERROR("pipeline '%s' wants %u bytes of push constants; the engine's "
+        WR_ERROR("pipeline '%s' wants %u bytes of push constants; the engine's "
                  "budget is 128, which is what Vulkan guarantees",
                  d.name ? d.name : "?", d.push_constant_size);
         return {};
@@ -790,7 +790,7 @@ PipelineH GlDevice::create_pipeline(const PipelineDesc &d) {
     const GlShader *vs = shaders.get(d.vertex);
     const GlShader *fs = shaders.get(d.fragment);
     if (!vs || !fs) {
-        MF_ERROR("gl: pipeline '%s' is missing a stage", d.name ? d.name : "?");
+        WR_ERROR("gl: pipeline '%s' is missing a stage", d.name ? d.name : "?");
         return {};
     }
     GLuint prog = compile_program({{GL_VERTEX_SHADER, vs}, {GL_FRAGMENT_SHADER, fs}},
@@ -1002,7 +1002,7 @@ GLuint GlDevice::framebuffer_for(const RenderingInfo &info) {
     }
     GLenum status = glCheckNamedFramebufferStatus(fbo, GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
-        MF_ERROR("gl: framebuffer for pass '%s' is incomplete (0x%x)",
+        WR_ERROR("gl: framebuffer for pass '%s' is incomplete (0x%x)",
                  info.name ? info.name : "?", status);
     fbo_cache_[key] = fbo;
     return fbo;
@@ -1318,7 +1318,7 @@ void GlCommandList::bind_group(uint32_t set, BindGroupH h, const uint32_t *offse
 void GlCommandList::push_constants(const void *data, uint32_t size, uint32_t offset) {
     if (!data || !size) return;
     if (offset + size > 128) {
-        MF_ERROR("gl: push constants exceed the 128-byte budget");
+        WR_ERROR("gl: push constants exceed the 128-byte budget");
         return;
     }
     glNamedBufferSubData(dev_->push_buffer(), GLintptr(offset), GLsizeiptr(size), data);
@@ -1500,4 +1500,4 @@ Device *create_gl_device(const DeviceDesc &d) {
     return dev;
 }
 
-}  // namespace mf::rhi
+}  // namespace wr::rhi

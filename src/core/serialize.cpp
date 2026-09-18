@@ -4,7 +4,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 void ByteWriter::raw(const void *p, size_t n) {
     const uint8_t *b = (const uint8_t *)p;
@@ -200,4 +200,4 @@ Variant ByteReader::variant() {
     }
 }
 
-}  // namespace mf
+}  // namespace wr

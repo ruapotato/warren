@@ -1,4 +1,4 @@
-// Manifold -- reading glTF, and the JSON under it.
+// Warren -- reading glTF, and the JSON under it.
 //
 // The test writes its own files. A sample asset would test the
 // exporter that made it as much as the importer, and would not be
@@ -22,7 +22,7 @@
 #include "resource/resource.h"
 #include "scene/nodes.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 
@@ -70,7 +70,7 @@ std::vector<uint8_t> build_glb() {
 
     char json[2048];
     std::snprintf(json, sizeof(json), R"({
-"asset":{"version":"2.0","generator":"manifold test"},
+"asset":{"version":"2.0","generator":"warren test"},
 "scene":0,
 "scenes":[{"nodes":[0]}],
 "nodes":[{"name":"Holder","children":[1],"translation":[5,0,0]},
@@ -155,7 +155,7 @@ int main() {
 
     // ---------------------------------------------------------- glb
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "manifold_gltf_test";
+        std::filesystem::temp_directory_path() / "warren_gltf_test";
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);

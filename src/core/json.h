@@ -1,4 +1,4 @@
-// Manifold -- JSON, because glTF is JSON.
+// Warren -- JSON, because glTF is JSON.
 //
 // Small on purpose. This exists to read one family of files written
 // by well-behaved exporters, so it parses the whole of RFC 8259 and
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace mf {
+namespace wr {
 
 class Json {
 public:
@@ -79,4 +79,4 @@ private:
     std::map<std::string, Json> object_;
 };
 
-}  // namespace mf
+}  // namespace wr

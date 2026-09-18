@@ -1,4 +1,4 @@
-// Manifold -- the editor's geometry.
+// Warren -- the editor's geometry.
 //
 // One pipeline, one texture, one triangle list. Everything the UI
 // draws -- a panel, a slider, a letter -- is a coloured quad, and the

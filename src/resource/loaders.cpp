@@ -1,4 +1,4 @@
-// Manifold -- who can read what.
+// Warren -- who can read what.
 //
 // One place where every format the engine understands is attached to
 // the extensions that mean it. A plugin adds its own the same way,
@@ -18,7 +18,7 @@
 #include "resource/packed_scene.h"
 #include "resource/resource.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 constexpr uint32_t kMeshMagic = 0x4D464D53u;   // 'MFMS'
@@ -44,7 +44,7 @@ Ref<Resource> load_wav(const std::string &path) {
 
 Ref<Resource> load_image(const std::string &path) {
     if (!g_device) {
-        MF_ERROR("resource: '%s' needs a graphics device, and none is set",
+        WR_ERROR("resource: '%s' needs a graphics device, and none is set",
                  path.c_str());
         return {};
     }
@@ -71,7 +71,7 @@ Ref<Resource> load_mesh(const std::string &path) {
 
     ByteReader r(bytes);
     if (r.u32() != kMeshMagic || r.u32() != kMeshVersion) {
-        MF_ERROR("mesh: '%s' is not a Manifold mesh", path.c_str());
+        WR_ERROR("mesh: '%s' is not a Warren mesh", path.c_str());
         return {};
     }
     Ref<Mesh> m(new Mesh());
@@ -119,7 +119,7 @@ bool save_mesh(Resource *res, const std::string &path) {
     }
     FILE *f = std::fopen(path.c_str(), "wb");
     if (!f) {
-        MF_ERROR("mesh: could not write '%s'", path.c_str());
+        WR_ERROR("mesh: could not write '%s'", path.c_str());
         return false;
     }
     const size_t n = std::fwrite(w.bytes.data(), 1, w.bytes.size(), f);
@@ -147,7 +147,7 @@ Ref<Resource> load_material(const std::string &path) {
 
     ByteReader r(bytes);
     if (r.u32() != kMaterialMagic || r.u32() != kMaterialVersion) {
-        MF_ERROR("material: '%s' is not a Manifold material", path.c_str());
+        WR_ERROR("material: '%s' is not a Warren material", path.c_str());
         return {};
     }
     Ref<Material> m(new Material());
@@ -215,7 +215,7 @@ bool save_material(Resource *res, const std::string &path) {
 
     FILE *f = std::fopen(path.c_str(), "wb");
     if (!f) {
-        MF_ERROR("material: could not write '%s'", path.c_str());
+        WR_ERROR("material: could not write '%s'", path.c_str());
         return false;
     }
     const size_t n = std::fwrite(w.bytes.data(), 1, w.bytes.size(), f);
@@ -248,4 +248,4 @@ RegisterLoaders g_register;
 void resource_set_device(rhi::Device *dev) { g_device = dev; }
 rhi::Device *resource_device() { return g_device; }
 
-}  // namespace mf
+}  // namespace wr

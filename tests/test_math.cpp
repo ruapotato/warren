@@ -1,4 +1,4 @@
-// Manifold -- does the maths do what it says.
+// Warren -- does the maths do what it says.
 //
 // The oblique near plane is the engine's reason to exist, so it is
 // tested first and hardest: the claim is that after `with_oblique_near`
@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <initializer_list>
 
-using namespace mf;
+using namespace wr;
 
 static int g_fail = 0;
 static int g_checks = 0;

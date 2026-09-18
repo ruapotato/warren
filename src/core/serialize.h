@@ -1,4 +1,4 @@
-// Manifold -- Variants to bytes and back.
+// Warren -- Variants to bytes and back.
 //
 // One writer for the network, the scene file and the undo stack,
 // because they want the same thing: a value whose type is known only
@@ -17,7 +17,7 @@
 
 #include "core/variant.h"
 
-namespace mf {
+namespace wr {
 
 class ByteWriter {
 public:
@@ -69,4 +69,4 @@ private:
     bool ok_ = true;
 };
 
-}  // namespace mf
+}  // namespace wr

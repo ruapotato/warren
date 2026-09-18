@@ -1,4 +1,4 @@
-// Manifold -- the render hardware interface.
+// Warren -- the render hardware interface.
 //
 // TWO BACKENDS, ONE CONTRACT. Vulkan and OpenGL are both first class:
 // neither is a fallback for the other, both are expected to run every
@@ -35,7 +35,7 @@
 
 #include "core/math/projection.h"
 
-namespace mf::rhi {
+namespace wr::rhi {
 
 // ---------------------------------------------------------------- handles
 
@@ -511,7 +511,7 @@ struct DebugScope {
     }
     DebugScope(const DebugScope &) = delete;
 };
-#define MF_GPU_SCOPE(cmd, name) ::mf::rhi::DebugScope mf_gpu_scope_##__LINE__(cmd, name)
+#define WR_GPU_SCOPE(cmd, name) ::wr::rhi::DebugScope mf_gpu_scope_##__LINE__(cmd, name)
 
 // ----------------------------------------------------------------- device
 
@@ -667,4 +667,4 @@ void destroy_device(Device *d);
 // Which backends this build can actually create, most preferred first.
 std::vector<Backend> available_backends();
 
-}  // namespace mf::rhi
+}  // namespace wr::rhi

@@ -1,4 +1,4 @@
-// Manifold -- the portal surface.
+// Warren -- the portal surface.
 //
 // The same quad is drawn three times per portal per recursion level,
 // with three different pipelines and one shader:

@@ -1,9 +1,9 @@
-// Manifold -- vectors.
+// Warren -- vectors.
 #pragma once
 
 #include "mathdefs.h"
 
-namespace mf {
+namespace wr {
 
 struct Vec2 {
     float x = 0, y = 0;
@@ -225,4 +225,4 @@ struct Vec2i {
     float aspect() const { return y == 0 ? 0.0f : float(x) / float(y); }
 };
 
-}  // namespace mf
+}  // namespace wr

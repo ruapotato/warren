@@ -1,4 +1,4 @@
-// Manifold -- Object, Ref, and the class registry.
+// Warren -- Object, Ref, and the class registry.
 //
 // The registry is the reason this file exists. Every engine class
 // declares its methods and properties once, in C++, and from that one
@@ -17,7 +17,7 @@
 
 #include "variant.h"
 
-namespace mf {
+namespace wr {
 
 class Object;
 
@@ -243,20 +243,20 @@ void Ref<T>::release() {
     if (ptr_) static_cast<const Object *>(ptr_)->ref_release();
 }
 
-// --------------------------------------------------------- the MF_CLASS macro
+// --------------------------------------------------------- the WR_CLASS macro
 
-#define MF_CLASS(Cls, Base)                                                  \
+#define WR_CLASS(Cls, Base)                                                  \
 public:                                                                      \
     using Self = Cls;                                                        \
     using Super = Base;                                                      \
     static const char *class_name_static() { return #Cls; }                  \
     const char *get_class_name() const override { return #Cls; }             \
-    static ::mf::ClassInfo *class_info_static() {                            \
-        static ::mf::ClassInfo *ci =                                         \
-            ::mf::ClassDB::create(#Cls, Base::class_info_static());          \
+    static ::wr::ClassInfo *class_info_static() {                            \
+        static ::wr::ClassInfo *ci =                                         \
+            ::wr::ClassDB::create(#Cls, Base::class_info_static());          \
         return ci;                                                           \
     }                                                                        \
-    ::mf::ClassInfo *get_class_info() const override {                       \
+    ::wr::ClassInfo *get_class_info() const override {                       \
         return class_info_static();                                          \
     }                                                                        \
                                                                              \
@@ -264,14 +264,14 @@ private:
 
 // Put one of these at file scope to have `fn` run during
 // ClassDB::register_all().
-#define MF_REGISTER(fn)                                                      \
+#define WR_REGISTER(fn)                                                      \
     namespace {                                                              \
     struct MfRegistrar_##fn {                                                \
-        MfRegistrar_##fn() { ::mf::ClassDB::add_registrar(&fn); }            \
+        MfRegistrar_##fn() { ::wr::ClassDB::add_registrar(&fn); }            \
     };                                                                       \
     static MfRegistrar_##fn s_mf_registrar_##fn;                             \
     }
 
-}  // namespace mf
+}  // namespace wr
 
 #include "bind.h"

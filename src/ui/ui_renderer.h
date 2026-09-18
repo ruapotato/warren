@@ -1,10 +1,10 @@
-// Manifold -- putting the UI's draw list on the screen.
+// Warren -- putting the UI's draw list on the screen.
 #pragma once
 
 #include "rhi/rhi.h"
 #include "ui/ui.h"
 
-namespace mf::ui {
+namespace wr::ui {
 
 class Renderer {
 public:
@@ -29,4 +29,4 @@ private:
     rhi::BufferH dummy_ubo_;
 };
 
-}  // namespace mf::ui
+}  // namespace wr::ui

@@ -5,7 +5,7 @@
 #include <mutex>
 #include <vector>
 
-namespace mf {
+namespace wr {
 namespace {
 
 LogLevel g_level = LogLevel::Info;
@@ -88,4 +88,4 @@ void log_remove_sink(LogSink sink) {
                   g_sinks.end());
 }
 
-}  // namespace mf
+}  // namespace wr

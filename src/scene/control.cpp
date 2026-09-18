@@ -6,7 +6,7 @@
 #include "core/log.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 namespace {
 Control *g_focused = nullptr;
 }
@@ -187,6 +187,6 @@ static void register_control() {
 
     ClassBuilder<ThemeProvider>();
 }
-MF_REGISTER(register_control)
+WR_REGISTER(register_control)
 
-}  // namespace mf
+}  // namespace wr

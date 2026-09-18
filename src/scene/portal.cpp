@@ -4,7 +4,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 Portal3D::Portal3D() { set_name("Portal3D"); }
 
@@ -16,7 +16,7 @@ void Portal3D::on_exit_tree() {
 
 void Portal3D::link_to(Portal3D *other) {
     if (other == this) {
-        MF_ERROR("%s: a portal cannot link to itself", name().c_str());
+        WR_ERROR("%s: a portal cannot link to itself", name().c_str());
         return;
     }
     if (link_ == other) return;
@@ -218,6 +218,6 @@ static void register_portal_class() {
         .method("faces", &Portal3D::faces).args("point")
         .signal("traversed");
 }
-MF_REGISTER(register_portal_class)
+WR_REGISTER(register_portal_class)
 
-}  // namespace mf
+}  // namespace wr

@@ -14,11 +14,11 @@
 #include "core/jobs.h"
 #include "core/log.h"
 #include "scene/nodes.h"
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 #include "script/python.h"
 #endif
 
-namespace mf {
+namespace wr {
 
 Engine::~Engine() { shutdown(); }
 
@@ -47,11 +47,11 @@ bool Engine::init(const EngineConfig &cfg) {
         if (device_) break;
         window_.close();
         if (order.size() > 1)
-            MF_WARN("engine: %s did not start; trying the next backend",
+            WR_WARN("engine: %s did not start; trying the next backend",
                     rhi::backend_name(backend));
     }
     if (!device_) {
-        MF_FATAL("engine: no graphics backend could be started");
+        WR_FATAL("engine: no graphics backend could be started");
         return false;
     }
 
@@ -59,7 +59,7 @@ bool Engine::init(const EngineConfig &cfg) {
     resource_set_device(device_);
 
     if (!renderer_.init(device_, cfg.render)) {
-        MF_FATAL("engine: the renderer failed to start");
+        WR_FATAL("engine: the renderer failed to start");
         return false;
     }
     physics_ = Ref<PhysicsWorld>(new PhysicsWorld());
@@ -80,7 +80,7 @@ bool Engine::init(const EngineConfig &cfg) {
         pc.renderer = &renderer_;
         pc.physics = physics_.get();
         int n = plugins_.load_directory(dir, pc);
-        if (n) MF_INFO("%s", plugins_.report().c_str());
+        if (n) WR_INFO("%s", plugins_.report().c_str());
     }
 
     if (cfg.enable_editor) {
@@ -106,7 +106,7 @@ bool Engine::init(const EngineConfig &cfg) {
         audio_system_install(&audio_system_);
     }
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
     if (cfg.python) {
         std::vector<std::string> paths = cfg.script_paths;
         char *base = SDL_GetBasePath();
@@ -123,7 +123,7 @@ bool Engine::init(const EngineConfig &cfg) {
 
     if (on_ready) on_ready(*this);
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
     // AFTER on_ready, so the script finds a scene to work on.
     if (cfg.python && !cfg.startup_script.empty()) {
         Python::refresh_classes();
@@ -134,7 +134,7 @@ bool Engine::init(const EngineConfig &cfg) {
     clock_ = Clock();
     if (config_.max_frames && config_.fixed_delta <= 0.0f) {
         config_.fixed_delta = 1.0f / 60.0f;
-        MF_INFO("engine: %llu frames at a fixed 1/60s, for a reproducible run",
+        WR_INFO("engine: %llu frames at a fixed 1/60s, for a reproducible run",
                 (unsigned long long)config_.max_frames);
     }
     return true;
@@ -174,7 +174,7 @@ void Engine::shutdown() {
     audio_system_install(nullptr);
 
     tree_.reset();
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
     Python::shutdown();
 #endif
     plugins_.unload_all();
@@ -400,7 +400,7 @@ bool Engine::save_screenshot(const std::string &path) {
     std::vector<uint8_t> pixels(bytes);
     size_t got = device_->read_texture(src, pixels.data(), pixels.size());
     if (got != bytes) {
-        MF_ERROR("screenshot: could not read the swapchain back");
+        WR_ERROR("screenshot: could not read the swapchain back");
         return false;
     }
     // BGRA on most swapchains; PNG wants RGBA.
@@ -412,10 +412,10 @@ bool Engine::save_screenshot(const std::string &path) {
     int ok = stbi_write_png(path.c_str(), int(td.width), int(td.height), 4,
                             pixels.data(), int(td.width * 4));
     if (!ok) {
-        MF_ERROR("screenshot: could not write '%s'", path.c_str());
+        WR_ERROR("screenshot: could not write '%s'", path.c_str());
         return false;
     }
-    MF_INFO("screenshot: %s (%ux%u)", path.c_str(), td.width, td.height);
+    WR_INFO("screenshot: %s (%ux%u)", path.c_str(), td.width, td.height);
     return true;
 }
 
@@ -430,4 +430,4 @@ std::string Engine::status_line() const {
     return b;
 }
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- the portal mechanism, in isolation.
+// Warren -- the portal mechanism, in isolation.
 //
 // Recursive portals are four stencil operations in a row, and if any
 // one of them behaves differently on the two backends the picture is
@@ -27,8 +27,8 @@
 #include "render/shaders/generated/shaders.h"
 #include "rhi/rhi.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 
@@ -331,10 +331,10 @@ int main(int argc, char **argv) {
     Counts results[2];
     Backend backends[2] = {Backend::OpenGL, Backend::Vulkan};
     for (int i = 0; i < 2; i++) {
-#if !MANIFOLD_OPENGL
+#if !WARREN_OPENGL
         if (backends[i] == Backend::OpenGL) continue;
 #endif
-#if !MANIFOLD_VULKAN
+#if !WARREN_VULKAN
         if (backends[i] == Backend::Vulkan) continue;
 #endif
         Counts c = run(backends[i], validation);

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 Palette::Palette() {
     for (int i = 0; i < 256; i++) {
@@ -365,4 +365,4 @@ void mesh_chunk(const MeshRequest &req, MeshResult *out) {
     out->empty = out->indices.empty();
 }
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

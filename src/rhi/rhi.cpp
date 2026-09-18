@@ -4,7 +4,7 @@
 
 #include "core/log.h"
 
-namespace mf::rhi {
+namespace wr::rhi {
 
 const char *backend_name(Backend b) {
     switch (b) {
@@ -70,10 +70,10 @@ Device *create_vulkan_device(const DeviceDesc &d);
 
 std::vector<Backend> available_backends() {
     std::vector<Backend> v;
-#if MANIFOLD_VULKAN
+#if WARREN_VULKAN
     v.push_back(Backend::Vulkan);
 #endif
-#if MANIFOLD_OPENGL
+#if WARREN_OPENGL
     v.push_back(Backend::OpenGL);
 #endif
     return v;
@@ -83,17 +83,17 @@ Device *create_device(const DeviceDesc &desc) {
     Device *d = nullptr;
     switch (desc.backend) {
         case Backend::Vulkan:
-#if MANIFOLD_VULKAN
+#if WARREN_VULKAN
             d = create_vulkan_device(desc);
 #else
-            MF_ERROR("rhi: this build has no Vulkan backend");
+            WR_ERROR("rhi: this build has no Vulkan backend");
 #endif
             break;
         case Backend::OpenGL:
-#if MANIFOLD_OPENGL
+#if WARREN_OPENGL
             d = create_gl_device(desc);
 #else
-            MF_ERROR("rhi: this build has no OpenGL backend");
+            WR_ERROR("rhi: this build has no OpenGL backend");
 #endif
             break;
     }
@@ -102,14 +102,14 @@ Device *create_device(const DeviceDesc &desc) {
         // that silently changes renderer produces bug reports that
         // cannot be reproduced, and a performance mystery that takes a
         // week to trace to a driver that failed to initialise.
-        MF_ERROR("rhi: could not create a %s device", backend_name(desc.backend));
+        WR_ERROR("rhi: could not create a %s device", backend_name(desc.backend));
         return nullptr;
     }
     const DeviceCaps &c = d->caps();
-    MF_INFO("rhi: %s on %s", backend_name(c.backend), c.device_name.c_str());
-    MF_INFO("     %s, %s", c.api_version.c_str(), c.driver_info.c_str());
+    WR_INFO("rhi: %s on %s", backend_name(c.backend), c.device_name.c_str());
+    WR_INFO("     %s, %s", c.api_version.c_str(), c.driver_info.c_str());
     if (c.stencil_bits < 8) {
-        MF_FATAL("rhi: %u stencil bits; portals need 8", c.stencil_bits);
+        WR_FATAL("rhi: %u stencil bits; portals need 8", c.stencil_bits);
         destroy_device(d);
         return nullptr;
     }
@@ -122,4 +122,4 @@ void destroy_device(Device *d) {
     delete d;
 }
 
-}  // namespace mf::rhi
+}  // namespace wr::rhi

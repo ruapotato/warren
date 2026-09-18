@@ -1,4 +1,4 @@
-# Manifold conventions
+# Warren conventions
 
 Stated once, enforced by `tests/test_backend_parity`, which renders the
 same scene through both backends and requires the images to match.
@@ -62,7 +62,7 @@ arbitrary one given in view space, keeping the half-space where
 is unchanged and only the near side of it is cut away.
 
 The published derivation (Lengyel 2005) assumes OpenGL's [−1, 1] depth,
-so Manifold derives it again from the clip condition. See the comment in
+so Warren derives it again from the clip condition. See the comment in
 `src/core/math/projection.h`. It works for off-axis frusta, for an
 already-oblique projection (a portal seen through a portal) and for
 orthographic (a shadow cascade clipped to a portal), because row 3 is

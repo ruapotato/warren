@@ -1,4 +1,4 @@
-# Every OpenGL entry point Manifold may call, and nothing else.
+# Every OpenGL entry point Warren may call, and nothing else.
 #
 # The loader is generated from this list against the Khronos header, so a
 # typo is a build error rather than a null pointer at run time, and the

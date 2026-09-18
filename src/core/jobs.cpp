@@ -9,7 +9,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 struct Job {
@@ -83,7 +83,7 @@ void Jobs::init(int threads) {
     p.stopping = false;
     p.workers.reserve(size_t(threads));
     for (int i = 0; i < threads; i++) p.workers.emplace_back(worker_loop);
-    MF_INFO("jobs: %d worker threads", threads);
+    WR_INFO("jobs: %d worker threads", threads);
 }
 
 void Jobs::shutdown() {
@@ -181,4 +181,4 @@ std::string Jobs::report() {
     return b;
 }
 
-}  // namespace mf
+}  // namespace wr

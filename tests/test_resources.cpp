@@ -1,4 +1,4 @@
-// Manifold -- assets that live in files and are shared.
+// Warren -- assets that live in files and are shared.
 //
 // A scene used to write its meshes inline, which is correct and does
 // not scale: a level of forty rooms each using the same crate is
@@ -26,7 +26,7 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 
@@ -47,7 +47,7 @@ int main() {
     std::printf("resources\n");
 
     const std::filesystem::path dir =
-        std::filesystem::temp_directory_path() / "manifold_resource_test";
+        std::filesystem::temp_directory_path() / "warren_resource_test";
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);

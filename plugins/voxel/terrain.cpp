@@ -8,7 +8,7 @@
 #include "physics/world.h"
 #include "scene/scene_tree.h"
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 namespace {
 // The physics world the terrain registers its colliders with. Set by
@@ -550,6 +550,6 @@ static void register_voxel_classes() {
         .method("set_material", &VoxelTerrain3D::set_material).args("material")
         .method("report", &VoxelTerrain3D::report);
 }
-MF_REGISTER(register_voxel_classes)
+WR_REGISTER(register_voxel_classes)
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

@@ -1,4 +1,4 @@
-// Manifold -- what every shader in the engine can assume.
+// Warren -- what every shader in the engine can assume.
 //
 // BINDINGS ARE GLOBALLY UNIQUE: binding = set * 8 + slot. Vulkan reads
 // the (set, binding) pair; OpenGL only gets the binding, because
@@ -6,8 +6,8 @@
 // construction means the flattening cannot collide, which it silently
 // would otherwise -- two uniform blocks landing on binding 0 and one
 // of them reading the other's bytes.
-#ifndef MF_COMMON_GLSL
-#define MF_COMMON_GLSL
+#ifndef WR_COMMON_GLSL
+#define WR_COMMON_GLSL
 
 #define SET_FRAME     0
 #define SET_VIEW      1
@@ -274,4 +274,4 @@ float hash12(vec2 p) {
     return fract((p3.x + p3.y) * p3.z);
 }
 
-#endif  // MF_COMMON_GLSL
+#endif  // WR_COMMON_GLSL

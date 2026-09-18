@@ -1,4 +1,4 @@
-// Manifold -- the immediate-mode UI, and whether the font is legible.
+// Warren -- the immediate-mode UI, and whether the font is legible.
 //
 // A UI test that asserts "some triangles were produced" tests
 // nothing. This one renders the whole printable ASCII range to a
@@ -26,8 +26,8 @@
 #include "ui/ui.h"
 #include "ui/ui_renderer.h"
 
-using namespace mf;
-using namespace mf::rhi;
+using namespace wr;
+using namespace wr::rhi;
 
 namespace {
 
@@ -279,10 +279,10 @@ int main() {
         return g_fail ? 1 : 0;
     }
     std::printf("  rendered on %s\n", s.device.c_str());
-    // A font is judged by looking at it. MF_UI_DUMP=file.ppm writes
+    // A font is judged by looking at it. WR_UI_DUMP=file.ppm writes
     // what was rendered, so a change to the table can be checked by
     // eye as well as by the counts below.
-    if (const char *path = getenv("MF_UI_DUMP")) {
+    if (const char *path = getenv("WR_UI_DUMP")) {
         if (FILE *f = std::fopen(path, "wb")) {
             std::fprintf(f, "P6\n%u %u\n255\n", kW, kH);
             for (size_t i = 0; i < size_t(kW) * kH; i++)

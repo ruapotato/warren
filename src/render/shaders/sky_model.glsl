@@ -1,4 +1,4 @@
-// Manifold -- the sky, as a function of direction.
+// Warren -- the sky, as a function of direction.
 //
 // ONE DEFINITION, TWO CONSUMERS. sky.glsl draws it on screen and
 // skycube.glsl bakes it into the cubemap that lights the scene. If
@@ -6,8 +6,8 @@
 // away from the backdrop the first time anyone tuned one of them, and
 // the symptom -- a world lit slightly wrong for the sky behind it --
 // is one nobody traces back to a duplicated shader.
-#ifndef MF_SKY_MODEL_GLSL
-#define MF_SKY_MODEL_GLSL
+#ifndef WR_SKY_MODEL_GLSL
+#define WR_SKY_MODEL_GLSL
 
 #include "common.glsl"
 
@@ -56,4 +56,4 @@ vec3 cube_direction(int face, vec2 st) {
     return vec3(-uv.x, -uv.y, -1.0);
 }
 
-#endif  // MF_SKY_MODEL_GLSL
+#endif  // WR_SKY_MODEL_GLSL

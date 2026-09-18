@@ -2,7 +2,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 Material::~Material() { release(); }
 
@@ -128,7 +128,7 @@ static void register_material_class() {
         .field("shader", &Material::shader)
         .method("touch", &Material::touch);
 }
-MF_REGISTER(register_material_class)
+WR_REGISTER(register_material_class)
 
 Ref<Material> Material::duplicate() const {
     Ref<Material> m = new Material();
@@ -160,4 +160,4 @@ Ref<Material> Material::duplicate() const {
     return m;
 }
 
-}  // namespace mf
+}  // namespace wr

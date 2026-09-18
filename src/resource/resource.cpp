@@ -9,7 +9,7 @@
 #include "core/bind.h"
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 struct Registry {
@@ -107,7 +107,7 @@ Ref<Resource> ResourceLoader::load(const std::string &path,
                 }
     }
     if (!chosen) {
-        MF_ERROR("resource: nothing can read '%s' (extension '%s')",
+        WR_ERROR("resource: nothing can read '%s' (extension '%s')",
                  path.c_str(), ext.c_str());
         return {};
     }
@@ -182,7 +182,7 @@ bool ResourceSaver::save(Resource *r, const std::string &path) {
                 }
     }
     if (!chosen) {
-        MF_ERROR("resource: nothing can write '%s'", path.c_str());
+        WR_ERROR("resource: nothing can write '%s'", path.c_str());
         return false;
     }
     if (!chosen(r, ResourceLoader::resolve(path))) return false;
@@ -197,6 +197,6 @@ static void register_resource() {
         .prop("resource_name", &Resource::resource_name,
               &Resource::set_resource_name);
 }
-MF_REGISTER(register_resource)
+WR_REGISTER(register_resource)
 
-}  // namespace mf
+}  // namespace wr

@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace mf::voxel {
+namespace wr::voxel {
 
 float perlin(const Vec3 &p, uint32_t seed, Vec3 *out_gradient) {
     const int32_t xi = int32_t(std::floor(p.x));
@@ -113,4 +113,4 @@ float worley(const Vec3 &p, uint32_t seed) {
     return std::sqrt(best);
 }
 
-}  // namespace mf::voxel
+}  // namespace wr::voxel

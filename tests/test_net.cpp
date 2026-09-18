@@ -1,4 +1,4 @@
-// Manifold -- the net stack, over a network that misbehaves.
+// Warren -- the net stack, over a network that misbehaves.
 //
 // A reliability layer works perfectly on localhost. Loss, reordering
 // and duplication are the entire reason it exists and none of them
@@ -24,8 +24,8 @@
 #include "scene/scene_tree.h"
 #include "net/socket.h"
 
-using namespace mf;
-using namespace mf::net;
+using namespace wr;
+using namespace wr::net;
 
 namespace {
 

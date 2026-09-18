@@ -1,4 +1,4 @@
-// Manifold -- the projection matrix, as a matrix.
+// Warren -- the projection matrix, as a matrix.
 //
 // THIS TYPE IS WHY THE ENGINE EXISTS.
 //
@@ -25,7 +25,7 @@
 
 #include "transform.h"
 
-namespace mf {
+namespace wr {
 
 struct Projection {
     // Column-major: m[c][r]. Uploads to GLSL unchanged.
@@ -190,4 +190,4 @@ struct Projection {
 // A transform used as a 4x4, for the view matrix and for model matrices.
 Projection to_projection(const Transform3D &t);
 
-}  // namespace mf
+}  // namespace wr

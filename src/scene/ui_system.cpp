@@ -6,7 +6,7 @@
 #include "scene/controls.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 
 void UiSystem::update(SceneTree *tree, const Frame &frame, float dt) {
     (void)dt;
@@ -191,4 +191,4 @@ void UiSystem::paint(Control *c, float inherited) {
     if (c->clip_contents) draw_.pop_clip();
 }
 
-}  // namespace mf
+}  // namespace wr

@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace mf {
+namespace wr {
 namespace {
 
 struct ActionBinding {
@@ -143,4 +143,4 @@ void Input::_focus_lost() {
     s.motion = Vec2();
 }
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- the editor.
+// Warren -- the editor.
 //
 // THE INSPECTOR IS NOT WRITTEN, IT IS DERIVED. Every class in this
 // engine declares its properties once so that Python, the scene
@@ -23,7 +23,7 @@
 #include "scene/node.h"
 #include "ui/ui.h"
 
-namespace mf {
+namespace wr {
 
 class Engine;
 class Node3D;
@@ -85,4 +85,4 @@ private:
     float frame_ms_ = 0.0f;
 };
 
-}  // namespace mf
+}  // namespace wr

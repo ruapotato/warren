@@ -1,6 +1,6 @@
 #include "pyvalue.h"
 
-#if MANIFOLD_PYTHON
+#if WARREN_PYTHON
 
 #include <cstring>
 #include <map>
@@ -9,7 +9,7 @@
 
 #include "core/log.h"
 
-namespace mf::python {
+namespace wr::python {
 namespace {
 
 PyTypeObject *g_value_types[int(VType::Count)] = {};
@@ -337,7 +337,7 @@ PyObject *value_new(PyTypeObject *type, PyObject *args, PyObject *) {
     for (int i = 0; i < int(VType::Count); i++)
         if (g_value_types[i] == type) vt = VType(i);
     if (vt == VType::Nil) {
-        PyErr_SetString(PyExc_TypeError, "unknown Manifold value type");
+        PyErr_SetString(PyExc_TypeError, "unknown Warren value type");
         return nullptr;
     }
     const Py_ssize_t n = args ? PyTuple_GET_SIZE(args) : 0;
@@ -460,7 +460,7 @@ Variant &value_of(PyObject *o) { return ((ValueObject *)o)->value; }
 
 bool register_value_types(PyObject *module) {
     for (const ValueTypeDesc &d : k_value_type_list) {
-        std::string full = std::string("manifold.") + d.name;
+        std::string full = std::string("warren.") + d.name;
         // Leaked on purpose: a PyType_Spec's name must outlive the
         // type, and the type outlives the process.
         char *name = strdup(full.c_str());
@@ -584,6 +584,6 @@ Variant from_python_or_nil(PyObject *o) {
     return v;
 }
 
-}  // namespace mf::python
+}  // namespace wr::python
 
-#endif  // MANIFOLD_PYTHON
+#endif  // WARREN_PYTHON

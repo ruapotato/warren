@@ -1,4 +1,4 @@
-// Manifold -- the voxel plugin, and whether level of detail leaves a
+// Warren -- the voxel plugin, and whether level of detail leaves a
 // hole in the world.
 //
 // Also the first test of the plugin ABI end to end: the shared library
@@ -31,7 +31,7 @@
 #include "scene/nodes.h"
 #include "scene/scene_tree.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

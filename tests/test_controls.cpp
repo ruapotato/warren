@@ -1,4 +1,4 @@
-// Manifold -- user interface as part of the scene.
+// Warren -- user interface as part of the scene.
 //
 // The three things a node UI has to get right, none of which a
 // screenshot shows:
@@ -27,7 +27,7 @@
 #include "scene/scene_tree.h"
 #include "scene/ui_system.h"
 
-using namespace mf;
+using namespace wr;
 
 namespace {
 

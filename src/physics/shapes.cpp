@@ -4,7 +4,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 
 AABB Shape::local_bounds() const {
     switch (type) {
@@ -189,7 +189,7 @@ void TriangleMesh::build(std::vector<Vec3> vertices, std::vector<uint32_t> indic
     root.bounds = bounds_;
     nodes_.push_back(root);
     subdivide(0, 0);
-    MF_DEBUG("physics: BVH over %zu triangles, %zu nodes", n, nodes_.size());
+    WR_DEBUG("physics: BVH over %zu triangles, %zu nodes", n, nodes_.size());
 }
 
 void TriangleMesh::subdivide(uint32_t index, int depth) {
@@ -312,4 +312,4 @@ int32_t TriangleMesh::raycast(const Vec3 &origin, const Vec3 &dir, float max_t,
     return best;
 }
 
-}  // namespace mf
+}  // namespace wr

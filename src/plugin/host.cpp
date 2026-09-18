@@ -13,7 +13,7 @@
 
 #include "core/log.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 void *open_library(const std::string &path, std::string *error) {
@@ -72,20 +72,20 @@ bool PluginHost::load(const std::string &path, const PluginContext &ctx) {
     std::string error;
     void *handle = open_library(path, &error);
     if (!handle) {
-        MF_ERROR("plugin '%s' could not be opened: %s", path.c_str(), error.c_str());
+        WR_ERROR("plugin '%s' could not be opened: %s", path.c_str(), error.c_str());
         return false;
     }
 
     auto info_fn = (const PluginInfo *(*)())symbol(handle, "mf_plugin_info");
     if (!info_fn) {
-        MF_ERROR("plugin '%s' has no mf_plugin_info; it is not a Manifold plugin",
+        WR_ERROR("plugin '%s' has no mf_plugin_info; it is not a Warren plugin",
                  path.c_str());
         close_library(handle);
         return false;
     }
     const PluginInfo *info = info_fn();
     if (!info) {
-        MF_ERROR("plugin '%s' returned no info", path.c_str());
+        WR_ERROR("plugin '%s' returned no info", path.c_str());
         close_library(handle);
         return false;
     }
@@ -93,10 +93,10 @@ bool PluginHost::load(const std::string &path, const PluginContext &ctx) {
     // a different engine may have a different idea of what every
     // pointer below means, and calling into it would be a crash with
     // no explanation.
-    if (info->abi != MANIFOLD_PLUGIN_ABI) {
-        MF_ERROR("plugin '%s' was built for ABI %u; this engine is ABI %u",
+    if (info->abi != WARREN_PLUGIN_ABI) {
+        WR_ERROR("plugin '%s' was built for ABI %u; this engine is ABI %u",
                  info->name ? info->name : path.c_str(), info->abi,
-                 uint32_t(MANIFOLD_PLUGIN_ABI));
+                 uint32_t(WARREN_PLUGIN_ABI));
         close_library(handle);
         return false;
     }
@@ -110,7 +110,7 @@ bool PluginHost::load(const std::string &path, const PluginContext &ctx) {
     p.shutdown = (void (*)())symbol(handle, "mf_plugin_shutdown");
     p.frame = (void (*)(float))symbol(handle, "mf_plugin_frame");
     if (!p.init) {
-        MF_ERROR("plugin '%s' has no mf_plugin_init", info->name);
+        WR_ERROR("plugin '%s' has no mf_plugin_init", info->name);
         close_library(handle);
         return false;
     }
@@ -126,7 +126,7 @@ bool PluginHost::start(LoadedPlugin &p, const PluginContext &ctx) {
         for (const char *const *r = p.info->requires_plugins; *r; r++) {
             const LoadedPlugin *dep = find(*r);
             if (!dep || !dep->started) {
-                MF_ERROR("plugin '%s' needs '%s', which is not loaded",
+                WR_ERROR("plugin '%s' needs '%s', which is not loaded",
                          p.info->name, *r);
                 return false;
             }
@@ -135,11 +135,11 @@ bool PluginHost::start(LoadedPlugin &p, const PluginContext &ctx) {
     PluginContext local = ctx;
     local.directory = p.directory.c_str();
     if (!p.init(&local)) {
-        MF_ERROR("plugin '%s' refused to start", p.info->name);
+        WR_ERROR("plugin '%s' refused to start", p.info->name);
         return false;
     }
     p.started = true;
-    MF_INFO("plugin: %s %s -- %s", p.info->name, p.info->version,
+    WR_INFO("plugin: %s %s -- %s", p.info->name, p.info->version,
             p.info->description ? p.info->description : "");
     return true;
 }
@@ -222,4 +222,4 @@ std::string PluginHost::default_directory() {
     return (root / "plugins").string();
 }
 
-}  // namespace mf
+}  // namespace wr

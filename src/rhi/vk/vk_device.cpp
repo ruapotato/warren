@@ -1,4 +1,4 @@
-// Manifold -- the Vulkan 1.3 backend.
+// Warren -- the Vulkan 1.3 backend.
 //
 // Written to the modern core, not to 1.0 with a decade of extensions
 // bolted on: dynamic rendering instead of render pass and framebuffer
@@ -27,18 +27,18 @@
 #include "rhi/vk/vk_alloc.h"
 #include "rhi/vk/vkfn.h"
 
-namespace mf::rhi {
+namespace wr::rhi {
 namespace {
 
-using mf::vk::Allocation;
-using mf::vk::Allocator;
-using mf::vk::MemoryUsage;
+using wr::vk::Allocation;
+using wr::vk::Allocator;
+using wr::vk::MemoryUsage;
 
 #define VK_CHECK(expr, what)                                         \
     do {                                                             \
         VkResult r_ = (expr);                                        \
         if (r_ != VK_SUCCESS) {                                      \
-            MF_ERROR("vk: %s failed (%d)", what, int(r_));           \
+            WR_ERROR("vk: %s failed (%d)", what, int(r_));           \
         }                                                            \
     } while (0)
 
@@ -46,7 +46,7 @@ using mf::vk::MemoryUsage;
     do {                                                             \
         VkResult r_ = (expr);                                        \
         if (r_ != VK_SUCCESS) {                                      \
-            MF_FATAL("vk: %s failed (%d)", what, int(r_));           \
+            WR_FATAL("vk: %s failed (%d)", what, int(r_));           \
             return false;                                            \
         }                                                            \
     } while (0)
@@ -456,11 +456,11 @@ debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     (void)user;
     if (!data || !data->pMessage) return VK_FALSE;
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-        MF_ERROR("vk validation: %s", data->pMessage);
+        WR_ERROR("vk validation: %s", data->pMessage);
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-        MF_WARN("vk validation: %s", data->pMessage);
+        WR_WARN("vk validation: %s", data->pMessage);
     else
-        MF_DEBUG("vk: %s", data->pMessage);
+        WR_DEBUG("vk: %s", data->pMessage);
     return VK_FALSE;
 }
 
@@ -468,22 +468,22 @@ debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 // ==================================================== instance and device
 
 bool VkDeviceImpl::create_instance(bool validation) {
-    if (!mf::vk::load_global()) {
-        MF_WARN("vk: no Vulkan library on this system");
+    if (!wr::vk::load_global()) {
+        WR_WARN("vk: no Vulkan library on this system");
         return false;
     }
 
     uint32_t api = VK_API_VERSION_1_0;
     if (vkEnumerateInstanceVersion) vkEnumerateInstanceVersion(&api);
     if (api < VK_API_VERSION_1_3) {
-        MF_WARN("vk: loader reports %u.%u; this backend needs 1.3",
+        WR_WARN("vk: loader reports %u.%u; this backend needs 1.3",
                 VK_API_VERSION_MAJOR(api), VK_API_VERSION_MINOR(api));
         return false;
     }
 
     unsigned ext_count = 0;
     if (!SDL_Vulkan_GetInstanceExtensions(window_, &ext_count, nullptr)) {
-        MF_WARN("vk: SDL cannot list the surface extensions: %s", SDL_GetError());
+        WR_WARN("vk: SDL cannot list the surface extensions: %s", SDL_GetError());
         return false;
     }
     std::vector<const char *> extensions(ext_count);
@@ -503,13 +503,13 @@ bool VkDeviceImpl::create_instance(bool validation) {
                 break;
             }
         if (layers.empty())
-            MF_WARN("vk: validation asked for but the layer is not installed");
+            WR_WARN("vk: validation asked for but the layer is not installed");
     }
 
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "Manifold";
+    app.pApplicationName = "Warren";
     app.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
-    app.pEngineName = "Manifold";
+    app.pEngineName = "Warren";
     app.engineVersion = VK_MAKE_VERSION(0, 1, 0);
     app.apiVersion = VK_API_VERSION_1_3;
 
@@ -522,10 +522,10 @@ bool VkDeviceImpl::create_instance(bool validation) {
 
     VkResult r = vkCreateInstance(&ci, nullptr, &instance_);
     if (r != VK_SUCCESS) {
-        MF_WARN("vk: vkCreateInstance failed (%d)", int(r));
+        WR_WARN("vk: vkCreateInstance failed (%d)", int(r));
         return false;
     }
-    mf::vk::load_instance(instance_);
+    wr::vk::load_instance(instance_);
 
     if (debug_labels_ && vkCreateDebugUtilsMessengerEXT) {
         VkDebugUtilsMessengerCreateInfoEXT di{
@@ -545,7 +545,7 @@ bool VkDeviceImpl::pick_physical_device() {
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(instance_, &n, nullptr);
     if (!n) {
-        MF_WARN("vk: no physical devices");
+        WR_WARN("vk: no physical devices");
         return false;
     }
     std::vector<VkPhysicalDevice> devices(n);
@@ -578,7 +578,7 @@ bool VkDeviceImpl::pick_physical_device() {
         vkGetPhysicalDeviceFormatProperties(pd, VK_FORMAT_D32_SFLOAT_S8_UINT, &fp);
         if (!(fp.optimalTilingFeatures &
               VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
-            MF_WARN("vk: %s has no D32_SFLOAT_S8_UINT; skipping", props.deviceName);
+            WR_WARN("vk: %s has no D32_SFLOAT_S8_UINT; skipping", props.deviceName);
             continue;
         }
 
@@ -594,7 +594,7 @@ bool VkDeviceImpl::pick_physical_device() {
         }
     }
     if (!physical_) {
-        MF_WARN("vk: no adapter meets the requirements (1.3, present, D32F_S8)");
+        WR_WARN("vk: no adapter meets the requirements (1.3, present, D32F_S8)");
         return false;
     }
 
@@ -674,7 +674,7 @@ bool VkDeviceImpl::create_logical_device() {
     have.pNext = &have13;
     vkGetPhysicalDeviceFeatures2(physical_, &have);
     if (!have13.dynamicRendering || !have13.synchronization2) {
-        MF_WARN("vk: %s lacks dynamic rendering or synchronization2",
+        WR_WARN("vk: %s lacks dynamic rendering or synchronization2",
                 caps_.device_name.c_str());
         return false;
     }
@@ -695,7 +695,7 @@ bool VkDeviceImpl::create_logical_device() {
     ci.ppEnabledExtensionNames = extensions;
 
     VK_TRY(vkCreateDevice(physical_, &ci, nullptr, &device_), "vkCreateDevice");
-    mf::vk::load_device(device_);
+    wr::vk::load_device(device_);
     vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
 
     alloc_.init(physical_, device_);
@@ -825,7 +825,7 @@ bool VkDeviceImpl::create_swapchain(uint32_t w, uint32_t h) {
                  "swapchain image view");
         swapchain_images_.push_back(h);
     }
-    MF_INFO("vk: swapchain %ux%u, %zu images, %s, %s", extent_.width, extent_.height,
+    WR_INFO("vk: swapchain %ux%u, %zu images, %s, %s", extent_.width, extent_.height,
             swapchain_images_.size(), format_name(swapchain_format_),
             present == VK_PRESENT_MODE_MAILBOX_KHR     ? "mailbox"
             : present == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate"
@@ -867,7 +867,7 @@ void VkDeviceImpl::set_vsync(bool on) {
 bool VkDeviceImpl::init(const DeviceDesc &d) {
     window_ = (SDL_Window *)d.window;
     if (!window_) {
-        MF_ERROR("vk: no window");
+        WR_ERROR("vk: no window");
         return false;
     }
     frames_in_flight_ = std::max(1u, std::min(3u, d.frames_in_flight));
@@ -875,7 +875,7 @@ bool VkDeviceImpl::init(const DeviceDesc &d) {
 
     if (!create_instance(d.validation)) return false;
     if (!SDL_Vulkan_CreateSurface(window_, instance_, &surface_)) {
-        MF_WARN("vk: SDL could not create a surface: %s", SDL_GetError());
+        WR_WARN("vk: SDL could not create a surface: %s", SDL_GetError());
         return false;
     }
     if (!pick_physical_device()) return false;
@@ -913,7 +913,7 @@ bool VkDeviceImpl::init(const DeviceDesc &d) {
     }
 
     cmd_ = new VkCommandListImpl(this);
-    MF_INFO("vk: %s", alloc_.report().c_str());
+    WR_INFO("vk: %s", alloc_.report().c_str());
     return true;
 }
 
@@ -1004,7 +1004,7 @@ BufferH VkDeviceImpl::create_buffer(const BufferDesc &d, const void *initial) {
     if (d.usage & BufferUsage::Indirect) ci.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (vkCreateBuffer(device_, &ci, nullptr, &b->buffer) != VK_SUCCESS) {
-        MF_ERROR("vk: could not create buffer '%s'", b->name.c_str());
+        WR_ERROR("vk: could not create buffer '%s'", b->name.c_str());
         buffers.destroy(h);
         return {};
     }
@@ -1043,7 +1043,7 @@ void *VkDeviceImpl::map(BufferH h) {
     VkBufferRes *b = buffers.get_checked(h, "buffer");
     if (!b) return nullptr;
     if (!b->memory.mapped)
-        MF_ERROR("vk: buffer '%s' is not host visible", b->name.c_str());
+        WR_ERROR("vk: buffer '%s' is not host visible", b->name.c_str());
     return b->memory.mapped;
 }
 
@@ -1054,7 +1054,7 @@ void VkDeviceImpl::write_buffer(BufferH h, const void *data, uint64_t size,
     VkBufferRes *b = buffers.get_checked(h, "buffer");
     if (!b || !data || !size) return;
     if (offset + size > b->size) {
-        MF_ERROR("vk: write of %llu at %llu overflows buffer '%s' (%llu bytes)",
+        WR_ERROR("vk: write of %llu at %llu overflows buffer '%s' (%llu bytes)",
                  (unsigned long long)size, (unsigned long long)offset,
                  b->name.c_str(), (unsigned long long)b->size);
         return;
@@ -1078,7 +1078,7 @@ void VkDeviceImpl::write_buffer(BufferH h, const void *data, uint64_t size,
             record_copy(frames_[frame_index_].cb, uint64_t(at), p);
             return;
         }
-        MF_WARN("vk: staging ring full mid-frame; deferring an upload of %llu "
+        WR_WARN("vk: staging ring full mid-frame; deferring an upload of %llu "
                 "bytes to the next frame",
                 (unsigned long long)size);
     }
@@ -1121,7 +1121,7 @@ TextureH VkDeviceImpl::create_texture(const TextureDesc &d, const void *initial)
     if (d.dim == TextureDim::TexCube) ci.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 
     if (vkCreateImage(device_, &ci, nullptr, &t->image) != VK_SUCCESS) {
-        MF_ERROR("vk: could not create texture '%s' (%ux%u %s)",
+        WR_ERROR("vk: could not create texture '%s' (%ux%u %s)",
                  d.name ? d.name : "?", d.width, d.height, format_name(d.format));
         textures.destroy(h);
         return {};
@@ -1196,7 +1196,7 @@ VkImageView VkDeviceImpl::attachment_view(VkTextureRes &t, int32_t layer,
                            layer >= 0 ? 1u : t.desc.layers};
     VkImageView v = VK_NULL_HANDLE;
     if (vkCreateImageView(device_, &vi, nullptr, &v) != VK_SUCCESS) {
-        MF_ERROR("vk: could not make an attachment view for layer %d mip %u",
+        WR_ERROR("vk: could not make an attachment view for layer %d mip %u",
                  layer, mip);
         return t.view;
     }
@@ -1238,7 +1238,7 @@ size_t VkDeviceImpl::read_texture(TextureH h, void *out, size_t capacity,
     uint32_t hh = std::max(1u, t->desc.height >> mip);
     size_t need = size_t(w) * hh * format_block_size(t->desc.format);
     if (capacity < need) {
-        MF_ERROR("vk: read_texture needs %zu bytes, given %zu", need, capacity);
+        WR_ERROR("vk: read_texture needs %zu bytes, given %zu", need, capacity);
         return 0;
     }
 
@@ -1353,7 +1353,7 @@ void VkDeviceImpl::destroy(SamplerH h) {
 
 ShaderH VkDeviceImpl::create_shader(const ShaderDesc &d) {
     if (!d.spirv || !d.spirv_words) {
-        MF_ERROR("vk: shader '%s' has no SPIR-V", d.name ? d.name : "?");
+        WR_ERROR("vk: shader '%s' has no SPIR-V", d.name ? d.name : "?");
         return {};
     }
     ShaderH h = shaders.create();
@@ -1365,7 +1365,7 @@ ShaderH VkDeviceImpl::create_shader(const ShaderDesc &d) {
     ci.codeSize = d.spirv_words * 4;
     ci.pCode = d.spirv;
     if (vkCreateShaderModule(device_, &ci, nullptr, &s->module) != VK_SUCCESS) {
-        MF_ERROR("vk: shader module '%s' rejected", s->name.c_str());
+        WR_ERROR("vk: shader module '%s' rejected", s->name.c_str());
         shaders.destroy(h);
         return {};
     }
@@ -1419,7 +1419,7 @@ BindGroupH VkDeviceImpl::create_bind_group(const BindGroupDesc &d) {
     ai.descriptorSetCount = 1;
     ai.pSetLayouts = &l->layout;
     if (vkAllocateDescriptorSets(device_, &ai, &g->set) != VK_SUCCESS) {
-        MF_ERROR("vk: descriptor pool exhausted allocating '%s'",
+        WR_ERROR("vk: descriptor pool exhausted allocating '%s'",
                  d.name ? d.name : "?");
         groups.destroy(h);
         return {};
@@ -1502,7 +1502,7 @@ void VkDeviceImpl::update_bind_group(BindGroupH h, const BindGroupDesc &d) {
 
 PipelineH VkDeviceImpl::create_pipeline(const PipelineDesc &d) {
     if (d.push_constant_size > 128) {
-        MF_ERROR("pipeline '%s' wants %u bytes of push constants; the engine's "
+        WR_ERROR("pipeline '%s' wants %u bytes of push constants; the engine's "
                  "budget is 128, which is what Vulkan guarantees",
                  d.name ? d.name : "?", d.push_constant_size);
         return {};
@@ -1510,7 +1510,7 @@ PipelineH VkDeviceImpl::create_pipeline(const PipelineDesc &d) {
     const VkShaderRes *vs = shaders.get(d.vertex);
     const VkShaderRes *fs = shaders.get(d.fragment);
     if (!vs || !fs) {
-        MF_ERROR("vk: pipeline '%s' is missing a stage", d.name ? d.name : "?");
+        WR_ERROR("vk: pipeline '%s' is missing a stage", d.name ? d.name : "?");
         return {};
     }
 
@@ -1691,12 +1691,12 @@ PipelineH VkDeviceImpl::create_pipeline(const PipelineDesc &d) {
     gi.layout = p->layout;
     gi.renderPass = VK_NULL_HANDLE;
 
-    // MANIFOLD_DUMP_PIPELINES=1 prints the depth, stencil and blend
+    // WARREN_DUMP_PIPELINES=1 prints the depth, stencil and blend
     // state of every pipeline as it is created. Two backends that
     // disagree about a picture almost always disagree about one of
     // these first, and reading them back is faster than bisecting.
-    if (getenv("MANIFOLD_DUMP_PIPELINES"))
-        MF_INFO("vk pipeline '%s': stencil=%d front(cmp=%d ref-dyn fail=%d "
+    if (getenv("WARREN_DUMP_PIPELINES"))
+        WR_INFO("vk pipeline '%s': stencil=%d front(cmp=%d ref-dyn fail=%d "
                 "dfail=%d pass=%d cmask=0x%02x wmask=0x%02x) depth(test=%d "
                 "write=%d cmp=%d) cull=%d colourmask=0x%x fmt(depth=%d stencil=%d)",
                 d.name ? d.name : "?", int(ds.stencilTestEnable),
@@ -1709,7 +1709,7 @@ PipelineH VkDeviceImpl::create_pipeline(const PipelineDesc &d) {
                 int(ri.depthAttachmentFormat), int(ri.stencilAttachmentFormat));
     if (vkCreateGraphicsPipelines(device_, pipeline_cache_, 1, &gi, nullptr,
                                   &p->pipeline) != VK_SUCCESS) {
-        MF_ERROR("vk: pipeline '%s' could not be created", d.name ? d.name : "?");
+        WR_ERROR("vk: pipeline '%s' could not be created", d.name ? d.name : "?");
         vkDestroyPipelineLayout(device_, p->layout, nullptr);
         pipelines.destroy(h);
         return {};
@@ -1902,7 +1902,7 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
         int64_t at = stage(p.bytes.data(), p.bytes.size(),
                            p.dst_texture.valid() ? 256 : 16);
         if (at < 0) {
-            MF_ERROR("vk: staging ring full; an upload of %zu bytes was dropped",
+            WR_ERROR("vk: staging ring full; an upload of %zu bytes was dropped",
                      p.bytes.size());
             continue;
         }
@@ -1914,7 +1914,7 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
 
 CommandList *VkDeviceImpl::begin_frame() {
     if (frame_open_) {
-        MF_ERROR("vk: begin_frame called twice");
+        WR_ERROR("vk: begin_frame called twice");
         return cmd_;
     }
     Frame &f = frames_[frame_index_];
@@ -1935,7 +1935,7 @@ CommandList *VkDeviceImpl::begin_frame() {
         return nullptr;
     }
     if (r != VK_SUCCESS) {
-        MF_ERROR("vk: vkAcquireNextImageKHR failed (%d)", int(r));
+        WR_ERROR("vk: vkAcquireNextImageKHR failed (%d)", int(r));
         return nullptr;
     }
 
@@ -2104,8 +2104,8 @@ void VkCommandListImpl::begin_rendering(const RenderingInfo &info) {
     ri.pColorAttachments = colour.data();
     ri.pDepthAttachment = info.has_depth ? &depth : nullptr;
     ri.pStencilAttachment = has_stencil ? &stencil : nullptr;
-    if (getenv("MANIFOLD_DUMP_PIPELINES"))
-        MF_INFO("vk begin_rendering '%s': %ux%u colour=%zu depth=%s stencil=%s "
+    if (getenv("WARREN_DUMP_PIPELINES"))
+        WR_INFO("vk begin_rendering '%s': %ux%u colour=%zu depth=%s stencil=%s "
                 "(depth load=%d clear=%.3f, stencil load=%d clear=%u)",
                 info.name ? info.name : "?", w, h, colour.size(),
                 ri.pDepthAttachment ? "yes" : "NO",
@@ -2371,4 +2371,4 @@ Device *create_vulkan_device(const DeviceDesc &d) {
     return dev;
 }
 
-}  // namespace mf::rhi
+}  // namespace wr::rhi

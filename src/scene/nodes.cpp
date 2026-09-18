@@ -3,7 +3,7 @@
 #include "core/log.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 
 // --------------------------------------------------------------- Camera3D
 
@@ -31,7 +31,7 @@ Projection Camera3D::projection(float aspect) const {
                 static bool warned = false;
                 if (!warned) {
                     warned = true;
-                    MF_WARN("Camera3D: frustum_offset is ignored on an infinite "
+                    WR_WARN("Camera3D: frustum_offset is ignored on an infinite "
                             "projection");
                 }
             }
@@ -184,6 +184,6 @@ static void register_scene_nodes() {
         .field("angle", &SpotLight3D::angle)
         .field("angle_softness", &SpotLight3D::angle_softness);
 }
-MF_REGISTER(register_scene_nodes)
+WR_REGISTER(register_scene_nodes)
 
-}  // namespace mf
+}  // namespace wr

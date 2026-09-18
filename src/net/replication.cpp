@@ -8,7 +8,7 @@
 #include "core/serialize.h"
 #include "scene/scene_tree.h"
 
-namespace mf {
+namespace wr {
 namespace {
 constexpr uint32_t kSnapshotMagic = 0x534E4150u;  // 'SNAP'
 constexpr uint32_t kSpawnMagic = 0x53504E57u;     // 'SPNW'
@@ -130,7 +130,7 @@ void Replicator::apply_spawns(const uint8_t *data, size_t size) {
             }
         }
         if (!node) {
-            MF_WARN("net: cannot spawn '%s' for id %u", cls.c_str(), id);
+            WR_WARN("net: cannot spawn '%s' for id %u", cls.c_str(), id);
             continue;
         }
         NetSync *s = new NetSync();
@@ -228,6 +228,6 @@ static void register_net_classes() {
         .field("interpolate", &NetSync::interpolate)
         .method("add_property", &NetSync::add_property).args("name");
 }
-MF_REGISTER(register_net_classes)
+WR_REGISTER(register_net_classes)
 
-}  // namespace mf
+}  // namespace wr

@@ -1,4 +1,4 @@
-// Manifold -- one triangle covering the screen.
+// Warren -- one triangle covering the screen.
 //
 // Three vertices, no vertex buffer, no index buffer: the positions come
 // from gl_VertexIndex. A single triangle rather than two because the

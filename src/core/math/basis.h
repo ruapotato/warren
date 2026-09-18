@@ -1,9 +1,9 @@
-// Manifold -- 3x3, as three columns.
+// Warren -- 3x3, as three columns.
 #pragma once
 
 #include "quat.h"
 
-namespace mf {
+namespace wr {
 
 // A linear map, stored as the three vectors the unit axes land on. That
 // is the useful reading of a basis nine times out of ten -- `col[1]` is
@@ -126,4 +126,4 @@ inline Basis lerp(const Basis &a, const Basis &b, float t) {
             lerp(a.col[2], b.col[2], t)};
 }
 
-}  // namespace mf
+}  // namespace wr

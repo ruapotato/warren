@@ -8,7 +8,7 @@
 #include "core/log.h"
 #include "core/object.h"
 
-namespace mf {
+namespace wr {
 namespace {
 
 // A Variant type as a Python annotation. Several engine types map to
@@ -120,9 +120,9 @@ std::vector<ClassInfo *> in_dependency_order() {
     return all;
 }
 
-const char *k_preamble = R"(# Manifold -- generated type stubs. Do not edit.
+const char *k_preamble = R"(# Warren -- generated type stubs. Do not edit.
 #
-# Written from the engine's own class registry by `manifold --stubs`,
+# Written from the engine's own class registry by `warren --stubs`,
 # so this file describes exactly the classes, methods and properties
 # the running engine exposes -- plugins included, if they were loaded
 # when it was generated. Regenerate it when the engine changes.
@@ -358,18 +358,18 @@ bool write_python_stubs(const std::string &path) {
     const std::string text = python_stubs();
     FILE *f = std::fopen(path.c_str(), "wb");
     if (!f) {
-        MF_ERROR("stubs: could not write '%s'", path.c_str());
+        WR_ERROR("stubs: could not write '%s'", path.c_str());
         return false;
     }
     const size_t n = std::fwrite(text.data(), 1, text.size(), f);
     std::fclose(f);
     if (n != text.size()) {
-        MF_ERROR("stubs: short write to '%s'", path.c_str());
+        WR_ERROR("stubs: short write to '%s'", path.c_str());
         return false;
     }
-    MF_INFO("stubs: wrote %s (%zu classes, %zu bytes)", path.c_str(),
+    WR_INFO("stubs: wrote %s (%zu classes, %zu bytes)", path.c_str(),
             ClassDB::all().size(), text.size());
     return true;
 }
 
-}  // namespace mf
+}  // namespace wr

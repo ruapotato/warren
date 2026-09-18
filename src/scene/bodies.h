@@ -1,10 +1,10 @@
-// Manifold -- things that collide.
+// Warren -- things that collide.
 #pragma once
 
 #include "physics/world.h"
 #include "scene/nodes.h"
 
-namespace mf {
+namespace wr {
 
 class PhysicsWorld;
 
@@ -12,7 +12,7 @@ class PhysicsWorld;
 // moved; moving one is legal but rebuilds nothing, so a moving
 // platform should be a CharacterBody3D or an AnimatableBody.
 class StaticBody3D : public Node3D {
-    MF_CLASS(StaticBody3D, Node3D)
+    WR_CLASS(StaticBody3D, Node3D)
 
 public:
     ~StaticBody3D() override;
@@ -45,7 +45,7 @@ private:
 // the gravity and the speeds. A two-metre doorway wired to a six-metre
 // arch is a machine for making you three times as tall.
 class CharacterBody3D : public Node3D {
-    MF_CLASS(CharacterBody3D, Node3D)
+    WR_CLASS(CharacterBody3D, Node3D)
 
 public:
     CharacterBody3D() = default;
@@ -127,4 +127,4 @@ private:
     float last_scale_ = 1.0f;
 };
 
-}  // namespace mf
+}  // namespace wr

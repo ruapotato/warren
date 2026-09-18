@@ -1,4 +1,4 @@
-// Manifold -- the scene tree.
+// Warren -- the scene tree.
 //
 // In the image of Godot, because that shape is right: a tree of nodes,
 // each a small thing that does one job, composed rather than inherited
@@ -12,7 +12,7 @@
 
 #include "core/object.h"
 
-namespace mf {
+namespace wr {
 
 class Node;
 class SceneTree;
@@ -40,7 +40,7 @@ public:
 };
 
 class Node : public Object {
-    MF_CLASS(Node, Object)
+    WR_CLASS(Node, Object)
 
 public:
     Node();
@@ -169,7 +169,7 @@ protected:
 // ask for it many times a frame and recomputing a chain of matrices per
 // query is how a scene graph becomes the slowest part of an engine.
 class Node3D : public Node {
-    MF_CLASS(Node3D, Node)
+    WR_CLASS(Node3D, Node)
 
 public:
     Node3D() = default;
@@ -228,4 +228,4 @@ protected:
     uint32_t layers_ = 1;
 };
 
-}  // namespace mf
+}  // namespace wr

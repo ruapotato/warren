@@ -1,4 +1,4 @@
-# Every Vulkan entry point Manifold calls. Loaded at run time through
+# Every Vulkan entry point Warren calls. Loaded at run time through
 # vkGetInstanceProcAddr, so a machine with no Vulkan driver falls back
 # to OpenGL instead of failing to start.
 #
