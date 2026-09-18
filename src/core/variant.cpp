@@ -392,3 +392,57 @@ bool Variant::operator==(const Variant &o) const {
 }
 
 }  // namespace mf
+
+// BLENDING TWO VALUES OF WHATEVER TYPE THEY TURN OUT TO BE.
+//
+// Interpolation belongs with the type rather than with whatever is
+// doing the interpolating. A replicator that switches on VType to
+// smooth a position is one that stops working the day a class
+// replicates a rotation, and a tween, an animation track and an undo
+// preview all want the same answer.
+//
+// Rotations take the shortest arc. Anything with no sensible midpoint
+// -- a string, an object, an array -- holds the old value until the
+// end and then takes the new one, which is at least never a value
+// that was true at neither end.
+namespace mf {
+
+Variant Variant::lerp(const Variant &a, const Variant &b, float t) {
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    if (a.type() != b.type()) return t < 0.5f ? a : b;
+    switch (a.type()) {
+        case VType::Float:
+            return Variant(double(a.to_float() + (b.to_float() - a.to_float()) * t));
+        case VType::Int: {
+            const double v = double(a.to_int()) +
+                             (double(b.to_int()) - double(a.to_int())) * double(t);
+            return Variant(int64_t(v + (v < 0 ? -0.5 : 0.5)));
+        }
+        case VType::Vec2: return Variant(a.to_vec2() + (b.to_vec2() - a.to_vec2()) * t);
+        case VType::Vec3: return Variant(a.to_vec3() + (b.to_vec3() - a.to_vec3()) * t);
+        case VType::Vec4: return Variant(a.to_vec4() + (b.to_vec4() - a.to_vec4()) * t);
+        case VType::Color: {
+            const Color x = a.to_color(), y = b.to_color();
+            return Variant(Color(x.r + (y.r - x.r) * t, x.g + (y.g - x.g) * t,
+                                 x.b + (y.b - x.b) * t, x.a + (y.a - x.a) * t));
+        }
+        case VType::Quat: return Variant(slerp(a.to_quat(), b.to_quat(), t));
+        case VType::Transform: {
+            const Transform3D x = a.to_transform(), y = b.to_transform();
+            Transform3D out;
+            out.origin = x.origin + (y.origin - x.origin) * t;
+            out.basis = Basis(slerp(x.basis.to_quat(), y.basis.to_quat(), t));
+            return Variant(out);
+        }
+        case VType::Plane: {
+            const Plane x = a.to_plane(), y = b.to_plane();
+            return Variant(Plane((x.normal + (y.normal - x.normal) * t).normalized(),
+                                 x.d + (y.d - x.d) * t));
+        }
+        default:
+            return t < 0.5f ? a : b;
+    }
+}
+
+}  // namespace mf

@@ -92,6 +92,7 @@ public:
     // --- what is it -----------------------------------------------------
     VType type() const { return t_; }
     const char *type_name() const { return vtype_name(t_); }
+    static Variant lerp(const Variant &a, const Variant &b, float t);
     bool is_nil() const { return t_ == VType::Nil; }
     bool is_num() const { return t_ == VType::Int || t_ == VType::Float; }
     void clear();

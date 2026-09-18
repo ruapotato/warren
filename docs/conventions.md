@@ -293,3 +293,53 @@ The direction the sound arrives from is towards the **aperture**, not
 towards the source. That is the part that makes it read as a hole.
 Doppler uses the rate of change of the *path*, so a source running
 towards a portal rises in pitch for a listener on the other side of it.
+
+## Networking
+
+Three channels, because a game wants three different things out of
+UDP and a stack offering one makes the other two somebody else's
+problem: **Unreliable** (a snapshot; if it is lost the next one is
+along and is better anyway), **Sequenced** (a snapshot that is never
+delivered out of order, so a late one cannot wind the world
+backwards), and **Reliable** (a spawn, a death, a chat line).
+
+**Two acknowledgement schemes, because they answer different
+questions.** Fiedler's packet ack — newest sequence plus a bitfield
+of the 32 before it — measures the *link*: round trip and loss. It is
+the wrong shape for confirming *delivery*, because it reaches only 32
+packets back, and a peer sending 80 packets a second while the other
+answers 10 times a second has moved past the window before any ack
+arrives. Measured: **844 retransmissions to deliver 100 messages**.
+The reliable stream is therefore acked cumulatively — one number
+saying "I have everything below this" — plus a bitfield of the 32
+after it, so a message the receiver is already holding behind a lost
+one is not retransmitted. That took it to **157**, and
+`tests/test_net` now fails above 200.
+
+Retransmissions are also capped per update. Without that, a hundred
+messages time out together and the burst pushes the peer's ack window
+forward faster than its acks come back — the stack making its own
+problem worse.
+
+**The simulated transport is not a test fixture, it is the point.** A
+reliability layer works perfectly on localhost; loss, reordering and
+duplication are its entire reason for existing and none of them
+happen between two processes on one machine. `SimulatedNetwork` drops
+a third, duplicates a tenth and delivers the rest in jitter order
+from a seeded generator, so a failure reproduces.
+
+A length field in a packet is an allocation request from a stranger.
+`ByteReader` bounds every one against what is actually left, reports
+failure once at the end rather than at every field, and zeroes what
+it could not read so a truncated packet cannot hand the game numbers
+nobody wrote.
+
+### What "the client agrees with the server" means
+
+The client interpolates towards the newest snapshot rather than
+snapping to it, so it is deliberately behind: at 6 m/s with a 50 ms
+snapshot interval it sits about half a metre back along the path.
+That is the feature working. A test that called it error would be
+measuring the latency of its own simulator. What *is* error is being
+off the path — `tests/test_net` measures **0.570 m of lag and 0.013 m
+of drift** over a link losing a fifth of everything.

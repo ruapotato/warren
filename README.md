@@ -129,6 +129,13 @@ rather than teleporting between frames. A body that crosses an unequal
 pair is rescaled by the ratio, and its collision radius, step height
 and eye height all follow from that one number.
 
+**Replication is a list of property names.** A node says which of its
+properties matter over the wire; the server reads them through
+ClassDB, writes them as Variants and the client sets them back the
+same way. Nothing in the net layer knows what a `Vec3` is or that
+`Node3D` has a position — which is why a plugin's class and a Python
+subclass replicate without the net layer being told they exist.
+
 **One declaration, every binding.** A class says what it has once, in
 C++:
 
@@ -254,6 +261,7 @@ src/render/shaders/  one source per program, both backends
 src/scene/         node tree, cameras, lights, Portal3D, bodies
 src/physics/       shapes, BVH, sweeps, portal-aware tracing
 src/audio/         the mixer and clip loading
+src/net/           sockets, reliability, replication
 src/script/        the Python bridge and the stub generator
 src/plugin/        the plugin ABI and host
 src/app/           Engine: the loop that ties it together
@@ -262,7 +270,8 @@ tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
                    lights, image-based lighting, punctual shadows,
-                   the plugin ABI and terrain LOD, audio, Python
+                   the plugin ABI and terrain LOD, audio,
+                   networking, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -286,6 +295,6 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: networking and an editor.
+Not yet: an editor.
 
 See `docs/conventions.md` before touching the renderer.

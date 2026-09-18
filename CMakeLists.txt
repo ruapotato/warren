@@ -69,7 +69,7 @@ add_custom_target(manifold_codegen DEPENDS ${GL_GEN} ${VK_GEN} ${SHADER_GEN})
 
 # ----------------------------------------------------------------- sources
 
-set(MANIFOLD_DIRS core core/math platform audio render
+set(MANIFOLD_DIRS core core/math platform audio net render
                   render/shaders/generated scene physics script plugin
                   resource app)
 set(MANIFOLD_SRC "")
