@@ -247,7 +247,8 @@ bool Crowd::set_target(uint32_t id, const Vec3 &target) {
     a->arrived = false;
     a->leg = 1;
     a->on_link = false;
-    return mesh_->find_path(a->position, target, &a->path, &a->path_partial);
+    return mesh_->find_path(a->position, target, &a->path, &a->path_partial,
+                            a->filter);
 }
 
 void Crowd::stop(uint32_t id) {
@@ -293,7 +294,7 @@ void Crowd::follow_paths(float dt) {
         if (a.stuck_for > 0.5f && replanned < replans_per_step) {
             a.stuck_for = 0.0f;
             if (mesh_ && mesh_->find_path(a.position, a.target, &a.path,
-                                          &a.path_partial)) {
+                                          &a.path_partial, a.filter)) {
                 a.leg = 1;
                 ++replanned;
             }
@@ -399,7 +400,7 @@ void Crowd::follow_paths(float dt) {
             if (off > replan_distance) {
                 if (mesh_ &&
                     mesh_->find_path(a.position, a.target, &a.path,
-                                     &a.path_partial)) {
+                                     &a.path_partial, a.filter)) {
                     a.leg = 1;
                     ++replanned;
                 }
@@ -585,12 +586,12 @@ void Crowd::integrate(float dt) {
         // after a bug; whatever the cause, refusing to move it
         // leaves it standing in the air for the rest of the game.
         // Put it back first and move it afterwards.
-        if (mesh_->find_poly(a.position, Vec3(0.5f, a.height, 0.5f)) ==
-            nav::kNoPoly) {
+        if (mesh_->find_poly(a.position, Vec3(0.5f, a.height, 0.5f),
+                             a.filter) == nav::kNoPoly) {
             Vec3 back;
-            if (mesh_->nearest_point(a.position, Vec3(8.0f, a.height * 2.0f,
-                                                      8.0f),
-                                     &back)) {
+            if (mesh_->nearest_point(a.position,
+                                     Vec3(8.0f, a.height * 2.0f, 8.0f), &back,
+                                     nullptr, a.filter)) {
                 a.position = back;
                 want = back + a.velocity * dt;
             }
@@ -598,10 +599,10 @@ void Crowd::integrate(float dt) {
 
         const float step = (want - a.position).length();
         Vec3 on;
-        const bool projected =
-            mesh_->nearest_point(want, Vec3(1.0f, a.height, 1.0f), &on);
+        const bool projected = mesh_->nearest_point(
+            want, Vec3(1.0f, a.height, 1.0f), &on, nullptr, a.filter);
         Vec3 hit;
-        if (mesh_->raycast(a.position, want, &hit)) {
+        if (mesh_->raycast(a.position, want, &hit, a.filter)) {
             if (projected) want = on;
         } else if (projected &&
                    (on - a.position).length() <= step * 2.0f + 1e-3f) {

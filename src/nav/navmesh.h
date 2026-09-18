@@ -165,6 +165,23 @@ public:
     // touch.
     int prune_unreachable(const std::vector<Vec3> &seeds);
 
+    // CHANGE WHAT A FILTER SEES, without re-baking.
+    //
+    // Every polygon whose centre lies in `box` has `set_bits` turned
+    // on in its area mask and `clear_bits` turned off. Returns how
+    // many changed.
+    //
+    // This is how a level opens up. A town whose doors are bought
+    // one at a time could re-bake as each one opens, and a bake of a
+    // hundred and thirty metres is a fraction of a second -- spent
+    // at the exact moment a player has just committed to a doorway
+    // with a crowd behind them. Baking once with every doorway
+    // passable and gating it with a bit costs nothing and happens
+    // between frames.
+    int set_area_in(const AABB &box, uint16_t set_bits, uint16_t clear_bits);
+    // The area mask of whatever polygon is at `p`, or zero if none.
+    uint16_t area_at(const Vec3 &p, const Vec3 &extents) const;
+
     void add_link(const NavLink &link);
     void clear_links();
     const std::vector<NavLink> &links() const { return links_; }

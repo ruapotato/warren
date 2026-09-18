@@ -83,6 +83,11 @@ public:
     // vertically, because the usual mistake is a body half a metre
     // above the floor and the usual disaster is snapping it to the
     // storey below.
+    // Turn area bits on or off over a box, which is how a zone
+    // opens without re-baking. See NavMesh::set_area_in.
+    int set_area_in(const AABB &box, int set_bits, int clear_bits);
+    int area_at(const Vec3 &p) const;
+
     bool nearest_point(const Vec3 &p, Vec3 *out) const;
     bool random_point(const Vec3 &near, float radius, Vec3 *out) const;
     // The same two, shaped for a script: they return the point
@@ -158,7 +163,14 @@ public:
     // a mob told to stand on one point orbits it for ever.
     float goal_radius = 0.0f;
     bool avoidance = true;
+    // Who avoids whom, in the crowd.
     uint16_t layer = 1, mask = 0xffff;
+    // WHICH GROUND THIS BODY MAY WALK ON, against NavPoly::area.
+    // Separate from `layer`/`mask`, which are about bodies; this is
+    // about the level. A town that opens a zone at a time sets a
+    // bit on that zone's polygons and puts the bit in here.
+    int nav_include = 0xffff;
+    int nav_exclude = 0;
 
     // WHO MOVES THE NODE. By default the agent does: the crowd
     // works out where the body should be and the transform follows.

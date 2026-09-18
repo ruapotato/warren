@@ -171,6 +171,15 @@ void NavRegion3D::on_physics(float dt) {
     if (active && mesh_) crowd_.step(dt);
 }
 
+int NavRegion3D::set_area_in(const AABB &box, int set_bits, int clear_bits) {
+    if (!mesh_) return 0;
+    return mesh_->set_area_in(box, uint16_t(set_bits), uint16_t(clear_bits));
+}
+
+int NavRegion3D::area_at(const Vec3 &p) const {
+    return mesh_ ? int(mesh_->area_at(p, Vec3(1.0f, 2.0f, 1.0f))) : 0;
+}
+
 Vec3 NavRegion3D::nearest_point_or(const Vec3 &p) const {
     Vec3 out = p;
     nearest_point(p, &out);
@@ -225,6 +234,8 @@ void NavAgent3D::join() {
     a.avoidance = avoidance;
     a.layer = layer;
     a.mask = mask;
+    a.filter.include = uint16_t(nav_include);
+    a.filter.exclude = uint16_t(nav_exclude);
     id_ = region_->crowd().add(a);
     if (pending_) {
         region_->crowd().set_target(id_, pending_target_);
@@ -325,6 +336,8 @@ void NavAgent3D::on_physics(float dt) {
     a->avoidance = avoidance;
     a->layer = layer;
     a->mask = mask;
+    a->filter.include = uint16_t(nav_include);
+    a->filter.exclude = uint16_t(nav_exclude);
 
     if (drives_transform) {
         set_global_position(a->position);
@@ -346,6 +359,9 @@ static void register_nav_nodes() {
         .method("poly_count", &NavRegion3D::poly_count)
         .method("bake_seconds", &NavRegion3D::bake_seconds)
         .method("collect_links", &NavRegion3D::collect_links_now)
+        .method("set_area_in", &NavRegion3D::set_area_in)
+            .args("box", "set_bits", "clear_bits")
+        .method("area_at", &NavRegion3D::area_at).args("point")
         .method("find_path", &NavRegion3D::find_path).args("from", "to")
         .method("is_reachable", &NavRegion3D::is_reachable).args("from", "to")
         .method("nearest_point", &NavRegion3D::nearest_point_or).args("point")
@@ -368,6 +384,8 @@ static void register_nav_nodes() {
         .field("max_accel", &NavAgent3D::max_accel, "range:0,128")
         .field("goal_radius", &NavAgent3D::goal_radius, "range:0,32")
         .field("avoidance", &NavAgent3D::avoidance)
+        .field("nav_include", &NavAgent3D::nav_include)
+        .field("nav_exclude", &NavAgent3D::nav_exclude)
         .field("drives_transform", &NavAgent3D::drives_transform)
         .method("set_target", &NavAgent3D::set_target).args("point")
         .method("stop", &NavAgent3D::stop)

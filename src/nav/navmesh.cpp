@@ -415,6 +415,25 @@ int NavMesh::prune_unreachable(const std::vector<Vec3> &seeds) {
     return dropped;
 }
 
+int NavMesh::set_area_in(const AABB &box, uint16_t set_bits,
+                         uint16_t clear_bits) {
+    int changed = 0;
+    for (NavPoly &p : polys_) {
+        if (p.count == 0) continue;
+        Vec3 c = poly_center(p);
+        if (!box.contains(c)) continue;
+        uint16_t was = p.area;
+        p.area = uint16_t((p.area | set_bits) & ~clear_bits);
+        if (p.area != was) ++changed;
+    }
+    return changed;
+}
+
+uint16_t NavMesh::area_at(const Vec3 &p, const Vec3 &extents) const {
+    uint16_t poly = find_poly(p, extents);
+    return poly == kNoPoly ? 0 : polys_[poly].area;
+}
+
 void NavMesh::add_link(const NavLink &link) {
     links_.push_back(link);
     resolve_links();
@@ -476,6 +495,23 @@ bool NavMesh::find_path(const Vec3 &from, const Vec3 &to,
     const Vec3 ext(2.0f, 4.0f, 2.0f);
     if (!nearest_point(from, ext, &start, &start_poly, filter)) return false;
     if (!nearest_point(to, ext, &goal, &goal_poly, filter)) return false;
+
+    // A GOAL THAT SNAPPED A LONG WAY IS NOT THE GOAL.
+    //
+    // Both ends are put on the mesh before searching, which is what
+    // lets a caller name a point half a metre above the floor, or
+    // just inside a wall, and get a sensible answer. But the filter
+    // decides what counts as the mesh, so a goal inside a zone this
+    // body may not enter snaps to the nearest zone it may -- and a
+    // route to THAT is not a partial route, it is a complete route
+    // to somewhere else, which is worse, because the caller is told
+    // it succeeded.
+    //
+    // Snapping further than the search box means the point asked
+    // for was not on reachable ground. The path still goes as far
+    // as it can, and now says so.
+    const bool goal_moved =
+        (goal - to).length() > std::fmax(ext.x, ext.z) * 1.5f;
 
     // Links leaving each polygon, gathered once. A level has few
     // links and many polygons, so scanning the link list per
@@ -568,6 +604,8 @@ bool NavMesh::find_path(const Vec3 &from, const Vec3 &to,
             }
         }
     }
+
+    if (goal_moved && partial) *partial = true;
 
     if (!found) {
         if (partial) *partial = true;

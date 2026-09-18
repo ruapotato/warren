@@ -872,6 +872,70 @@ int main() {
               "and the route up it still works");
     }
 
+    // ------------------------------------------- opening a zone by a bit
+    //
+    // A town whose doors are bought one at a time could re-bake as
+    // each opens. A bake of a hundred and thirty metres is a
+    // fraction of a second, spent at the exact moment a player has
+    // committed to a doorway with a crowd behind them.
+    //
+    // Baking once with every doorway passable and gating it with an
+    // area bit costs nothing and happens between frames. This is
+    // that mechanism: the same mesh, two answers, no re-bake.
+    {
+        std::vector<Vec3> tris;
+        box(tris, Vec3(-10, -0.2f, -10), Vec3(10, 0, 10));
+        box(tris, Vec3(-0.3f, 0, -10), Vec3(0.3f, 2.5f, -2));
+        box(tris, Vec3(-0.3f, 0, 2), Vec3(0.3f, 2.5f, 10));
+        AABB b(Vec3(-11.2f, -1.4f, -11.2f), Vec3(11.2f, 3, 11.2f));
+
+        NavMesh mesh;
+        check(mesh.bake(tris, b, settings, nullptr), "two rooms bake");
+
+        const uint16_t kOpen = 1, kSealed = 2;
+        int marked = mesh.set_area_in(AABB(Vec3(0.0f, -2, -12), Vec3(12, 4, 12)),
+                                      kSealed, kOpen);
+        check(marked > 0, "the east room's polygons can be marked sealed");
+        check_int(int(mesh.area_at(Vec3(5, 0, -6), Vec3(1, 2, 1))), kSealed,
+                  "and report the mark");
+        check_int(int(mesh.area_at(Vec3(-5, 0, -6), Vec3(1, 2, 1))), kOpen,
+                  "while the west room keeps its own");
+
+        NavFilter only_open;
+        only_open.include = kOpen;
+        std::vector<PathPoint> path;
+        bool partial = false;
+        mesh.find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6), &path, &partial,
+                       only_open);
+        check(partial, "a body that may only use open ground cannot cross");
+
+        Vec3 hit;
+        check(!mesh.raycast(Vec3(-1.5f, 0, 6), Vec3(1.5f, 0, 6), &hit,
+                            only_open),
+              "and a ray of its own is stopped at the boundary");
+
+        // Buying the door: one call, no re-bake, and the same query
+        // answers differently.
+        mesh.set_area_in(AABB(Vec3(0.0f, -2, -12), Vec3(12, 4, 12)), kOpen,
+                         kSealed);
+        partial = true;
+        check(mesh.find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6), &path, &partial,
+                             only_open) &&
+                  !partial,
+              "opening it lets the same body straight through");
+
+        // A body with no filter was never stopped, which is what
+        // makes the gate a property of the body and not of the mesh.
+        NavFilter anything;
+        partial = true;
+        mesh.set_area_in(AABB(Vec3(0.0f, -2, -12), Vec3(12, 4, 12)), kSealed,
+                         kOpen);
+        check(mesh.find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6), &path, &partial,
+                             anything) &&
+                  !partial,
+              "and something that ignores the gate still walks through it");
+    }
+
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
 }

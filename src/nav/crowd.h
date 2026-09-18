@@ -56,6 +56,13 @@ struct CrowdAgent {
     // shorter cuts it finer and starts to bump.
     float time_horizon = 2.0f;
 
+    // WHICH GROUND THIS BODY MAY USE. The navmesh is baked once
+    // with everything passable; what a given body is allowed to
+    // cross is a filter, so a town can open a zone at a time, a
+    // hound can be barred from the sewer, and none of it costs a
+    // re-bake.
+    NavFilter filter;
+
     bool avoidance = true;
     // Who avoids whom. A body avoids another when its mask overlaps
     // the other's layer -- so the living can be made to dodge each
