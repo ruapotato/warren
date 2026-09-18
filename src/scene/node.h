@@ -65,6 +65,29 @@ public:
     bool is_queued_for_deletion() const { return queued_free_; }
 
     Node *parent() const { return parent_; }
+
+    // WHICH SCENE THIS NODE BELONGS TO.
+    //
+    // Not its parent: a door instanced inside a room has the room's
+    // wall as its parent and the DOOR as its owner, because the door
+    // is where it is defined. Saving the room then writes that node
+    // as part of an instance line rather than in full, which is what
+    // makes editing the door change every room that uses one.
+    //
+    // Null means "belongs to whatever tree it is in", which is true
+    // of anything built by hand in code.
+    Node *owner() const { return owner_; }
+    void set_owner(Node *o) { owner_ = o; }
+    // Owner for this node and everything beneath it. What
+    // PackedScene::instantiate uses, and what a tool uses after
+    // building a subtree it means to save as a unit.
+    void set_owner_recursive(Node *o);
+
+    // WHERE THIS NODE CAME FROM, when it is the root of an instance.
+    // Empty for everything else. Set by PackedScene::instantiate and
+    // read by whatever saves the tree above it.
+    const std::string &scene_path() const { return scene_path_; }
+    void set_scene_path(const std::string &p) { scene_path_ = p; }
     const std::vector<Ref<Node>> &children() const { return children_; }
     int child_count() const { return int(children_.size()); }
     Node *child(int i) const {
@@ -124,7 +147,11 @@ protected:
     void propagate_exit();
 
     std::string name_ = "Node";
-    Node *parent_ = nullptr;             // borrowed; the parent owns us
+    Node *parent_ = nullptr;
+    // Weak on purpose. An owner is always an ancestor, so it
+    // outlives what it owns, and a reference would be a cycle.
+    Node *owner_ = nullptr;
+    std::string scene_path_;             // borrowed; the parent owns us
     std::vector<Ref<Node>> children_;
     std::vector<std::string> groups_;
     SceneTree *tree_ = nullptr;

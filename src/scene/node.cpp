@@ -44,6 +44,23 @@ std::string Node::path() const {
     return parent_->path() + "/" + name_;
 }
 
+void Node::set_owner_recursive(Node *o) {
+    owner_ = o;
+    for (auto &c : children_) {
+        if (!c) continue;
+        // STOP AT AN INSTANCE. A door placed in a corridor belongs
+        // to the corridor -- that is what makes the corridor write
+        // it -- but everything INSIDE the door belongs to the door,
+        // and claiming it for the corridor is what turns "one line
+        // referring to a door" back into "a copy of a door".
+        if (!c->scene_path_.empty()) {
+            c->owner_ = o;
+            continue;
+        }
+        c->set_owner_recursive(o);
+    }
+}
+
 void Node::add_child(Node *child) {
     if (!child) return;
     if (child == this) {
@@ -371,6 +388,9 @@ static void register_node_classes() {
         .method("remove_child", &Node::remove_child).args("child")
         .method("queue_free", &Node::queue_free)
         .method("get_parent", &Node::parent)
+        .method("get_owner", &Node::owner)
+        .method("set_owner", &Node::set_owner).args("owner")
+        .prop("scene_path", &Node::scene_path, &Node::set_scene_path)
         .method("get_child_count", &Node::child_count)
         .method("get_child", &Node::child).args("index")
         .method("find_child", &Node::find_child).args("name")
