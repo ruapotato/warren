@@ -25,6 +25,10 @@
 
 #include "nav/crowd.h"
 #include "nav/navmesh.h"
+#include "render/mesh.h"
+#include "scene/nav_nodes.h"
+#include "scene/nodes.h"
+#include "scene/scene_tree.h"
 
 using namespace wr;
 using namespace wr::nav;
@@ -373,6 +377,116 @@ int main() {
         check(a->arrived, "and the body gets to the roof");
         check(on_link_steps > 0, "by way of the ladder, which it reports");
         check_near(a->position.y, 3.0f, 0.2f, "ending up at roof height");
+    }
+
+    // ============================================================
+    //                                              as nodes in a scene
+    // ============================================================
+    //
+    // Everything above works on triangles and knows nothing about
+    // the tree, which is what makes it testable. This is the
+    // ordinary way to use it: put a region in the level, put bodies
+    // under it, and let the level's own geometry be what gets baked.
+    {
+        SceneTree tree;
+        Node3D *scene = new Node3D();
+        scene->set_name("Level");
+        tree.set_scene(scene);
+
+        NavRegion3D *region = new NavRegion3D();
+        region->set_name("Nav");
+        region->settings.agent.radius = 0.35f;
+        region->settings.cell_size = 0.25f;
+        scene->add_child(region);
+
+        // A floor and a wall with a gap in it, as actual meshes,
+        // because the point of the node layer is that the geometry
+        // in the level is the geometry that gets baked.
+        auto slab = [&](const Vec3 &mn, const Vec3 &mx, const char *n) {
+            Ref<Mesh> m(new Mesh());
+            std::vector<Vec3> t;
+            box(t, mn, mx);
+            std::vector<Vertex> v;
+            std::vector<uint32_t> idx;
+            for (size_t i = 0; i < t.size(); ++i) {
+                Vertex vert;
+                vert.position = t[i];
+                v.push_back(vert);
+                idx.push_back(uint32_t(i));
+            }
+            m->append(v, idx, 0);
+            m->set_bounds(compute_bounds(m->vertices));
+            MeshInstance3D *mi = new MeshInstance3D();
+            mi->set_name(n);
+            mi->mesh = m;
+            region->add_child(mi);
+        };
+        slab(Vec3(-10, -0.2f, -10), Vec3(10, 0, 10), "Floor");
+        slab(Vec3(-0.3f, 0, -10), Vec3(0.3f, 2.5f, -2), "WallA");
+        slab(Vec3(-0.3f, 0, 2), Vec3(0.3f, 2.5f, 10), "WallB");
+
+        // A game loop runs both: navigation lives on the physics
+        // tick, because what it produces is movement.
+        auto frame = [&] {
+            tree.physics_tick(1.0f / 60.0f);
+            tree.process(1.0f / 60.0f);
+        };
+        // The region bakes itself on the first tick.
+        frame();
+        check(region->poly_count() > 0, "a region bakes the level under it");
+        check(region->stats().regions >= 1, "and finds ground to walk on");
+
+        // A wall really is a wall, and the gap really is a gap.
+        check(!region->is_reachable(Vec3(-5, 0, -6), Vec3(5, 0, -6)) ||
+                  region->find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6)).size() > 2,
+              "getting past the wall means going round through the gap");
+        check(region->is_reachable(Vec3(-5, 0, -6), Vec3(5, 0, -6)),
+              "and the gap does connect the two halves");
+
+        Vec3 on;
+        check(region->nearest_point(Vec3(-5, 3.0f, -6), &on),
+              "a point above the floor snaps to it");
+        check_near(on.y, 0.05f, 0.2f, "at floor height");
+
+        NavAgent3D *agent = new NavAgent3D();
+        agent->set_name("Shambler");
+        agent->radius = 0.35f;
+        agent->max_speed = 2.5f;
+        agent->set_position(Vec3(-5, 0, -6));
+        region->add_child(agent);
+        frame();
+        check(agent->region() == region, "an agent finds the region above it");
+
+        agent->set_target(Vec3(5, 0, -6));
+        check(agent->has_target(), "and takes a target");
+
+        for (int i = 0; i < 1200 && !agent->arrived(); ++i) frame();
+        check(agent->arrived(), "and walks round the wall to reach it");
+        check_near(agent->global_position().x, 5.0f, 0.6f,
+                   "ending up where it was sent");
+        check(agent->global_position().z > -9.9f,
+              "and the node's transform followed the body");
+
+        // A link, authored as a node, joins two things nothing could
+        // walk between.
+        NavLink3D *link = new NavLink3D();
+        link->set_name("vault");
+        link->set_position(Vec3(-0.9f, 0, -6));
+        link->start = Vec3();
+        link->end = Vec3(1.8f, 0, 0);
+        link->radius = 1.0f;
+        region->add_child(link);
+        region->collect_links();
+        check(region->mesh() && region->mesh()->links().size() == 1,
+              "a NavLink3D node is picked up by the region");
+        check(region->mesh() && region->mesh()->links().size() == 1 &&
+                  region->mesh()->links()[0].from_poly != nav::kNoPoly,
+              "and lands on the mesh");
+
+        Array through = region->find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6));
+        check(through.size() >= 2, "and the route across it is shorter now");
+
+        scene->queue_free();
     }
 
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");

@@ -274,6 +274,26 @@ bool NavMesh::nearest_point(const Vec3 &p, const Vec3 &extents, Vec3 *out,
         }
     }
     if (best_poly == kNoPoly) return false;
+    // A HAIR INSIDE, NOT EXACTLY ON.
+    //
+    // The closest point on an edge is on the boundary, and computing
+    // it in floats lands a fraction to one side or the other. Land
+    // on the outside and every following query disagrees that the
+    // point is on the mesh at all: find_poly returns nothing, a ray
+    // from it goes nowhere, and a body placed there stands still for
+    // ever wondering why. Which is exactly the failure this was
+    // written for.
+    //
+    // A thousandth of the way toward the polygon's middle is far
+    // below anything that matters and puts the point unambiguously
+    // inside.
+    {
+        const NavPoly &np = polys_[best_poly];
+        Vec3 c;
+        for (int k = 0; k < np.count; ++k) c = c + verts_[np.verts[k]];
+        if (np.count) best_p = best_p + (c * (1.0f / float(np.count)) - best_p) *
+                                            1e-3f;
+    }
     if (out) *out = best_p;
     if (poly) *poly = best_poly;
     return true;

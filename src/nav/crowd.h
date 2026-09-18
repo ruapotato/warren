@@ -88,6 +88,10 @@ struct CrowdAgent {
 
     // Set by the crowd, read by whoever cares.
     bool arrived = false;
+    // How long this body has been claiming to go somewhere while
+    // barely moving. The crowd re-plans off it; a game can read it
+    // to decide something has gone wrong enough to act on.
+    float stuck_for = 0.0f;
     // How much avoidance had to bend the desired velocity, in metres
     // per second. Large and sustained means the body is stuck in a
     // crowd, which is the cue for a game to do something else.

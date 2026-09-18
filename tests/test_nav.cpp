@@ -399,19 +399,39 @@ int main() {
             for (int k = 0; k < p.count; ++k) {
                 uint16_t n = p.neis[k];
                 if (n == kNoPoly) {
-                    // A wall edge with mesh on the other side of it
-                    // is a crack. Step a little way out along the
-                    // edge's outward normal and see.
+                    // A WALL EDGE WITH MESH BEHIND IT IS A CRACK,
+                    // and the distance probed matters.
+                    //
+                    // The two ways two polygons fail to be joined
+                    // are a T-junction, where one edge meets the
+                    // middle of another, and a near-miss, where two
+                    // contours run parallel a cell apart because
+                    // the two sides disagreed about where their
+                    // shared boundary starts. A timid probe walks
+                    // into the gap of the second kind and reports
+                    // nothing, so this steps a whole cell out --
+                    // safe, because a real wall has the body's
+                    // radius of clearance behind it and a cell is
+                    // much less than that.
+                    //
+                    // Probed at three points along the edge rather
+                    // than at the middle, so a short edge near a
+                    // concave corner cannot answer for the whole.
                     const Vec3 &a = m.verts()[p.verts[k]];
                     const Vec3 &b = m.verts()[p.verts[(k + 1) % p.count]];
                     Vec3 d = b - a;
                     float len = std::sqrt(d.x * d.x + d.z * d.z);
                     if (len < 1e-4f) continue;
                     Vec3 outward(-d.z / len, 0.0f, d.x / len);
-                    Vec3 probe = (a + b) * 0.5f + outward * 0.06f;
-                    probe.y = (a.y + b.y) * 0.5f;
-                    if (m.find_poly(probe, Vec3(0.05f, 0.4f, 0.05f)) != kNoPoly)
-                        ++cracks;
+                    int behind = 0;
+                    for (float f : {0.25f, 0.5f, 0.75f}) {
+                        Vec3 probe = a + d * f + outward * 0.26f;
+                        probe.y = a.y + (b.y - a.y) * f;
+                        if (m.find_poly(probe, Vec3(0.05f, 0.4f, 0.05f)) !=
+                            kNoPoly)
+                            ++behind;
+                    }
+                    if (behind == 3) ++cracks;
                     continue;
                 }
                 const NavPoly &q = m.polys()[n];
@@ -689,6 +709,70 @@ int main() {
         check_int(int(c.size()), int(a.size()), "and it paths the same way");
         check_near(path_length(c), path_length(a), 1e-3f,
                    "over exactly the same distance");
+    }
+
+    // ------------------------------------------- two rooms, and a door
+    //
+    // The bake cuts open ground into regions wherever the ground
+    // narrows, so any level with a doorway in it comes out as more
+    // than one region, and every region seam is a place two contours
+    // have to agree on to the last bit. Where they do not, the
+    // polygons are never joined: the mesh looks continuous, the
+    // crack detector above sees a wall with floor behind it, and a
+    // path from one room to the other is reported impossible.
+    //
+    // This is the check that a multi-region bake is actually one
+    // navmesh and not several laid side by side.
+    {
+        std::vector<Vec3> tris;
+        box(tris, Vec3(-10, -0.2f, -10), Vec3(10, 0, 10));
+        box(tris, Vec3(-0.3f, 0, -10), Vec3(0.3f, 2.5f, -2));
+        box(tris, Vec3(-0.3f, 0, 2), Vec3(0.3f, 2.5f, 10));
+        AABB b(Vec3(-11.2f, -1.4f, -11.2f), Vec3(11.2f, 3, 11.2f));
+
+        NavMesh mesh;
+        BakeStats st;
+        check(mesh.bake(tris, b, settings, &st), "two rooms and a door bake");
+        check(st.regions >= 2, "and come out as more than one region");
+        check_mesh(mesh, "two rooms");
+
+        // The polygons on the two sides must be joined through the
+        // doorway, and joined means adjacency -- not merely that
+        // both halves exist.
+        uint16_t left = mesh.find_poly(Vec3(-5, 0, -6), Vec3(1, 2, 1));
+        uint16_t right = mesh.find_poly(Vec3(5, 0, -6), Vec3(1, 2, 1));
+        check(left != kNoPoly && right != kNoPoly,
+              "there is floor in both rooms");
+        std::vector<bool> seen(mesh.polys().size(), false);
+        std::vector<uint16_t> stack{left};
+        if (left != kNoPoly) seen[left] = true;
+        bool joined = false;
+        while (!stack.empty()) {
+            uint16_t p = stack.back();
+            stack.pop_back();
+            if (p == right) joined = true;
+            for (int k = 0; k < mesh.polys()[p].count; ++k) {
+                uint16_t n = mesh.polys()[p].neis[k];
+                if (n == kNoPoly || seen[n]) continue;
+                seen[n] = true;
+                stack.push_back(n);
+            }
+        }
+        check(joined, "and the polygon graph goes through the doorway");
+
+        std::vector<PathPoint> path;
+        bool partial = true;
+        check(mesh.find_path(Vec3(-5, 0, -6), Vec3(5, 0, -6), &path, &partial),
+              "a path from one room to the other is found");
+        check(!partial, "and it is a whole one, not a walk up to the wall");
+
+        int off_mesh = 0;
+        for (size_t i = 1; i < path.size(); ++i) {
+            Vec3 h;
+            if (!mesh.raycast(path[i - 1].position, path[i].position, &h))
+                ++off_mesh;
+        }
+        check_int(off_mesh, 0, "every leg of which stays on the navmesh");
     }
 
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");

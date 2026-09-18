@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "scene/bodies.h"
 #include "scene/nodes.h"
+#include "scene/nav_nodes.h"
 #include "scene/portal.h"
 #include "scene/scene_tree.h"
 #include "script/stubs.h"
@@ -260,6 +261,84 @@ mf.root().add_child(n)
         check(stubs.find("def add_child(self, child: Node | None)") !=
                   std::string::npos,
               "and the stub names both the argument and its class");
+    }
+
+    // --- navigation, from a script
+    //
+    // A game drives its bodies from Python, so the navigation nodes
+    // have to be reachable there on the same terms as everything
+    // else: built by name, configured by property, and stepped by
+    // the tree. Nothing below was bound by hand; it all comes from
+    // the same registry the stubs are written from.
+    check(Python::run_string(R"PY(
+import warren as mf
+root = mf.root()
+region = mf.NavRegion3D()
+region.name = "Nav"
+root.add_child(region)
+)PY"),
+          "a navigation region is built from a script");
+
+    // mf.root() is the tree's root, which is the scene's parent
+    // here -- there is no engine, so mf.scene() is None and the
+    // script is handed the root instead.
+    NavRegion3D *region = nullptr;
+    if (Node *found = tree.root()->find_child("Nav"))
+        region = found->cast_to<NavRegion3D>();
+    check(region != nullptr, "and is a real node in the tree");
+
+    if (region) {
+        // The floor, from C++, because primitive meshes are not
+        // script-reachable yet. The region does not care where its
+        // geometry came from.
+        MeshInstance3D *floor = new MeshInstance3D();
+        floor->set_name("Floor");
+        floor->mesh = Mesh::box(Vec3(16.0f, 0.4f, 16.0f));
+        floor->set_position(Vec3(0.0f, -0.2f, 0.0f));
+        region->add_child(floor);
+
+        check(Python::run_string(R"PY(
+import warren as mf
+region = mf.root().get_node("Nav")
+agent = mf.NavAgent3D()
+agent.name = "Shambler"
+agent.radius = 0.35
+agent.max_speed = 2.5
+agent.goal_radius = 1.0
+agent.position = mf.Vec3(-5, 0, -5)
+region.add_child(agent)
+)PY"),
+              "and an agent is put in it, configured by property");
+
+        auto frame = [&] {
+            tree.physics_tick(1.0f / 60.0f);
+            tree.process(1.0f / 60.0f);
+        };
+        frame();
+        check(region->poly_count() > 0,
+              "the region bakes the geometry under it");
+
+        check(Python::run_string(R"PY(
+import warren as mf
+region = mf.root().get_node("Nav")
+agent = region.get_node("Shambler")
+agent.set_target(mf.Vec3(5, 0, 5))
+assert agent.has_target(), "the agent took a target"
+path = region.find_path(mf.Vec3(-5, 0, -5), mf.Vec3(5, 0, 5))
+assert len(path) >= 2, "a path came back as a list of points"
+assert region.is_reachable(mf.Vec3(-5, 0, -5), mf.Vec3(5, 0, 5))
+)PY"),
+              "pathing answers through the script bindings");
+
+        for (int i = 0; i < 600; ++i) frame();
+        check(Python::run_string(R"PY(
+import warren as mf
+agent = mf.root().get_node("Nav").get_node("Shambler")
+assert agent.arrived(), "the agent got there"
+p = agent.position
+assert p.x > 2.0 and p.z > 2.0, "and the node moved with it"
+)PY"),
+              "and the body walks, driven by the tree");
     }
 
     Python::shutdown();

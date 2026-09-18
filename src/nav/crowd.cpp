@@ -259,7 +259,6 @@ void Crowd::stop(uint32_t id) {
 }
 
 void Crowd::follow_paths(float dt) {
-    (void)dt;
     int replanned = 0;
     const size_t n = agents_.size();
     for (size_t k = 0; k < n; ++k) {
@@ -270,6 +269,35 @@ void Crowd::follow_paths(float dt) {
         a.on_link = false;
         a.link = 0xffff;
         if (!a.has_target || a.path.empty()) continue;
+
+        // WHEN NOTHING IS HAPPENING, TRY SOMETHING ELSE.
+        //
+        // A body can end up wedged: it rounded a corner too early,
+        // or a crowd closed in front of it, or its route was
+        // invalidated by a door shutting. It is still following a
+        // perfectly good path and going nowhere, and from the
+        // outside it looks broken rather than thwarted.
+        //
+        // Measuring it is easy -- moving at a crawl while claiming
+        // to be going somewhere -- and a fresh path from where the
+        // body actually is almost always clears it, because the
+        // corner it cut is now behind it.
+        if (a.on_link) {
+            // Mid-ladder is not stuck, however slowly it climbs.
+            a.stuck_for = 0.0f;
+        } else if (a.velocity.length() < a.max_speed * 0.1f) {
+            a.stuck_for += dt;
+        } else {
+            a.stuck_for = 0.0f;
+        }
+        if (a.stuck_for > 0.5f && replanned < replans_per_step) {
+            a.stuck_for = 0.0f;
+            if (mesh_ && mesh_->find_path(a.position, a.target, &a.path,
+                                          &a.path_partial)) {
+                a.leg = 1;
+                ++replanned;
+            }
+        }
 
         // Near enough counts, when the caller said how near.
         if (a.goal_radius > 0.0f) {
@@ -290,8 +318,13 @@ void Crowd::follow_paths(float dt) {
             const PathPoint &p = a.path[a.leg];
             Vec3 d = p.position - a.position;
             d.y = 0.0f;
+            // A link leg never advances on proximity. Getting
+            // within a fraction of a ladder's top and calling that
+            // arrived leaves the body in mid-air beside the roof,
+            // off the mesh, where nothing can move it again. The
+            // explicit handling below lands it on the far end.
             bool link_leg = a.path[a.leg - 1].flags == kPathLink;
-            float reach = link_leg ? a.radius * 0.6f
+            float reach = link_leg ? 0.0f
                                    : (a.leg + 1 == a.path.size() ? arrive_radius
                                                                  : corner_radius);
             if (d.length() > reach) break;
@@ -317,7 +350,19 @@ void Crowd::follow_paths(float dt) {
             a.link = here.link;
             Vec3 d = next.position - a.position;
             float len = d.length();
-            a.desired = len > kEps ? d * (a.max_speed / len) : Vec3();
+            // A LINK IS ONE MOVEMENT. Within a step of the far end,
+            // land on it exactly rather than creeping up on it: the
+            // far end is a point known to be on the mesh, and any
+            // fraction short of it is not.
+            if (len <= a.max_speed * dt * 1.5f + 1e-3f) {
+                a.position = next.position;
+                a.velocity = Vec3();
+                a.on_link = false;
+                a.link = 0xffff;
+                ++a.leg;
+            } else {
+                a.desired = d * (a.max_speed / len);
+            }
             continue;
         }
 
@@ -513,36 +558,69 @@ void Crowd::integrate(float dt) {
             continue;
         }
 
-        // STAY ON THE MESH, and slide rather than stick. Avoidance
-        // knows about other bodies and nothing at all about walls,
-        // so a body dodging into a corner is dodging into a wall.
+        // STAY ON THE MESH, and slide rather than stick.
         //
-        // Stopping dead at the wall would be correct and would look
-        // terrible: a body walking at a wall at a shallow angle
-        // should carry on along it, not halt. So the motion into
-        // the wall is removed and the rest is retried along the
-        // face.
-        Vec3 hit, normal;
-        if (!mesh_->raycast(a.position, want, &hit, NavFilter{}, &normal)) {
-            Vec3 remaining = want - hit;
-            remaining.y = 0.0f;
-            if (normal.length_sq() > 1e-8f) {
-                Vec3 slide = remaining - normal * dot(remaining, normal);
-                Vec3 slid;
-                want = mesh_->raycast(hit, hit + slide, &slid) ? slid : slid;
-            } else {
-                want = hit;
+        // Avoidance knows about other bodies and nothing at all
+        // about walls, so a body dodging into a corner is dodging
+        // into a wall. Stopping it dead there would be correct and
+        // would look terrible: something walking at a wall at a
+        // shallow angle should carry on along it.
+        //
+        // PROJECTION IS THE SLIDE. The nearest point on the mesh to
+        // a position just outside it is the perpendicular foot on
+        // the boundary -- which is the motion with the into-the-wall
+        // part removed, exactly. Doing it this way rather than by
+        // reflecting off a wall normal also survives the case that
+        // broke the first attempt: a body already standing exactly
+        // on the boundary, where a ray leaves immediately and there
+        // is no normal to be had.
+        //
+        // The ray is still worth casting, as the guard against
+        // going through a thin wall in one step. Projection alone
+        // would happily put a body on whichever side of a wall it
+        // ended up nearer.
+        // OFF THE MESH ENTIRELY is a state to get out of, not one
+        // to reason from. A body can arrive here after being
+        // dropped into the level, after a bake changed under it, or
+        // after a bug; whatever the cause, refusing to move it
+        // leaves it standing in the air for the rest of the game.
+        // Put it back first and move it afterwards.
+        if (mesh_->find_poly(a.position, Vec3(0.5f, a.height, 0.5f)) ==
+            nav::kNoPoly) {
+            Vec3 back;
+            if (mesh_->nearest_point(a.position, Vec3(8.0f, a.height * 2.0f,
+                                                      8.0f),
+                                     &back)) {
+                a.position = back;
+                want = back + a.velocity * dt;
             }
         }
-        // Then project, unconditionally. The ray walk can still fail
-        // to place a body exactly -- an edge grazed, a corner cut by
-        // a hair -- and a body a millimetre outside the mesh is a
-        // body whose next query finds nothing and which then stands
-        // still for ever. Projection is cheap and makes "on the
-        // mesh" an invariant rather than a hope.
+
+        const float step = (want - a.position).length();
         Vec3 on;
-        if (mesh_->nearest_point(want, Vec3(1.0f, a.height, 1.0f), &on))
+        const bool projected =
+            mesh_->nearest_point(want, Vec3(1.0f, a.height, 1.0f), &on);
+        Vec3 hit;
+        if (mesh_->raycast(a.position, want, &hit)) {
+            if (projected) want = on;
+        } else if (projected &&
+                   (on - a.position).length() <= step * 2.0f + 1e-3f) {
+            // Slid along the wall. Accepting the projection only
+            // when it is within a couple of steps of where the body
+            // already is means it cannot have crossed anything: a
+            // body moving four centimetres a frame cannot arrive on
+            // the far side of a wall.
+            //
+            // The bound also has to tolerate a body that is a hair
+            // OUTSIDE the mesh, which happens however carefully the
+            // projection is done, and which used to wedge it: the
+            // ray from an outside point fails at once, and refusing
+            // to move without a successful ray is refusing to move
+            // at all.
             want = on;
+        } else {
+            want = hit;  // genuinely into a corner
+        }
 
         Vec3 moved = want - a.position;
         a.position = want;

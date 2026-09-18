@@ -46,16 +46,24 @@ until the port is playable. It is not in this repository on purpose:
 having two implementations of one game where a search can find both is
 how an afternoon disappears.
 
-## What the port needs from the engine
+## What the port needed from the engine
 
-Warren does not yet have two things this game is built on, and they are
-engine work rather than game work:
+Two things this game is built on were engine work rather than game
+work. Both are done.
 
 - **Skeletal animation.** Every survivor and eight of the eleven undead
   are the same nineteen-bone rig playing the same retargeted walk
-  cycle. Warren imports bones from glTF and does not deform anything
-  with them.
+  cycle. `src/anim/` now has skeletons, poses, clips with masked
+  one-shots, retargeting by bone name, and GPU skinning; `Skinned3D`
+  and `AnimationPlayer` are nodes, and glTF brings rigs and their
+  animations in.
 - **Navigation.** Thirty shamblers pathing round a town, with links
-  between levels for ladders, walkways and roof edges.
+  between levels for ladders, walkways and roof edges. `src/nav/` now
+  bakes a navmesh from level geometry, answers paths with A* and a
+  funnel, carries off-mesh links for the ladders and roof drops, and
+  moves crowds with reciprocal avoidance so thirty of them converging
+  on the player do not become one of them. `NavRegion3D`,
+  `NavLink3D` and `NavAgent3D` are nodes, reachable from Python.
 
-Both are being built now; see the engine's own README.
+What remains is game work: the town, the rounds, the weapons and the
+species, from `design/rotgrave_design.json`.

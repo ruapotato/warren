@@ -406,6 +406,8 @@ src/rhi/vk/        Vulkan 1.3 backend
 src/render/        meshes, materials, textures, the renderer
 src/render/shaders/  one source per program, both backends
 src/scene/         node tree, cameras, lights, Portal3D, bodies
+src/anim/          skeletons, poses, clips, retargeting
+src/nav/           navmesh baking, pathfinding, crowds
 src/physics/       shapes, BVH, sweeps, portal-aware tracing
 src/audio/         the mixer and clip loading
 src/net/           sockets, reliability, replication
@@ -426,7 +428,8 @@ tests/             maths, backend parity, the portal stencil
                    the plugin ABI and terrain LOD, audio,
                    networking, the UI, controls, scenes, the
                    editor, Python, resources, glTF, procedural
-                   generation, the agent protocol
+                   generation, skinning, the navmesh bake and the
+                   funnel, crowds, the agent protocol
 docs/conventions.md  the rules, stated once
 docs/agent.md        driving the engine from a program
 docs/plugins.md      how to write one
@@ -453,12 +456,15 @@ audio, a networking layer with three delivery channels, a
 work-stealing job system, the plugin ABI, streaming dual-contoured
 voxel terrain, Control-node UI, an editor whose inspector is derived
 from reflection, resources and scene instancing, glTF import,
-procedural shapes and surfaces, and Python scripting with generated
-type stubs.
+procedural shapes and surfaces, GPU skeletal animation with clip
+blending and retargeting, navmesh baking with A* and funnel
+string-pulling, off-mesh links, crowds with reciprocal avoidance, and
+Python scripting with generated type stubs.
 
-Not yet: skeletal animation, an animation player, scripts saved in
-scene files, transform gizmos, particles, navigation, rigid bodies,
-and text wrapping in `Label`. The Windows paths exist and have never
-been compiled.
+Not yet: animation state machines beyond two slots and a masked
+one-shot, scripts saved in scene files, transform gizmos, particles,
+rigid bodies, tiled navmesh bakes for streamed worlds, and text
+wrapping in `Label`. The Windows paths exist and have never been
+compiled.
 
 See `docs/conventions.md` before touching the renderer.

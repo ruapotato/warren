@@ -113,17 +113,34 @@ void simplify(const std::vector<ContourVert> &raw, float max_error,
     out.clear();
     if (n < 3) return;
 
-    // Seed with the fixed points.
+    // WHICH VERTEX OF A RUN IS THE FIXED POINT, and it is the last
+    // one, which is not a detail.
+    //
+    // The walk records on each vertex the region across the edge
+    // ARRIVING at it, because that is the edge it was facing when
+    // it emitted the corner. So a stretch of boundary shared with
+    // region B is a run of vertices carrying B, and the corner
+    // where that stretch BEGINS is the last vertex of the run
+    // before it -- not the first vertex of the run itself.
+    //
+    // Region B walks the same stretch the other way and, applying
+    // the same rule, arrives at the same two corners. Take the
+    // first of each run instead and the two sides bracket the seam
+    // one cell apart: neither the vertices nor the edge match, the
+    // polygons never get joined, and the level comes out as two
+    // rooms with no door between them. Which is exactly the bug
+    // this rule was written to fix.
     bool has_joins = false;
     for (int i = 0; i < n; ++i)
-        if (raw[size_t(i)].region != raw[size_t((i + n - 1) % n)].region)
+        if (raw[size_t(i)].region != raw[size_t((i + 1) % n)].region)
             has_joins = true;
 
     std::vector<int> keep;
     if (has_joins) {
         for (int i = 0; i < n; ++i) {
-            int prev = (i + n - 1) % n;
-            if (raw[size_t(i)].region != raw[size_t(prev)].region) keep.push_back(i);
+            int next = (i + 1) % n;
+            if (raw[size_t(i)].region != raw[size_t(next)].region)
+                keep.push_back(i);
         }
     } else {
         // A loop with no joins touches nothing: an outer wall, or an
@@ -231,11 +248,16 @@ void simplify(const std::vector<ContourVert> &raw, float max_error,
 
     out.reserve(keep.size());
     for (int k : keep) {
-        // The region recorded on a kept vertex is the one across the
-        // edge LEAVING it, which is the region recorded on the raw
-        // vertex itself -- the stretch up to the next kept vertex
-        // borders one region throughout, by construction.
-        out.push_back(raw[size_t(k)]);
+        // Turn the bookkeeping round on the way out. Everything
+        // downstream wants "the region across the edge LEAVING this
+        // vertex", because that is how a polygon's edges are
+        // numbered; the walk recorded the edge arriving. The edge
+        // leaving a kept vertex is the one arriving at the next raw
+        // point, and the whole stretch up to the next kept vertex
+        // borders that same region, by construction.
+        ContourVert v = raw[size_t(k)];
+        v.region = raw[size_t((k + 1) % n)].region;
+        out.push_back(v);
     }
 }
 
