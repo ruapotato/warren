@@ -9,7 +9,9 @@
 #include "platform/window.h"
 #include "physics/world.h"
 #include "plugin/host.h"
+#include "audio/audio.h"
 #include "render/renderer.h"
+#include "scene/audio_nodes.h"
 #include "scene/scene_tree.h"
 
 namespace mf {
@@ -17,6 +19,8 @@ namespace mf {
 struct EngineConfig {
     WindowConfig window;
     RenderSettings render;
+    AudioServer::Config audio;
+    bool enable_audio = true;
     // Try this backend; on failure, say so and stop. Set
     // `allow_fallback` to try the other one instead -- off by default,
     // because an engine that silently changes renderer produces bug
@@ -70,6 +74,8 @@ public:
     Renderer *renderer() { return &renderer_; }
     PhysicsWorld *physics() { return physics_.get(); }
     PluginHost *plugins() { return &plugins_; }
+    AudioServer *audio() { return &audio_; }
+    AudioSystem *audio_system() { return &audio_system_; }
     const Clock &clock() const { return clock_; }
     uint64_t frames() const { return frames_; }
 
@@ -106,6 +112,8 @@ private:
     Renderer renderer_;
     Ref<PhysicsWorld> physics_;
     PluginHost plugins_;
+    AudioServer audio_;
+    AudioSystem audio_system_;
     Clock clock_;
     double physics_accumulator_ = 0.0;
     uint64_t frames_ = 0;

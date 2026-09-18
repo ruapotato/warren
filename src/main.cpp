@@ -11,6 +11,7 @@
 #include "script/python.h"
 #endif
 #include "core/log.h"
+#include "scene/audio_nodes.h"
 #include "scene/nodes.h"
 #include "plugin/host.h"
 #include "script/stubs.h"
@@ -380,6 +381,26 @@ void build_portal_demo(Engine &e) {
     spot->angle = deg2rad(34.0f);
     spot->angle_softness = 0.35f;
     small->add_child(spot);
+
+    // A HUM IN THE FAR ROOM, WHICH YOU HEAR THROUGH THE HOLE.
+    //
+    // Forty metres away through the wall and a few metres through
+    // the arch. Walk up to the portal and it gets louder and stays
+    // in front of you; walk away along the wall and it fades,
+    // because the path to it goes through the aperture and the
+    // aperture is behind you.
+    {
+        AudioPlayer3D *hum = new AudioPlayer3D();
+        hum->set_name("FarHum");
+        hum->clip = AudioClip::tone(110.0f, 2.0f);
+        hum->loop = true;
+        hum->autoplay = true;
+        hum->volume = 0.6f;
+        hum->max_distance = 30.0f;
+        hum->reference_distance = 2.0f;
+        hum->set_position(far_centre + Vec3(-12.0f, -5.0f, -6.0f));
+        large->add_child(hum);
+    }
 
     Renderer *r = e.renderer();
     r->ambient = Color::hex(0x4F5B6B);

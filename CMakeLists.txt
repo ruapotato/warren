@@ -69,8 +69,9 @@ add_custom_target(manifold_codegen DEPENDS ${GL_GEN} ${VK_GEN} ${SHADER_GEN})
 
 # ----------------------------------------------------------------- sources
 
-set(MANIFOLD_DIRS core core/math platform render render/shaders/generated
-                  scene physics script plugin resource app)
+set(MANIFOLD_DIRS core core/math platform audio render
+                  render/shaders/generated scene physics script plugin
+                  resource app)
 set(MANIFOLD_SRC "")
 foreach(d ${MANIFOLD_DIRS})
   file(GLOB s CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/${d}/*.cpp)

@@ -80,6 +80,16 @@ bool Engine::init(const EngineConfig &cfg) {
         if (n) MF_INFO("%s", plugins_.report().c_str());
     }
 
+    if (cfg.enable_audio) {
+        audio_.init(cfg.audio);
+        audio_system_.set_server(&audio_);
+        // The system installs itself as the one the nodes talk to on
+        // its first update; doing it here too means a node that plays
+        // something during on_ready, before any frame has run, finds
+        // a server rather than silence.
+        audio_system_install(&audio_system_);
+    }
+
 #if MANIFOLD_PYTHON
     if (cfg.python) {
         std::vector<std::string> paths = cfg.script_paths;
@@ -127,6 +137,16 @@ void Engine::shutdown() {
     // 2. Python, once nothing holds a reference into it.
     // 3. Plugins, once the nodes they registered are gone.
     // 4. Jobs, once nothing is waiting on one.
+    //
+    // AUDIO GOES FIRST OF ALL, before any of it. The device calls
+    // back on its own thread and holds a reference to whatever clip
+    // each voice is playing; a node destroyed while that callback is
+    // mid-mix would free the samples under it. Closing the device
+    // joins that thread, and after that nothing else is racing.
+    audio_.shutdown();
+    audio_system_.set_server(nullptr);
+    audio_system_install(nullptr);
+
     tree_.reset();
 #if MANIFOLD_PYTHON
     Python::shutdown();
@@ -180,6 +200,12 @@ bool Engine::step() {
 
     tree_->process(dt);
     tree_->flush_frees();
+
+    // AFTER THE TREE, BEFORE THE FRAME. Every player's place in the
+    // world is settled by now, and a sound placed from last frame's
+    // transforms lags the picture by exactly the amount that makes a
+    // footstep sound like it came from behind you.
+    if (audio_.running()) audio_system_.update(tree_.get(), dt);
 
     const bool want_shot = !config_.screenshot_path.empty() &&
                            frames_ + 1 == config_.screenshot_frame;

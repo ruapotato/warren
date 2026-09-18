@@ -257,3 +257,39 @@ The portals demo still differs by about 1% of pixels at shadow edges,
 and that is the demo's own geometry: its rooms are built from boxes
 whose volumes overlap, so coincident faces are resolved differently by
 two rasterisers. The engine path is deterministic; the scene is not.
+
+## Audio
+
+Float32 stereo, mixed by `AudioServer::mix`, which the device thread
+calls and a test calls directly — `open_device: false` gives a server
+that mixes when asked and owns no hardware, so the sound is checked as
+samples rather than as "did a card appear".
+
+**The audio thread never allocates, never logs and never waits on the
+game.** One mutex guards the voice table; the game holds it for a
+memcpy and the mixer for a mix. Voice handles carry a generation, so
+holding one after the sound has ended is safe rather than a handle to
+whatever took the slot.
+
+`AudioServer::shutdown` runs **first** in `Engine::shutdown`, before
+the tree. The callback holds a reference to each playing clip, and a
+node destroyed mid-mix would free the samples under it; closing the
+device joins that thread and nothing else is racing after that.
+
+A machine with no sound card is not an error. The server logs a
+warning and runs silent, because a game that will not start because it
+cannot make a noise is a worse outcome than a quiet one.
+
+### Sound through a portal
+
+`acoustic_path` returns the shortest way from a source to the ear: the
+straight line, or listener → near aperture → far aperture → source,
+whichever is less. The length is the two legs added, **not** the
+distance to the aperture alone — a source just behind the far portal
+is close and one across the far room is not, which is the difference
+between an opening and a speaker bolted to the wall.
+
+The direction the sound arrives from is towards the **aperture**, not
+towards the source. That is the part that makes it read as a hole.
+Doppler uses the rate of change of the *path*, so a source running
+towards a portal rises in pitch for a listener on the other side of it.

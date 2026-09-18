@@ -111,6 +111,16 @@ seen through the hole and nothing around it. `tests/test_lights`
 renders exactly that and measures 0.884 inside the aperture with a
 grid for that view and **0.000** without.
 
+**And so does sound.** A generator humming in the far room is forty
+metres away through the rock and three metres away through the arch,
+and it is heard at three — arriving *from the arch*, panned to where
+the aperture actually is. Every engine attenuates by distance; in a
+world with portals the straight-line distance is the wrong number and
+the straight-line direction is the wrong direction, and getting it
+wrong does not sound like a bug, it sounds like the portal is a
+picture. `tests/test_audio` measures 80.0 m through the rock against
+3.00 m through the arch, arriving from (0, 0, −1).
+
 **Physics knows about portals.** A swept capsule that crosses an
 aperture continues out of the far side with its velocity rotated and
 its length remaining — `PhysicsWorld::trace` returns the accumulated
@@ -243,6 +253,7 @@ src/render/        meshes, materials, textures, the renderer
 src/render/shaders/  one source per program, both backends
 src/scene/         node tree, cameras, lights, Portal3D, bodies
 src/physics/       shapes, BVH, sweeps, portal-aware tracing
+src/audio/         the mixer and clip loading
 src/script/        the Python bridge and the stub generator
 src/plugin/        the plugin ABI and host
 src/app/           Engine: the loop that ties it together
@@ -251,7 +262,7 @@ tools/             the three code generators
 tests/             maths, backend parity, the portal stencil
                    sequence, portal traversal, shadows, clustered
                    lights, image-based lighting, punctual shadows,
-                   the plugin ABI and terrain LOD, Python
+                   the plugin ABI and terrain LOD, audio, Python
 docs/conventions.md  the rules, stated once
 docs/plugins.md      how to write one
 ```
@@ -275,6 +286,6 @@ size-changing traversal, a work-stealing job system, the plugin ABI,
 streaming dual-contoured voxel terrain, and Python scripting with
 generated type stubs.
 
-Not yet: audio, networking, and an editor.
+Not yet: networking and an editor.
 
 See `docs/conventions.md` before touching the renderer.
