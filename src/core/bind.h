@@ -57,8 +57,16 @@ VType vtype_of() {
 
 Object *variant_object_checked(const Variant &v, const char *want_class);
 
+// RETURNS BY VALUE, ALWAYS.
+//
+// A bound method usually takes `const Vec3 &`, so T comes in as a
+// reference type -- and returning `T` would then return a reference to
+// the temporary this function just made. The value lives until the end
+// of the full expression at the call site, which is exactly long
+// enough to bind to the parameter, so stripping the reference here is
+// both correct and free.
 template <class T>
-T variant_to(const Variant &v) {
+auto variant_to(const Variant &v) -> std::remove_cv_t<std::remove_reference_t<T>> {
     using U = std::remove_cv_t<std::remove_reference_t<T>>;
     if constexpr (std::is_same_v<U, bool>) return v.to_bool();
     else if constexpr (std::is_enum_v<U>) return U(v.to_int());

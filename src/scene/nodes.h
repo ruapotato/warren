@@ -42,6 +42,16 @@ public:
     float fov_degrees() const { return rad2deg(fov_); }
     void set_fov_degrees(float d) { set_fov(deg2rad(d)); }
 
+    // CLIP PLANES FOLLOW THE CAMERA'S SCALE.
+    //
+    // A camera parented to something that changed size -- a character
+    // who walked through a portal into a larger one -- should see at
+    // the same proportions it always did. Its near plane is five
+    // centimetres of ITS world, not of the one it started in. Off for
+    // a camera that must keep absolute clip distances.
+    bool scale_clip_planes = true;
+    float world_scale() const { return global_transform().basis.uniform_scale(); }
+
     float near_plane() const { return near_; }
     void set_near(float n) { near_ = n > 1e-4f ? n : 1e-4f; }
     float far_plane() const { return far_; }

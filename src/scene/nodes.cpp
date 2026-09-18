@@ -9,6 +9,10 @@ namespace mf {
 
 Projection Camera3D::projection(float aspect) const {
     if (aspect <= 0.0f) aspect = 1.0f;
+    const float k = scale_clip_planes ? std::max(world_scale(), 1e-4f) : 1.0f;
+    const float near_ = this->near_ * k;
+    const float far_ = this->far_ * k;
+    const float ortho_height_ = this->ortho_height_ * k;
     switch (mode_) {
         case Mode::Custom:
             return custom_;
@@ -121,6 +125,7 @@ static void register_scene_nodes() {
         .prop("frustum_offset", &Camera3D::frustum_offset,
               &Camera3D::set_frustum_offset)
         .prop("cull_mask", &Camera3D::cull_mask, &Camera3D::set_cull_mask)
+        .field("scale_clip_planes", &Camera3D::scale_clip_planes)
         .prop("mode", &Camera3D::mode, &Camera3D::set_mode)
         .prop_ro("current", &Camera3D::current)
         .method("make_current", &Camera3D::make_current)

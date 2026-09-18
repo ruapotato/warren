@@ -6,6 +6,7 @@
 #include <string>
 
 #include "platform/window.h"
+#include "physics/world.h"
 #include "render/renderer.h"
 #include "scene/scene_tree.h"
 
@@ -25,6 +26,14 @@ struct EngineConfig {
     float physics_hz = 60.0f;
     // Stop after this many frames. For tests and for screenshots.
     uint64_t max_frames = 0;
+    // A FIXED FRAME TIME, so a capture is reproducible.
+    //
+    // With real timing, the same command twice produces two different
+    // pictures -- the simulation has taken a different number of
+    // steps -- and comparing two backends' output compares the clock
+    // as much as the renderer. Set when `max_frames` is, unless the
+    // caller asks otherwise.
+    float fixed_delta = 0.0f;
     std::string screenshot_path;
     uint64_t screenshot_frame = 0;
 };
@@ -46,6 +55,7 @@ public:
     rhi::Device *device() { return device_; }
     SceneTree *tree() { return tree_.get(); }
     Renderer *renderer() { return &renderer_; }
+    PhysicsWorld *physics() { return physics_.get(); }
     const Clock &clock() const { return clock_; }
     uint64_t frames() const { return frames_; }
 
@@ -64,6 +74,7 @@ private:
     rhi::Device *device_ = nullptr;
     std::unique_ptr<SceneTree> tree_;
     Renderer renderer_;
+    Ref<PhysicsWorld> physics_;
     Clock clock_;
     double physics_accumulator_ = 0.0;
     uint64_t frames_ = 0;

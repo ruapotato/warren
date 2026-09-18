@@ -9,15 +9,98 @@
 #include "app/engine.h"
 #include "core/log.h"
 #include "scene/nodes.h"
+#include "scene/bodies.h"
 #include "scene/portal.h"
 
 using namespace mf;
 
 namespace {
 
-// A free camera, so there is something to fly around with before the
-// character controller lands. Written as a C++ ScriptInstance, which
-// is the same interface the Python bindings will implement.
+// WALKING, AND CHANGING SIZE BY WALKING.
+//
+// The whole point of the demo. Speeds, jump and the mouse are all in
+// the character's OWN units -- `body->scaled(x)` -- so that at four
+// times the size everything feels identical and only the world has
+// changed proportion.
+class PlayerController : public ScriptInstance {
+public:
+    PlayerController(CharacterBody3D *body, Camera3D *cam, Window *win,
+                     PhysicsWorld *world)
+        : body_(body), cam_(cam), win_(win), world_(world) {}
+
+    const char *script_name() const override { return "PlayerController"; }
+
+    void on_ready() override {
+        if (body_) body_->set_world(world_);
+    }
+
+    void on_process(float dt) override {
+        if (!body_ || !cam_ || !win_) return;
+        if (Input::mouse_just_pressed(MouseButton::Right))
+            win_->set_mouse_captured(true);
+        if (Input::key_just_pressed(Key::Escape)) win_->set_mouse_captured(false);
+        if (win_->mouse_captured()) {
+            Vec2 m = Input::mouse_motion();
+            yaw_ -= m.x * 0.0022f;
+            pitch_ = clampf(pitch_ - m.y * 0.0022f, -1.5f, 1.5f);
+        }
+        // Yaw turns the body so that movement and the collider agree;
+        // pitch is the camera's alone, so looking up does not tip the
+        // capsule over.
+        body_->set_rotation(Quat::from_axis_angle(Vec3::up(), yaw_));
+        cam_->set_rotation(Quat::from_axis_angle(Vec3::right(), pitch_));
+        cam_->set_position({0.0f, body_->height + body_->radius, 0.0f});
+    }
+
+    void on_physics(float dt) override {
+        if (!body_ || !world_) return;
+        Vec3 forward(-std::sin(yaw_), 0.0f, -std::cos(yaw_));
+        Vec3 right(std::cos(yaw_), 0.0f, -std::sin(yaw_));
+        Vec3 wish;
+        if (Input::key_down(Key::W)) wish += forward;
+        if (Input::key_down(Key::S)) wish -= forward;
+        if (Input::key_down(Key::D)) wish += right;
+        if (Input::key_down(Key::A)) wish -= right;
+        if (wish.length_sq() > 0.0f) wish = wish.normalized();
+
+        const bool sprint = Input::key_down(Key::LeftShift);
+        // In the character's own units, so the feel survives a change
+        // of scale.
+        const float speed = body_->scaled(sprint ? 9.0f : 4.6f);
+        const float accel = body_->scaled(body_->on_floor() ? 60.0f : 12.0f);
+
+        Vec3 flat(body_->velocity.x, 0.0f, body_->velocity.z);
+        flat = move_toward(flat, wish * speed, accel * dt);
+        body_->velocity.x = flat.x;
+        body_->velocity.z = flat.z;
+
+        if (body_->on_floor() && Input::key_down(Key::Space))
+            body_->velocity.y = body_->scaled(7.0f);
+        if (Input::key_just_pressed(Key::R)) {
+            body_->set_global_position({0.0f, 1.0f, 3.0f});
+            body_->set_size(1.0f);
+            body_->velocity = Vec3();
+        }
+
+        int before = body_->portals_traversed();
+        body_->move_and_slide(world_, dt);
+        if (body_->portals_traversed() != before)
+            MF_INFO("through a portal: x%.2f, now %.2fx size (%.2fm tall)",
+                    double(body_->last_portal_scale()), double(body_->get_size()),
+                    double(body_->eye_height()));
+    }
+
+    float yaw() const { return yaw_; }
+
+private:
+    CharacterBody3D *body_;
+    Camera3D *cam_;
+    Window *win_;
+    PhysicsWorld *world_;
+    float yaw_ = 0.0f, pitch_ = 0.0f;
+};
+
+// A free camera, for looking at the scene from outside it.
 class FlyCamera : public ScriptInstance {
 public:
     explicit FlyCamera(Camera3D *cam, Window *win) : cam_(cam), win_(win) {}
@@ -59,6 +142,8 @@ private:
     Vec3 velocity_;
 };
 
+PhysicsWorld *g_world = nullptr;
+
 MeshInstance3D *add_mesh(Node *parent, const char *name, Ref<Mesh> mesh,
                          Ref<Material> mat, const Vec3 &position,
                          const Quat &rotation = Quat()) {
@@ -69,6 +154,14 @@ MeshInstance3D *add_mesh(Node *parent, const char *name, Ref<Mesh> mesh,
     mi->set_position(position);
     mi->set_rotation(rotation);
     parent->add_child(mi);
+    // Everything in the demo is level geometry, so everything gets a
+    // collider. A real game would mark which.
+    if (g_world) {
+        StaticBody3D *sb = new StaticBody3D();
+        sb->set_name("Collider");
+        mi->add_child(sb);
+        sb->build_from_mesh(g_world, mesh.get(), 1);
+    }
     return mi;
 }
 
@@ -105,8 +198,7 @@ void build_room(Node *parent, const Vec3 &centre, const Vec3 &size,
 // resolution, anti-aliased with everything around it.
 void build_portal_demo(Engine &e) {
     SceneTree *tree = e.tree();
-    rhi::Device *dev = e.device();
-    (void)dev;
+    g_world = e.physics();
 
     Node *scene = new Node();
     scene->set_name("PortalDemo");
@@ -167,7 +259,8 @@ void build_portal_demo(Engine &e) {
     a->width = 1.6f;
     a->height = 2.6f;
     a->edge_colour = Color::hex(0xFF8C1A);
-    a->set_position({0, 1.3f, -4.85f});
+    // Bottom edge exactly on the floor, whose surface is at 0.125.
+    a->set_position({0, 0.125f + a->height * 0.5f, -4.85f});
     // Facing +Z, back into the room, so the player walking north sees
     // its front.
     a->set_rotation(Quat());
@@ -178,7 +271,7 @@ void build_portal_demo(Engine &e) {
     b->width = 6.4f;
     b->height = 10.4f;
     b->edge_colour = Color::hex(0x2FA8FF);
-    b->set_position(far_centre + Vec3(0, -2.8f, 19.4f));
+    b->set_position(far_centre + Vec3(0, -8.0f + 0.125f + b->height * 0.5f, 19.4f));
     b->set_rotation(Quat::from_axis_angle(Vec3::up(), PI));
     large->add_child(b);
     a->link_to(b);
@@ -193,7 +286,7 @@ void build_portal_demo(Engine &e) {
     c->width = 1.6f;
     c->height = 2.6f;
     c->edge_colour = Color::hex(0x6BE36B);
-    c->set_position({-4.85f, 1.3f, 0});
+    c->set_position({-4.85f, 0.125f + c->height * 0.5f, 0});
     c->set_rotation(Quat::from_axis_angle(Vec3::up(), PI * 0.5f));
     small->add_child(c);
 
@@ -202,22 +295,33 @@ void build_portal_demo(Engine &e) {
     d->width = 1.6f;
     d->height = 2.6f;
     d->edge_colour = Color::hex(0x6BE36B);
-    d->set_position({4.85f, 1.3f, 0});
+    d->set_position({4.85f, 0.125f + d->height * 0.5f, 0});
     d->set_rotation(Quat::from_axis_angle(Vec3::up(), -PI * 0.5f));
     small->add_child(d);
     c->link_to(d);
 
-    // --- the camera -------------------------------------------------
+    // The physics needs to know where space is connected, or a body
+    // walks into the wall the portal is cut into.
+    for (Portal3D *p : {a, b, c, d}) g_world->add_portal(p);
+
+    // --- the player ---------------------------------------------------
+    CharacterBody3D *player = new CharacterBody3D();
+    player->set_name("Player");
+    player->radius = 0.32f;
+    player->height = 1.1f;
+    player->step_height = 0.45f;
+    player->set_global_position({0.0f, 1.0f, 3.0f});
+    scene->add_child(player);
+
     Camera3D *cam = new Camera3D();
     cam->set_name("Camera");
-    cam->set_fov_degrees(70.0f);
-    cam->set_near(0.05f);
+    cam->set_fov_degrees(74.0f);
+    cam->set_near(0.04f);
     cam->set_mode(Camera3D::Mode::PerspectiveInfinite);
-    cam->set_position({-0.2f, 1.65f, 3.4f});
-    cam->set_rotation(Quat::from_euler_yxz(0.0f, -0.02f, 0.0f));
-    scene->add_child(cam);
+    cam->set_position({0.0f, player->height + player->radius, 0.0f});
+    player->add_child(cam);
     cam->make_current();
-    cam->set_script(new FlyCamera(cam, e.window()));
+    player->set_script(new PlayerController(player, cam, e.window(), g_world));
 
     DirectionalLight3D *sun = new DirectionalLight3D();
     sun->set_name("Sun");
@@ -230,6 +334,20 @@ void build_portal_demo(Engine &e) {
     r->ambient_energy = 0.7f;
     r->fog_colour = Color::hex(0x7C8A9A);
     r->fog_density = 0.008f;
+    MF_INFO("%s", g_world->report().c_str());
+}
+
+// A spectator camera, for the screenshot harness and for looking at
+// the scene from outside it.
+void build_flythrough(Engine &e) {
+    build_portal_demo(e);
+    if (Node *p = e.tree()->root()->find_by_class("CharacterBody3D")) {
+        p->set_script(nullptr);
+        if (Node *c = p->find_by_class("Camera3D")) {
+            Camera3D *cam = static_cast<Camera3D *>(c);
+            cam->set_script(new FlyCamera(cam, e.window()));
+        }
+    }
 }
 
 }  // namespace
@@ -264,6 +382,10 @@ int main(int argc, char **argv) {
             cfg.window.width = std::stoi(next("1600"));
         } else if (a == "--height") {
             cfg.window.height = std::stoi(next("900"));
+        } else if (a == "--fixed-step") {
+            cfg.fixed_delta = std::stof(next("0.0166667"));
+        } else if (a == "--real-time") {
+            cfg.fixed_delta = -1.0f;
         } else if (a == "--no-vsync") {
             cfg.window.vsync = false;
         } else if (a == "--msaa") {
@@ -285,7 +407,9 @@ int main(int argc, char **argv) {
                 "  --demo portals        which scene\n"
                 "  --shot FILE           save a png and carry on\n"
                 "  --shot-frame N        which frame to save (default 8)\n"
-                "  --frames N            stop after N frames\n"
+                "  --frames N            stop after N frames (fixed 1/60s step)\n"
+                "  --fixed-step S        force a fixed frame time\n"
+                "  --real-time           real timing even with --frames\n"
                 "  --width N --height N  window size\n"
                 "  --msaa N              1, 2, 4 or 8\n"
                 "  --portal-depth N      recursion limit (default 4)\n"
@@ -301,6 +425,7 @@ int main(int argc, char **argv) {
     Engine engine;
     engine.on_ready = [&](Engine &e) {
         if (demo == "portals") build_portal_demo(e);
+        else if (demo == "fly") build_flythrough(e);
         else MF_ERROR("unknown demo '%s'", demo.c_str());
     };
     double title_timer = 0.0;
@@ -308,12 +433,27 @@ int main(int argc, char **argv) {
         title_timer += dt;
         if (title_timer > 0.25) {
             title_timer = 0.0;
-            e.window()->set_title("Manifold -- " + e.status_line());
+            std::string extra;
+            if (Node *n = e.tree()->root()->find_by_class("CharacterBody3D")) {
+                CharacterBody3D *b = static_cast<CharacterBody3D *>(n);
+                char buf[96];
+                std::snprintf(buf, sizeof(buf), "  |  size %.2fx (%.2fm)",
+                              double(b->get_size()), double(b->eye_height()));
+                extra = buf;
+            }
+            e.window()->set_title("Manifold -- " + e.status_line() + extra);
         }
     };
     if (!engine.init(cfg)) return 1;
     int rc = engine.run();
     {
+        if (Node *n = engine.tree()->root()->find_by_class("CharacterBody3D")) {
+            CharacterBody3D *b = static_cast<CharacterBody3D *>(n);
+            Vec3 p = b->global_position();
+            MF_INFO("player: (%.2f %.2f %.2f) floor=%d size=%.2f crossings=%d",
+                    double(p.x), double(p.y), double(p.z), int(b->on_floor()),
+                    double(b->get_size()), b->portals_traversed());
+        }
         const RenderStats &st = engine.renderer()->stats();
         MF_INFO("last frame: %u views, %u draws, %u tris, portals: %u seen / %u "
                 "culled, deepest %u, %.2f ms cpu",

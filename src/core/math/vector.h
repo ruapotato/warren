@@ -119,8 +119,10 @@ inline Vec3 vmax(const Vec3 &a, const Vec3 &b) {
     return {a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z};
 }
 inline Vec3 reflect(const Vec3 &v, const Vec3 &n) { return v - n * (2.0f * dot(v, n)); }
-// The part of `v` that survives sliding along a surface with normal `n`.
-inline Vec3 slide(const Vec3 &v, const Vec3 &n) { return v - n * dot(v, n); }
+// The part of `v` that survives sliding along a surface with normal
+// `n`. Named `slide_vec` rather than `slide` because "slide" is what
+// the loop that calls it is counting.
+inline Vec3 slide_vec(const Vec3 &v, const Vec3 &n) { return v - n * dot(v, n); }
 inline Vec3 project(const Vec3 &v, const Vec3 &onto) {
     float l = onto.length_sq();
     return l > EPS ? onto * (dot(v, onto) / l) : Vec3();

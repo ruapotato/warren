@@ -50,6 +50,7 @@ bool Engine::init(const EngineConfig &cfg) {
         MF_FATAL("engine: the renderer failed to start");
         return false;
     }
+    physics_ = Ref<PhysicsWorld>(new PhysicsWorld());
     tree_ = std::make_unique<SceneTree>();
     if (cfg.physics_hz > 0.0f) tree_->set_physics_step(1.0f / cfg.physics_hz);
 
@@ -57,12 +58,18 @@ bool Engine::init(const EngineConfig &cfg) {
     if (on_ready) on_ready(*this);
     running_ = true;
     clock_ = Clock();
+    if (config_.max_frames && config_.fixed_delta <= 0.0f) {
+        config_.fixed_delta = 1.0f / 60.0f;
+        MF_INFO("engine: %llu frames at a fixed 1/60s, for a reproducible run",
+                (unsigned long long)config_.max_frames);
+    }
     return true;
 }
 
 void Engine::shutdown() {
     if (device_) device_->wait_idle();
     tree_.reset();
+    physics_.reset();
     renderer_.shutdown();
     if (device_) {
         rhi::destroy_device(device_);
@@ -75,7 +82,8 @@ void Engine::shutdown() {
 bool Engine::step() {
     if (!running_ || !device_) return false;
     if (!window_.poll()) return false;
-    float dt = clock_.tick();
+    float real_dt = clock_.tick();
+    const float dt = config_.fixed_delta > 0.0f ? config_.fixed_delta : real_dt;
 
     if (window_.was_resized()) {
         Vec2i d = window_.drawable_size();
