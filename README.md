@@ -13,7 +13,7 @@ projection maths, the clip space, the depth format and the render
 hardware interface that no engine makes unless it means it.
 
 C++20 core, Python scripting, Vulkan **and** OpenGL, Windows and Linux.
-MIT licensed.
+AGPL-3.0 licensed.
 
 ---
 
