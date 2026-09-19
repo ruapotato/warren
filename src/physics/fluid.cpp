@@ -176,6 +176,34 @@ void Fluid::build_grid() {
         cell_count_.push_back(uint32_t(j - i));
         i = j;
     }
+    build_index();
+}
+
+void Fluid::build_index() {
+    uint32_t cap = 16;
+    while (cap < cell_key_.size() * 2) cap <<= 1;
+    probe_mask_ = cap - 1;
+    probe_key_.assign(cap, INT64_MIN);
+    probe_slot_.assign(cap, 0xFFFFFFFFu);
+    for (uint32_t i = 0; i < uint32_t(cell_key_.size()); i++) {
+        const int64_t k = cell_key_[i];
+        uint32_t h = uint32_t((uint64_t(k) * 0x9E3779B97F4A7C15ull) >> 40) &
+                     probe_mask_;
+        while (probe_slot_[h] != 0xFFFFFFFFu) h = (h + 1) & probe_mask_;
+        probe_key_[h] = k;
+        probe_slot_[h] = i;
+    }
+}
+
+uint32_t Fluid::find_cell(int64_t key) const {
+    if (probe_key_.empty()) return 0xFFFFFFFFu;
+    uint32_t h = uint32_t((uint64_t(key) * 0x9E3779B97F4A7C15ull) >> 40) &
+                 probe_mask_;
+    while (probe_slot_[h] != 0xFFFFFFFFu) {
+        if (probe_key_[h] == key) return probe_slot_[h];
+        h = (h + 1) & probe_mask_;
+    }
+    return 0xFFFFFFFFu;
 }
 
 void Fluid::find_neighbours() {
@@ -199,10 +227,8 @@ void Fluid::find_neighbours() {
                     const int64_t k = (((bx + dx) & 0x1FFFFF) << 42) |
                                       (((by + dy) & 0x1FFFFF) << 21) |
                                       ((bz + dz) & 0x1FFFFF);
-                    const auto it =
-                        std::lower_bound(cell_key_.begin(), cell_key_.end(), k);
-                    if (it == cell_key_.end() || *it != k) continue;
-                    const size_t c = size_t(it - cell_key_.begin());
+                    const uint32_t c = find_cell(k);
+                    if (c == 0xFFFFFFFFu) continue;
                     for (uint32_t s = 0; s < cell_count_[c]; s++) {
                         const uint32_t j = order_[cell_start_[c] + s];
                         if (j == i) continue;
@@ -623,6 +649,90 @@ void Fluid::finish(float dt) {
     }
 
     for (size_t i = 0; i < n; i++) pos_[i] = predicted_[i];
+}
+
+// --------------------------------------------------------- sampling
+
+float Fluid::density_at(const Vec3 &p) const {
+    if (cell_key_.empty()) return 0.0f;
+    const Kernel k(material.smoothing_radius);
+    const float mass = particle_mass();
+    const float inv = 1.0f / material.smoothing_radius;
+    const int64_t bx = int64_t(std::floor(p.x * inv));
+    const int64_t by = int64_t(std::floor(p.y * inv));
+    const int64_t bz = int64_t(std::floor(p.z * inv));
+    float rho = 0.0f;
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++) {
+                const int64_t key = (((bx + dx) & 0x1FFFFF) << 42) |
+                                    (((by + dy) & 0x1FFFFF) << 21) |
+                                    ((bz + dz) & 0x1FFFFF);
+                const uint32_t c = find_cell(key);
+                if (c == 0xFFFFFFFFu) continue;
+                for (uint32_t s = 0; s < cell_count_[c]; s++) {
+                    const uint32_t j = order_[cell_start_[c] + s];
+                    if (j >= pos_.size()) continue;   // ghost
+                    rho += k.w((pos_[j] - p).length_sq()) * mass;
+                }
+            }
+    return rho;
+}
+
+Vec3 Fluid::density_gradient_at(const Vec3 &p) const {
+    if (cell_key_.empty()) return Vec3();
+    const Kernel k(material.smoothing_radius);
+    const float mass = particle_mass();
+    const float inv = 1.0f / material.smoothing_radius;
+    const int64_t bx = int64_t(std::floor(p.x * inv));
+    const int64_t by = int64_t(std::floor(p.y * inv));
+    const int64_t bz = int64_t(std::floor(p.z * inv));
+    Vec3 g;
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++) {
+                const int64_t key = (((bx + dx) & 0x1FFFFF) << 42) |
+                                    (((by + dy) & 0x1FFFFF) << 21) |
+                                    ((bz + dz) & 0x1FFFFF);
+                const uint32_t c = find_cell(key);
+                if (c == 0xFFFFFFFFu) continue;
+                for (uint32_t s = 0; s < cell_count_[c]; s++) {
+                    const uint32_t j = order_[cell_start_[c] + s];
+                    if (j >= pos_.size()) continue;
+                    const Vec3 d = p - pos_[j];
+                    g += k.grad(d, d.length()) * mass;
+                }
+            }
+    return g;
+}
+
+bool Fluid::occupied(const AABB &box) const {
+    if (cell_key_.empty()) return false;
+    const float h = material.smoothing_radius;
+    const float inv = 1.0f / h;
+    // Grown by a smoothing radius: a particle just outside the box
+    // still puts density inside it.
+    const AABB grown = box.grown(h);
+    const int64_t x0 = int64_t(std::floor(grown.min.x * inv));
+    const int64_t y0 = int64_t(std::floor(grown.min.y * inv));
+    const int64_t z0 = int64_t(std::floor(grown.min.z * inv));
+    const int64_t x1 = int64_t(std::floor(grown.max.x * inv));
+    const int64_t y1 = int64_t(std::floor(grown.max.y * inv));
+    const int64_t z1 = int64_t(std::floor(grown.max.z * inv));
+    for (int64_t x = x0; x <= x1; x++)
+        for (int64_t y = y0; y <= y1; y++)
+            for (int64_t z = z0; z <= z1; z++) {
+                const int64_t key = ((x & 0x1FFFFF) << 42) |
+                                    ((y & 0x1FFFFF) << 21) | (z & 0x1FFFFF);
+                if (find_cell(key) != 0xFFFFFFFFu) return true;
+            }
+    return false;
+}
+
+AABB Fluid::bounds() const {
+    AABB b;
+    for (const Vec3 &p : pos_) b.expand(p);
+    return b.grown(material.smoothing_radius);
 }
 
 // -------------------------------------------------------------- step

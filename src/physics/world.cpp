@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "core/log.h"
+#include "physics/dynamics.h"
 #include "render/mesh.h"
 #include "scene/portal.h"
 
@@ -741,4 +742,11 @@ std::string PhysicsWorld::report() const {
     return b;
 }
 
+}  // namespace wr
+
+namespace wr {
+DynamicsWorld &PhysicsWorld::dynamics() {
+    if (!dynamics_) dynamics_ = std::make_unique<DynamicsWorld>(this);
+    return *dynamics_;
+}
 }  // namespace wr

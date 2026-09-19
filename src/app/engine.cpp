@@ -13,6 +13,7 @@
 
 #include "core/jobs.h"
 #include "core/log.h"
+#include "physics/dynamics.h"
 #include "scene/nodes.h"
 #if WARREN_PYTHON
 #include "script/python.h"
@@ -215,12 +216,20 @@ bool Engine::step() {
         const float step = tree_->physics_step();
         int steps = 0;
         while (physics_accumulator_ >= step && steps < 4) {
+            // THE SOLVER FIRST, THEN THE NODES. A RigidBody3D reads
+            // its transform back out of the solver in its own
+            // physics tick, so stepping after them means every body
+            // is drawn one tick behind where the physics thinks it
+            // is -- which is invisible standing still and reads as
+            // input lag the moment anything moves.
+            if (physics_) physics_->dynamics().step(step);
             tree_->physics_tick(step);
             physics_accumulator_ -= step;
             steps++;
         }
         if (steps == 4) physics_accumulator_ = 0.0;
     } else {
+        if (physics_) physics_->dynamics().step(dt);
         tree_->physics_tick(dt);
     }
 

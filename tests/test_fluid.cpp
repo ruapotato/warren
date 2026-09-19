@@ -20,6 +20,7 @@
 // liquid on the far side, warped into place so the neighbourhood
 // is continuous -- and the test measures exactly that, by running
 // the same pour with the ghosts suppressed and comparing.
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -288,6 +289,108 @@ int main() {
                         "spread at the mouth %.3f\n",
                         worst, tear[0]);
         }
+    }
+
+    // ------------------------------------------- what the surface costs
+    //
+    // The liquid is drawn as an isosurface and contouring it is by
+    // far the most expensive thing here, so the number belongs in
+    // the test rather than in somebody's frame budget by surprise.
+    //
+    // And it is measured on a SPREAD-OUT body of liquid, because
+    // that is the case that decides whether it is affordable. A
+    // bucketful is cheap however it is meshed; the same liquid
+    // thrown down a corridor has a bounding box twenty times the
+    // volume and almost all of it empty, and meshing the box costs
+    // the cube of the side for a picture of nothing.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        Ref<Mesh> floor = Mesh::box(Vec3(12, 0.4f, 3));
+        keep.push_back(floor);
+        w.add_mesh(*floor, Transform3D(Vec3(0, -0.2f, 0)), 1);
+        Fluid f(&w);
+        f.particle_radius = 0.045f;
+        f.material.smoothing_radius = 0.135f;
+        // A long thin stream along the corridor.
+        for (int i = 0; i < 1400; i++) {
+            const float t = float(i) / 1400.0f;
+            f.emit(Vec3(-5.0f + t * 10.0f, 0.10f + 0.05f * float(i % 3),
+                        0.05f * float((i / 3) % 3)));
+        }
+        run(f, 0.5f);
+
+        const AABB b = f.bounds();
+        const Vec3 sz = b.max - b.min;
+        const float cell = 0.09f;
+        const int chunk = 8;
+        const float span = cell * float(chunk);
+        const int nx = std::max(1, int(std::ceil(sz.x / span)));
+        const int ny = std::max(1, int(std::ceil(sz.y / span)));
+        const int nz = std::max(1, int(std::ceil(sz.z / span)));
+        int occupied = 0;
+        for (int x = 0; x < nx; x++)
+            for (int y = 0; y < ny; y++)
+                for (int z = 0; z < nz; z++) {
+                    const Vec3 o =
+                        b.min + Vec3(float(x), float(y), float(z)) * span;
+                    if (f.occupied(AABB(o, o + Vec3(span, span, span))))
+                        occupied++;
+                }
+        const int all = nx * ny * nz;
+        std::printf("      spread liquid: %zu particles over %.1f x %.1f x "
+                    "%.1f m, %d of %d chunks have any in them\n",
+                    f.count(), sz.x, sz.y, sz.z, occupied, all);
+        check(occupied < all,
+              "a spread-out body of liquid does not fill its own bounding box");
+
+        // Time the sampling, which is the whole cost, both ways.
+        auto sample_chunks = [&](bool skip) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int x = 0; x < nx; x++)
+                for (int y = 0; y < ny; y++)
+                    for (int z = 0; z < nz; z++) {
+                        const Vec3 o =
+                            b.min + Vec3(float(x), float(y), float(z)) * span;
+                        if (skip &&
+                            !f.occupied(AABB(o, o + Vec3(span, span, span))))
+                            continue;
+                        for (int i = 0; i <= chunk; i++)
+                            for (int j = 0; j <= chunk; j++)
+                                for (int k = 0; k <= chunk; k++)
+                                    (void)f.density_at(
+                                        o + Vec3(float(i), float(j),
+                                                 float(k)) * cell);
+                    }
+            const auto t1 = std::chrono::steady_clock::now();
+            return std::chrono::duration<double, std::milli>(t1 - t0).count();
+        };
+        const double dense = sample_chunks(false);
+        const double sparse = sample_chunks(true);
+        std::printf("      whole box %.1f ms, occupied chunks only %.1f ms\n",
+                    dense, sparse);
+        // A THIRD OFF, ON THE WORST CASE FOR IT. This stream has
+        // splashed over half a second, so it genuinely occupies
+        // two thirds of the chunks its bounding box contains --
+        // the skip cannot do better than that and should not
+        // claim to. A puddle in the corner of a room, which is
+        // the common case, saves far more.
+        check(sparse < dense * 0.8,
+              "and skipping the empty chunks is measurably cheaper");
+        // THE RATIO IS ASSERTED, THE TIME IS ONLY REPORTED.
+        //
+        // A wall-clock threshold in a test is a test that fails on
+        // a loaded machine: this one passed alone and failed under
+        // `ctest -j4` on the same commit, which tells you about
+        // the other three tests and nothing about the fluid. The
+        // ratio is what the change was for and it is load
+        // independent. The bound below is left only wide enough to
+        // catch something going quadratic.
+        //
+        // Single-threaded here; Fluid3D puts the chunks out to the
+        // job system, so a game sees this divided by its cores.
+        check_lt(float(sparse), 400.0f,
+                 "and a rebuild has not gone quadratic");
     }
 
     std::printf("  %s\n", g_fail ? "FAILED" : "all good");

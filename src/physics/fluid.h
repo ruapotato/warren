@@ -151,6 +151,30 @@ public:
     // density times volume.
     float particle_mass() const;
 
+    // --- asking about a point ----------------------------------------
+    //
+    // THE SURFACE COMES FROM HERE. A liquid drawn as particles is a
+    // liquid that looks like particles; what makes it read as
+    // liquid is an isosurface, and the engine already has a dual
+    // contourer that will build one out of any field. So the fluid
+    // answers "how dense is it here" and the mesher does the rest.
+    //
+    // Valid after a step, against the grid that step built.
+    float density_at(const Vec3 &p) const;
+    // The gradient of that, which is the surface normal. Worth
+    // having analytically: the contourer's fallback takes six extra
+    // samples per crossing and there are a great many crossings.
+    Vec3 density_gradient_at(const Vec3 &p) const;
+    // Everything the liquid occupies, grown by a smoothing radius.
+    AABB bounds() const;
+    // IS THERE ANY LIQUID IN THIS BOX. The surface mesher asks it
+    // per chunk, because a body of liquid's bounding box is mostly
+    // empty -- a stream across a room occupies a few per cent of
+    // the volume it spans -- and contouring costs the cube of the
+    // side. Answered from the grid the last step built, so it is a
+    // handful of cell lookups and not a scan.
+    bool occupied(const AABB &box) const;
+
     // --- what happened ---------------------------------------------
     struct Stats {
         uint32_t particles = 0;
@@ -215,6 +239,21 @@ private:
     std::vector<uint32_t> order_;
     std::vector<uint32_t> cell_start_, cell_count_;
     std::vector<int64_t> cell_key_;
+    // AN OPEN-ADDRESSED INDEX OVER cell_key_, because a binary
+    // search is the wrong shape for this.
+    //
+    // Every density sample looks up twenty-seven cells and every
+    // particle does the same once a step. A binary search over a
+    // few thousand cells is a dozen dependent, cache-missing loads
+    // EACH -- so the lookup, not the kernel, was most of the cost
+    // of both the solver's neighbour pass and the surface mesher.
+    // One probe into a power-of-two table replaces it.
+    std::vector<int64_t> probe_key_;
+    std::vector<uint32_t> probe_slot_;
+    uint32_t probe_mask_ = 0;
+    void build_index();
+    // The index into cell_key_ for this cell, or 0xFFFFFFFF.
+    uint32_t find_cell(int64_t key) const;
 
     // Flattened neighbour lists: `nbr_` indexed by `nbr_start_`.
     std::vector<uint32_t> nbr_;

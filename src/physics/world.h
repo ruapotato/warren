@@ -13,6 +13,7 @@
 // calls it.
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "core/object.h"
@@ -23,6 +24,7 @@ namespace wr {
 class Node3D;
 class Portal3D;
 class Mesh;
+class DynamicsWorld;
 
 struct ColliderId {
     uint32_t index = 0;
@@ -249,6 +251,16 @@ public:
         set_transform(ColliderId::unpack(packed), t);
     }
 
+    // --- the moving half ----------------------------------------------------------
+    //
+    // Collision answers queries; dynamics moves things. They are
+    // separate classes because most of a game only needs the first
+    // -- a character controller, a raycast, a trigger volume -- and
+    // one lives inside the other because a rigid body has to ask
+    // the static world what it is standing on. The engine steps it
+    // once per physics tick.
+    DynamicsWorld &dynamics();
+
     // --- diagnostics --------------------------------------------------------------
     struct Stats {
         uint32_t traces = 0;
@@ -282,6 +294,7 @@ private:
     std::vector<uint32_t> free_;
     std::vector<TriangleMesh> meshes_;
     std::vector<Portal3D *> portals_;
+    std::unique_ptr<DynamicsWorld> dynamics_;
     size_t live_ = 0;
     int max_hops_ = 4;
 };
