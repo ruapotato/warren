@@ -381,6 +381,9 @@ PyObject *py_pose(PyObject *, PyObject *args, PyObject *kwargs) {
     return to_python(Variant(t));
 }
 
+// The table, and a way to read its names back. See
+// stubs.cpp: the hand-written stub block is checked against
+// this so it cannot silently fall behind.
 PyMethodDef k_module_methods[] = {
     {"pose", (PyCFunction)py_pose, METH_VARARGS | METH_KEYWORDS,
      "A Transform3D from a position, a (yaw, pitch, roll) in radians "
@@ -851,6 +854,13 @@ std::string Python::report() {
     if (!g_running) return "python: not running";
     return "python: " + version() + ", " +
            std::to_string(ClassDB::all().size()) + " classes exposed";
+}
+
+std::vector<const char *> python_module_functions() {
+    std::vector<const char *> names;
+    for (const PyMethodDef *m = k_module_methods; m->ml_name; ++m)
+        names.push_back(m->ml_name);
+    return names;
 }
 
 }  // namespace wr

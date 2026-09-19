@@ -7,6 +7,7 @@
 
 #include "core/log.h"
 #include "core/object.h"
+#include "script/python.h"
 
 namespace wr {
 namespace {
@@ -229,6 +230,28 @@ class Projection(_Value):
 const char *k_functions = R"(
 # --------------------------------------------------------- the module
 
+def load(path: str, hint: str = "") -> Resource | None:
+    """Load a resource by path. None if nothing could load it.
+
+    CACHED, AND THAT IS PART OF THE CONTRACT: loading a path
+    twice gives the SAME object, not two equal ones, which is
+    what lets a hundred bodies share one mesh and one material.
+
+    `hint` steers the loader. For an image it decides the colour
+    space: "linear" or "data" for a normal map or an ORM, which
+    are not pictures -- running them through the sRGB curve
+    makes every surface smoother than it was authored and every
+    normal weaker, which looks like a lighting bug and is a
+    file-reading one.
+    """
+
+def shape(spec: dict, cell_size: float = 0.05, detail: int = 0,
+          smooth: bool = True) -> Mesh | None:
+    """Build a Mesh from a procedural shape description."""
+
+def surface(spec: dict, size: int = 512, seed: int = 0) -> Material | None:
+    """Build a Material from a procedural surface description."""
+
 def log(message: str) -> None:
     """Write a line to the engine log."""
 
@@ -411,6 +434,22 @@ std::string python_stubs() {
     }
 
     out += k_functions;
+    // EVERY REGISTERED FUNCTION HAS TO BE IN THAT BLOCK.
+    //
+    // `k_functions` is hand-written, because a good docstring is
+    // worth more than the one-line one in the method table. The
+    // price is that it drifts: three functions -- load, shape
+    // and surface -- were exposed by the engine and absent from
+    // the stubs for as long as they had existed, so every editor
+    // and every checker said a real call did not exist.
+    //
+    // Hand-written and checked is the combination that works.
+    for (const char *name : python_module_functions()) {
+        std::string want = std::string("\ndef ") + name + "(";
+        if (out.find(want) == std::string::npos)
+            WR_WARN("stubs: wr.%s is registered but not declared in "
+                    "k_functions; add it", name);
+    }
     return out;
 }
 

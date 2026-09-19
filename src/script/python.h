@@ -31,6 +31,10 @@
 
 namespace wr {
 
+// Every function the `warren` module exposes, by name. Used to
+// check the hand-written type stubs have not fallen behind.
+std::vector<const char *> python_module_functions();
+
 class Engine;
 class SceneTree;
 
