@@ -153,6 +153,18 @@ bool RigidBody3D::warped() const {
         const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
     return b && b->warped;
 }
+Portal3D *RigidBody3D::warp_from() const {
+    if (!world_) return nullptr;
+    const RigidBody *b =
+        const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
+    return b ? b->warp_from : nullptr;
+}
+Portal3D *RigidBody3D::warp_to() const {
+    if (!world_) return nullptr;
+    const RigidBody *b =
+        const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
+    return b ? b->warp_to : nullptr;
+}
 
 void RigidBody3D::teleport(const Transform3D &to) {
     if (!world_) {
@@ -246,8 +258,31 @@ void RigidBody3D::carry_to(const Vec3 &target, float strength, float damping) {
     // free.
     const float sp = b->linear_velocity.length();
     if (sp > 12.0f) b->linear_velocity = b->linear_velocity * (12.0f / sp);
-    b->angular_velocity = b->angular_velocity * 0.85f;
     b->force -= world_->dynamics().gravity * (b->mass * b->gravity_scale);
+}
+
+void RigidBody3D::align_to(const Quat &target, float strength, float damping) {
+    if (!world_) return;
+    RigidBody *b = world_->dynamics().get(body_);
+    if (!b) return;
+    b->wake();
+    // THE SHORT WAY ROUND. q and -q name the same orientation, and
+    // the difference between them is the difference between
+    // turning ten degrees and turning three hundred and fifty.
+    Quat want = target.normalized();
+    if (dot(want, b->orientation) < 0.0f) want = -want;
+    // The error as a world-frame rotation, then as a rotation
+    // vector -- axis times angle -- which is the units angular
+    // velocity is already in.
+    const Quat e = (want * b->orientation.inverse()).normalized();
+    const Vec3 axis{e.x, e.y, e.z};
+    const float s = axis.length();
+    Vec3 rot;
+    if (s > EPS) rot = axis * (2.0f * std::atan2(s, e.w) / s);
+    const Vec3 push = rot * strength - b->angular_velocity * damping;
+    b->angular_velocity += push * (1.0f / std::max(1.0f, damping + 1.0f));
+    const float sp = b->angular_velocity.length();
+    if (sp > 20.0f) b->angular_velocity = b->angular_velocity * (20.0f / sp);
 }
 
 // -------------------------------------------------------------- Fluid3D
@@ -557,7 +592,12 @@ static void register_rigid_classes() {
         .method("warped", &RigidBody3D::warped)
         .method("carry_to", &RigidBody3D::carry_to,
                 {Variant(18.0), Variant(4.0)})
-        .args("target", "strength", "damping");
+        .args("target", "strength", "damping")
+        .method("align_to", &RigidBody3D::align_to,
+                {Variant(12.0), Variant(3.0)})
+        .args("target", "strength", "damping")
+        .method("warp_from", &RigidBody3D::warp_from)
+        .method("warp_to", &RigidBody3D::warp_to);
 
     ClassBuilder<Fluid3D>()
         .field("particle_radius", &Fluid3D::particle_radius)

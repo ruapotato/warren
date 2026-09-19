@@ -105,6 +105,10 @@ public:
     void set_layer(int64_t value);
     // True for one tick after it came through an aperture.
     bool warped() const;
+    // The pair it last went through, kept after `warped` clears.
+    // Null until it has been through one.
+    Portal3D *warp_from() const;
+    Portal3D *warp_to() const;
 
     // CARRIED, NOT HELD. A cube picked up is not welded to the
     // player's hand -- it is pulled toward a point, so it bumps
@@ -113,6 +117,14 @@ public:
     // Call every tick with where the hand is.
     void carry_to(const Vec3 &target, float strength = 18.0f,
                   float damping = 4.0f);
+
+    // AND THE SAME FOR WHICH WAY UP IT IS. Damping the spin only
+    // stops a carried thing turning; it does not turn it back,
+    // and a barrel you are about to stand on a button has to
+    // arrive on its end. A motor toward an orientation is the
+    // rotational half of carry_to and belongs next to it.
+    void align_to(const Quat &target, float strength = 12.0f,
+                  float damping = 3.0f);
 
     void on_ready() override;
     void on_physics(float dt) override;

@@ -141,6 +141,14 @@ struct RigidBody {
     // game can cut a camera or play a sound without guessing.
     bool warped = false;
     Transform3D last_warp = Transform3D::identity();
+    // WHICH HOLE IT WENT IN AND WHICH IT CAME OUT OF, kept after
+    // `warped` has been cleared. A game carrying an object
+    // through a portal has to keep pulling it toward a hand that
+    // is still on the other side, and the only way to work out
+    // where that hand is from over here is to know the pair it
+    // went through.
+    Portal3D *warp_from = nullptr;
+    Portal3D *warp_to = nullptr;
 
     // WHERE IT IS AND WHICH WAY UP, WITHOUT THE SIZE.
     //

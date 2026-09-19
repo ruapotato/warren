@@ -110,6 +110,14 @@ public:
     // Identity until something has been through one.
     const Transform3D &last_portal_warp() const { return last_warp_; }
 
+    // WHICH HOLE IT WENT IN AND WHICH IT CAME OUT OF. The warp
+    // above says where things moved to; this says between what,
+    // which is what a game needs to work out where anything it
+    // is carrying now stands relative to the pair. Null until it
+    // has been through one. The same pair RigidBody3D keeps.
+    Portal3D *last_portal_in() const { return last_in_; }
+    Portal3D *last_portal_out() const { return last_out_; }
+
     // WHERE THE CAPSULE IS, GIVEN WHERE THE NODE IS.
     //
     // A character's origin is AT ITS FEET -- that is where a level
@@ -144,6 +152,8 @@ private:
     int portals_traversed_ = 0;
     float last_scale_ = 1.0f;
     Transform3D last_warp_;
+    Portal3D *last_in_ = nullptr;
+    Portal3D *last_out_ = nullptr;
 };
 
 }  // namespace wr

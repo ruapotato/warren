@@ -825,6 +825,8 @@ void DynamicsWorld::cross_portals() {
         b.mass = b.mass * ratio * ratio * ratio;
         b.warped = true;
         b.last_warp = warp;
+        b.warp_from = p;
+        b.warp_to = p->link();
         // SO THE NEXT STEP'S SEGMENT STARTS WHERE THE BODY IS. A
         // previous position left on the far side of the map is a
         // segment that crosses half the level, and it will find an

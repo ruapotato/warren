@@ -360,6 +360,64 @@ PyObject *value_xform_dir(PyObject *self, PyObject *other) {
     Py_RETURN_NONE;
 }
 
+// ------------------------------------------- the rotation constructors
+//
+// A ROTATION HAS TO BE CONSTRUCTIBLE FROM A SCRIPT. Every value
+// type is built from its components -- Vec3(x, y, z) -- and for
+// a quaternion that is useless: nobody writes down the four
+// numbers. The two ways anybody actually names a rotation are
+// three angles and an axis with an angle, and without them a
+// script can read an orientation and can never make one, which
+// is the difference between being able to ask a body which way
+// it is pointing and being able to tell it.
+
+PyObject *quat_from_euler(PyObject *, PyObject *args) {
+    double yaw = 0, pitch = 0, roll = 0;
+    if (!PyArg_ParseTuple(args, "d|dd", &yaw, &pitch, &roll)) return nullptr;
+    return to_python(Variant(Quat::from_euler_yxz(float(yaw), float(pitch),
+                                                  float(roll))));
+}
+
+PyObject *quat_from_axis_angle(PyObject *, PyObject *args) {
+    PyObject *axis = nullptr;
+    double angle = 0;
+    if (!PyArg_ParseTuple(args, "Od", &axis, &angle)) return nullptr;
+    Variant a;
+    if (!from_python(axis, &a)) return nullptr;
+    return to_python(Variant(Quat::from_axis_angle(a.to_vec3(), float(angle))));
+}
+
+PyObject *quat_between(PyObject *, PyObject *args) {
+    PyObject *from = nullptr, *to = nullptr;
+    if (!PyArg_ParseTuple(args, "OO", &from, &to)) return nullptr;
+    Variant a, b;
+    if (!from_python(from, &a) || !from_python(to, &b)) return nullptr;
+    return to_python(Variant(Quat::between(a.to_vec3(), b.to_vec3())));
+}
+
+PyObject *basis_from_axis_angle(PyObject *, PyObject *args) {
+    PyObject *axis = nullptr;
+    double angle = 0;
+    if (!PyArg_ParseTuple(args, "Od", &axis, &angle)) return nullptr;
+    Variant a;
+    if (!from_python(axis, &a)) return nullptr;
+    return to_python(Variant(Basis::from_axis_angle(a.to_vec3(), float(angle))));
+}
+
+PyMethodDef k_quat_statics[] = {
+    {"from_euler_yxz", quat_from_euler, METH_VARARGS,
+     "A rotation from yaw, pitch and roll, applied in that order."},
+    {"from_axis_angle", quat_from_axis_angle, METH_VARARGS,
+     "A rotation of `angle` radians about `axis`."},
+    {"between", quat_between, METH_VARARGS,
+     "The shortest rotation taking one direction to another."},
+    {nullptr, nullptr, 0, nullptr}};
+
+PyMethodDef k_basis_statics[] = {
+    {"from_axis_angle", basis_from_axis_angle, METH_VARARGS,
+     "A rotation of `angle` radians about `axis`."},
+    {nullptr, nullptr, 0, nullptr}};
+
 PyMethodDef k_value_methods[] = {
     {"xform", value_xform, METH_O,
      "A point through this transform or basis."},
@@ -473,15 +531,23 @@ PyType_Slot k_value_slots[] = {
 struct ValueTypeDesc {
     VType type;
     const char *name;
+    // Constructors that live on the type rather than on an
+    // instance. Null for the types that are just components.
+    PyMethodDef *statics;
 };
 
 const ValueTypeDesc k_value_type_list[] = {
-    {VType::Vec2, "Vec2"},       {VType::Vec3, "Vec3"},
-    {VType::Vec4, "Vec4"},       {VType::Color, "Color"},
-    {VType::Quat, "Quat"},       {VType::Basis, "Basis"},
-    {VType::Transform, "Transform3D"}, {VType::Plane, "Plane"},
-    {VType::AABB, "AABB"},       {VType::Rect2, "Rect2"},
-    {VType::Projection, "Projection"},
+    {VType::Vec2, "Vec2", nullptr},
+    {VType::Vec3, "Vec3", nullptr},
+    {VType::Vec4, "Vec4", nullptr},
+    {VType::Color, "Color", nullptr},
+    {VType::Quat, "Quat", k_quat_statics},
+    {VType::Basis, "Basis", k_basis_statics},
+    {VType::Transform, "Transform3D", nullptr},
+    {VType::Plane, "Plane", nullptr},
+    {VType::AABB, "AABB", nullptr},
+    {VType::Rect2, "Rect2", nullptr},
+    {VType::Projection, "Projection", nullptr},
 };
 
 }  // namespace
@@ -510,6 +576,16 @@ bool register_value_types(PyObject *module) {
         PyObject *type = PyType_FromSpec(&spec);
         if (!type) return false;
         g_value_types[int(d.type)] = (PyTypeObject *)type;
+        for (PyMethodDef *m = d.statics; m && m->ml_name; m++) {
+            PyObject *fn = PyCFunction_New(m, nullptr);
+            if (!fn) return false;
+            PyObject *st = PyStaticMethod_New(fn);
+            Py_DECREF(fn);
+            if (!st) return false;
+            int rc = PyObject_SetAttrString(type, m->ml_name, st);
+            Py_DECREF(st);
+            if (rc < 0) return false;
+        }
         Py_INCREF(type);
         if (PyModule_AddObject(module, d.name, type) < 0) return false;
     }
