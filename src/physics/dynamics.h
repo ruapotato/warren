@@ -180,6 +180,52 @@ public:
     float advance(float real_dt);
 
     Vec3 gravity{0.0f, -9.81f, 0.0f};
+
+    // WHAT A RESIZING PORTAL CONSERVES, and it is a choice rather
+    // than a fact, because a portal that changes your size is not
+    // a physical process. Three self-consistent answers exist and
+    // only one of them is a good game:
+    //
+    //   SELF-SIMILAR. World velocity scales with size, so nothing
+    //   changes in your own frame -- you did not shrink, the room
+    //   grew. Honest, and completely inert: shrinking has no
+    //   consequence you can feel, so a size machine gives you
+    //   nothing to do with it.
+    //
+    //   MOMENTUM WITH MASS CONSERVED. p = mv, mass unchanged, so
+    //   world velocity is unchanged and a tenth-size body covers
+    //   ten times its own length per second. This is the reading
+    //   of "a less dense material becomes denser and smaller",
+    //   and its problem is the mass: a shrunk crate still weighs
+    //   what it did and cannot be pushed, which is the opposite
+    //   of what a player expects of a small thing.
+    //
+    //   MOMENTUM WITH DENSITY CONSERVED. Mass falls as the cube,
+    //   so conserving p sends velocity up as 1/k^3. Shrink by ten
+    //   and you leave at a thousand times the speed. Not a game.
+    //
+    // What is used: SPEED IS PRESERVED and mass follows the
+    // volume. It is the plain generalisation of what an ordinary
+    // equal-sized portal does -- speedy thing goes in, speedy
+    // thing comes out -- and it gives the effect the second rule
+    // was wanted for, because a metre per second means something
+    // very different to a body a tenth of a metre tall. Small is
+    // fast, big is ponderous, and a small crate is still light.
+    //
+    // Set false for the self-similar rule.
+    bool portals_preserve_speed = true;
+    // AND THE SKATER, which is the one piece of real conservation
+    // here. Angular momentum L = I*omega, and a body whose mass
+    // stays put while its radius shrinks by k has I fall as k^2 --
+    // so omega rises as 1/k^2. That is a figure skater pulling
+    // their arms in, and it is worth having exactly because it is
+    // the one place the intuition is right.
+    //
+    // Clamped, because 1/k^2 at a tenth scale is a hundredfold and
+    // a body spinning at that rate is a solver problem and an
+    // unreadable picture.
+    float spin_conservation = 2.0f;
+    float max_spin = 25.0f;
     float fixed_step = 1.0f / 120.0f;
     // Above this many steps in one frame, give up and let time slip.
     // Otherwise a machine that cannot keep up spends longer and

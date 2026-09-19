@@ -308,6 +308,15 @@ def mouse_released(button: int) -> bool:
 def screenshot(path: str) -> bool:
     """Write the last frame to a PNG. Returns whether it worked."""
 
+def pose(position: Vec3 = ..., yaw: float = 0.0, pitch: float = 0.0,
+         roll: float = 0.0, scale: float = 1.0) -> Transform3D:
+    """A Transform3D with an orientation and a size.
+
+    Transform3D is constructible from script and Basis is not, so
+    without this a script can say where to put something and
+    nothing else. Euler is the engine's (yaw, pitch, roll).
+    """
+
 def mouse_wheel() -> float:
     """How far the wheel turned this frame, in notches."""
 

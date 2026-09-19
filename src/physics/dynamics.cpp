@@ -768,15 +768,30 @@ void DynamicsWorld::cross_portals() {
         // basis change, and if the far end is twice the size the
         // thing that comes out is twice as big and travelling twice
         // as fast -- otherwise a big portal is a brake.
-        b.linear_velocity = warp.basis.xform(b.linear_velocity);
-        // Angular velocity is a pseudovector: it transforms by the
-        // rotation but NOT by the scale, and it scales inversely
-        // with size, because a body twice as big turning at the
-        // same rate has four times the energy.
-        b.angular_velocity =
-            warp.basis.orthonormalized().xform(b.angular_velocity) *
-            (ratio > 1e-6f ? 1.0f / ratio : 1.0f);
+        // SPEED, OR SELF-SIMILARITY. See portals_preserve_speed --
+        // the warp's basis carries the size ratio, so putting the
+        // velocity through it scales the speed and putting it
+        // through the rotation alone does not.
+        b.linear_velocity =
+            portals_preserve_speed
+                ? warp.basis.orthonormalized().xform(b.linear_velocity)
+                : warp.basis.xform(b.linear_velocity);
+        // THE SKATER. Angular velocity is a pseudovector, so it
+        // takes the rotation and not the scale; the 1/k^2 is
+        // conservation of angular momentum for a body whose mass
+        // does not change with its size.
+        Vec3 spin = warp.basis.orthonormalized().xform(b.angular_velocity);
+        if (ratio > 1e-6f)
+            spin = spin * std::pow(1.0f / ratio, spin_conservation);
+        const float sl = spin.length();
+        if (sl > max_spin) spin = spin * (max_spin / sl);
+        b.angular_velocity = spin;
         b.scale *= ratio;
+        // Mass follows the volume, so a small crate is a light
+        // crate. This is the half of "denser and smaller" that is
+        // given up, deliberately: keeping the mass makes a shrunk
+        // object immovable and there is nothing to do with it.
+        b.mass = b.mass * ratio * ratio * ratio;
         b.warped = true;
         b.last_warp = warp;
         // SO THE NEXT STEP'S SEGMENT STARTS WHERE THE BODY IS. A

@@ -230,10 +230,14 @@ bool CharacterBody3D::cross_portals(PhysicsWorld *world, const Vec3 &before) {
                                      (world_height() * 0.5f + world_radius());
     set_global_transform(node);
 
-    // The velocity goes through the warp's basis, which carries the
-    // ratio -- so a body shrunk by half arrives moving half as fast in
-    // world terms and exactly as fast in its own.
-    velocity = warp.basis.xform(velocity);
+    // SPEED IS KEPT, by default. The warp's basis carries the size
+    // ratio, so putting the velocity through the rotation alone
+    // leaves the speed alone -- and a body at a tenth the size
+    // moving at the same metres per second is moving ten times as
+    // fast in the only units it cares about. That is the whole
+    // reason a size machine is worth having.
+    velocity = preserve_speed ? warp.basis.orthonormalized().xform(velocity)
+                              : warp.basis.xform(velocity);
 
     // Clear of the exit plane by its NEW width, so it does not arrive
     // inside the wall the exit is mounted on and get pushed back
@@ -263,6 +267,7 @@ static void register_body_classes() {
         .field("radius", &CharacterBody3D::radius)
         .field("height", &CharacterBody3D::height)
         .field("velocity", &CharacterBody3D::velocity)
+        .field("preserve_speed", &CharacterBody3D::preserve_speed)
         .field("gravity", &CharacterBody3D::gravity)
         .field("step_height", &CharacterBody3D::step_height)
         .field("max_slope", &CharacterBody3D::max_slope)

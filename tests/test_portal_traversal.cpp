@@ -188,25 +188,49 @@ void test_coming_back() {
     check(std::fabs(p.x) < 12.0f, "back in the first room", double(p.x));
 }
 
-void test_speed_is_relative() {
-    section("speed is unchanged in the body's own units");
+// WHAT A RESIZING PORTAL DOES TO YOUR SPEED, and it is a choice
+// about what is conserved rather than a fact -- changing your
+// size is not a physical process.
+//
+// The rule is that SPEED IS KEPT. It is the plain generalisation
+// of what an equal-sized pair does, and it is the only one of the
+// three candidates that makes a size machine worth using:
+//
+//   scaling the speed with the body is self-similar, so nothing
+//     changes in your own frame and shrinking has no consequence
+//     you can feel;
+//   conserving momentum with the mass held constant gives the
+//     same answer as this one for velocity, and leaves a shrunk
+//     object too heavy to push;
+//   conserving momentum with the density held constant sends
+//     velocity up as the inverse cube of the size, which at a
+//     tenth scale is a thousandfold.
+//
+// So: the metres per second are unchanged, and what changes is
+// what a metre is worth to you. Come out four times the size and
+// you are crawling at a quarter of your own lengths per second;
+// come out small and you are racing.
+void test_speed_is_preserved() {
+    section("speed is unchanged through a resizing portal");
     Fixture f(2.0f, 8.0f);
-    // Give it a straight velocity and read it back after the warp,
-    // with no controller interfering.
     f.body->set_global_position({0, 0.05f, 1.2f});
     const float dt = 1.0f / 120.0f;
     bool crossed = false;
     for (int i = 0; i < 400 && !crossed; i++) {
         f.body->velocity.x = 0.0f;
-        f.body->velocity.z = -6.0f * f.body->get_size();
+        f.body->velocity.z = -6.0f;
         crossed = f.body->move_and_slide(f.world.get(), dt);
     }
     check(crossed, "crossed");
-    // Four times the size, so four times the world speed -- which is
-    // the same speed measured in its own body lengths.
-    float world_speed = Vec2(f.body->velocity.x, f.body->velocity.z).length();
-    float own_speed = world_speed / f.body->get_size();
-    near_check(own_speed, 6.0f, 1.0f, "unchanged in its own units");
+    const float world_speed =
+        Vec2(f.body->velocity.x, f.body->velocity.z).length();
+    near_check(world_speed, 6.0f, 1.0f, "the same metres per second");
+    near_check(f.body->get_size(), 4.0f, 0.1f, "at four times the size");
+    // Which is the point: four times as big, same world speed, so
+    // a quarter of the pace in the only units the body cares
+    // about.
+    near_check(world_speed / f.body->get_size(), 1.5f, 0.4f,
+               "and therefore a quarter of the pace in its own lengths");
 }
 
 void test_ray_through_a_portal() {
@@ -376,7 +400,7 @@ int main(int argc, char **argv) {
     test_warp_algebra();
     test_walking_through();
     test_coming_back();
-    test_speed_is_relative();
+    test_speed_is_preserved();
     test_ray_through_a_portal();
     test_equal_pair_does_not_resize();
     test_too_big_does_not_fit();

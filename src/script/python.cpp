@@ -349,7 +349,43 @@ PyObject *py_group(PyObject *, PyObject *args) {
     return list;
 }
 
+// A PLACEMENT, WITH AN ORIENTATION AND A SIZE.
+//
+// Transform3D is constructible from script and Basis is not, so
+// until now a script could say WHERE to put something and nothing
+// else. Everything that needed an angle went through a node's
+// `euler`, which works for a node and not for the many things
+// that take a bare transform -- a collider, a teleport, a portal
+// warp.
+//
+// Euler here is the engine's: (yaw, pitch, roll), applied in that
+// order, which is the order that makes yaw behave like a compass.
+PyObject *py_pose(PyObject *, PyObject *args, PyObject *kwargs) {
+    static const char *keys[] = {"position", "yaw",   "pitch",
+                                 "roll",     "scale", nullptr};
+    PyObject *pos = nullptr;
+    double yaw = 0.0, pitch = 0.0, roll = 0.0, scale = 1.0;
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|Odddd",
+                                     const_cast<char **>(keys), &pos, &yaw,
+                                     &pitch, &roll, &scale))
+        return nullptr;
+    Vec3 origin;
+    if (pos && pos != Py_None) {
+        Variant v;
+        if (from_python(pos, &v)) origin = v.to_vec3();
+    }
+    Transform3D t;
+    t.basis = Basis::from_euler_yxz(float(yaw), float(pitch), float(roll)) *
+              float(scale);
+    t.origin = origin;
+    return to_python(Variant(t));
+}
+
 PyMethodDef k_module_methods[] = {
+    {"pose", (PyCFunction)py_pose, METH_VARARGS | METH_KEYWORDS,
+     "A Transform3D from a position, a (yaw, pitch, roll) in radians "
+     "and a uniform scale. The only way to build an oriented "
+     "transform from script."},
     {"log", py_log, METH_VARARGS, "Write a line to the engine log."},
     {"warn", py_warn, METH_VARARGS, "Write a warning."},
     {"error", py_error, METH_VARARGS, "Write an error."},

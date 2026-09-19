@@ -157,6 +157,61 @@ bool RigidBody3D::warped() const {
     return b && b->warped;
 }
 
+void RigidBody3D::teleport(const Transform3D &to) {
+    if (!world_) {
+        set_global_transform(to);
+        return;
+    }
+    RigidBody *b = world_->dynamics().get(body_);
+    if (!b) {
+        set_global_transform(to);
+        return;
+    }
+    b->position = to.origin;
+    b->prev_position = to.origin;
+    b->orientation = to.basis.orthonormalized().to_quat();
+    b->linear_velocity = Vec3();
+    b->angular_velocity = Vec3();
+    b->wake();
+    set_global_transform(to);
+}
+
+void RigidBody3D::set_kinematic(bool on) {
+    kinematic = on;
+    if (!world_) return;
+    RigidBody *b = world_->dynamics().get(body_);
+    if (!b) return;
+    b->kind = on ? BodyKind::Kinematic : BodyKind::Dynamic;
+    b->linear_velocity = Vec3();
+    b->angular_velocity = Vec3();
+    // The inverse mass is zero for a kinematic body and has to be
+    // put back when it stops being one, or a dropped object has
+    // infinite mass and cannot be moved by anything.
+    world_->dynamics().refresh_mass(body_);
+    b->wake();
+}
+
+bool RigidBody3D::is_kinematic() const {
+    if (!world_) return kinematic;
+    const RigidBody *b =
+        const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
+    return b ? b->kind == BodyKind::Kinematic : kinematic;
+}
+
+void RigidBody3D::set_body_scale(float value) {
+    if (!world_) return;
+    RigidBody *b = world_->dynamics().get(body_);
+    if (!b) return;
+    b->scale = std::max(0.01f, value);
+    // Mass as the cube of the size. A barrel three times as tall
+    // is twenty-seven times the barrel, and it should take
+    // twenty-seven times the shove -- otherwise a giant one skates
+    // about like a balloon and the size stops meaning anything.
+    b->mass = mass * b->scale * b->scale * b->scale;
+    world_->dynamics().refresh_mass(body_);
+    b->wake();
+}
+
 void RigidBody3D::carry_to(const Vec3 &target, float strength, float damping) {
     if (!world_) return;
     RigidBody *b = world_->dynamics().get(body_);
@@ -490,6 +545,10 @@ static void register_rigid_classes() {
         .method("wake", &RigidBody3D::wake)
         .method("is_sleeping", &RigidBody3D::sleeping)
         .method("body_scale", &RigidBody3D::body_scale)
+        .method("teleport", &RigidBody3D::teleport).args("to")
+        .method("set_kinematic", &RigidBody3D::set_kinematic).args("on")
+        .method("is_kinematic", &RigidBody3D::is_kinematic)
+        .method("set_body_scale", &RigidBody3D::set_body_scale).args("value")
         .method("warped", &RigidBody3D::warped)
         .method("carry_to", &RigidBody3D::carry_to,
                 {Variant(18.0), Variant(4.0)})

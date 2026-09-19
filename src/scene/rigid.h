@@ -70,6 +70,30 @@ public:
     void wake();
     bool sleeping() const;
     float body_scale() const;
+
+    // PUT IT SOMEWHERE, and mean it.
+    //
+    // Setting the node's transform does nothing: the solver owns
+    // the body and writes the node back every tick, so the move
+    // lasts until the next one. A respawn, a teleport, a thing
+    // locked to the player's hands -- all of them need to move the
+    // BODY, and all of them want the velocity cleared with it or
+    // the object arrives carrying whatever it was doing before.
+    void teleport(const Transform3D &to);
+    // Kinematic bodies are driven by the game and shove dynamics
+    // out of the way without being shoved back. Switching at
+    // runtime is what picking something up is: it stops being
+    // simulated and starts being carried.
+    void set_kinematic(bool on);
+    bool is_kinematic() const;
+    // RESIZE IT, keeping its mass sensible.
+    //
+    // The scale rides in the solver because portals change it, and
+    // a game that wants a barrel three times the size wants the
+    // same field -- so there is one notion of how big a body is
+    // and not two that can disagree. Mass goes as the cube, which
+    // is why a big one is hard to shift.
+    void set_body_scale(float value);
     // True for one tick after it came through an aperture.
     bool warped() const;
 

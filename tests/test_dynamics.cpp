@@ -257,8 +257,70 @@ int main() {
         check(crossed, "a body driven at an aperture goes through it");
         check_near(r->scale, 2.0f, 0.01f,
                    "and comes out the far end at the far end's size");
-        check_near(r->linear_velocity.length(), speed_in * 2.0f, 0.2f,
-                   "speedy thing goes in, speedy thing comes out -- scaled");
+        // SPEED IS KEPT, NOT SCALED, and that is a deliberate
+        // choice about what a resizing portal conserves. See
+        // DynamicsWorld::portals_preserve_speed: scaling the speed
+        // with the body is self-similar and inert -- nothing
+        // changes in your own frame -- while keeping it means a
+        // body that came out twice the size is now travelling at
+        // half its own lengths per second, and one that came out
+        // small is racing.
+        check_near(r->linear_velocity.length(), speed_in, 0.2f,
+                   "speedy thing goes in, speedy thing comes out");
+    }
+
+    // --------------------------------------------------- the skater
+    //
+    // The one piece of real conservation in a resizing portal.
+    // L = I*omega; a body whose mass stays put while its radius
+    // shrinks by k has its moment of inertia fall as k^2, so omega
+    // rises as 1/k^2. Pulling your arms in.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        DynamicsWorld d(&w);
+        d.gravity = Vec3();
+
+        // Big end first, small end second: a body through this
+        // pair comes out at half the size.
+        Portal3D a, b;
+        a.width = 2.0f;
+        a.height = 4.0f;
+        a.active = true;
+        a.open = 1.0f;
+        a.set_position(Vec3(0, 1, -4));
+        b.width = 1.0f;
+        b.height = 2.0f;
+        b.active = true;
+        b.open = 1.0f;
+        b.set_position(Vec3(0, 1, 4));
+        b.set_euler(Vec3(3.14159265f, 0, 0));
+        a.link_to(&b);
+        w.add_portal(&a);
+        w.add_portal(&b);
+
+        BodyId id = d.add(Shape::sphere(0.25f), Transform3D(Vec3(0, 1, -1)),
+                          4.0f);
+        RigidBody *body = d.get(id);
+        body->linear_damping = 0.0f;
+        body->angular_damping = 0.0f;
+        body->linear_velocity = Vec3(0, 0, -4.0f);
+        // About the axis of travel, so the warp does not reorient
+        // it and the magnitude is the only thing under test.
+        body->angular_velocity = Vec3(0, 0, 3.0f);
+        const float spin_in = body->angular_velocity.length();
+
+        bool crossed = false;
+        for (int i = 0; i < 400 && !crossed; i++) {
+            d.step(d.fixed_step);
+            crossed = d.get(id)->warped;
+        }
+        const RigidBody *r = d.get(id);
+        check(crossed, "a spinning body goes through a shrinking pair");
+        check_near(r->scale, 0.5f, 0.01f, "and comes out at half the size");
+        // Half the size, so four times the spin.
+        check_near(r->angular_velocity.length(), spin_in * 4.0f, 0.3f,
+                   "and four times the spin -- a skater pulling their arms in");
     }
 
     std::printf("  %s\n", g_fail ? "FAILED" : "all good");

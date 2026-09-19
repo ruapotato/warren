@@ -58,6 +58,12 @@ public:
 
     // --- movement ----------------------------------------------------------
     Vec3 velocity;
+    // WHAT A RESIZING PORTAL DOES TO YOUR SPEED. True keeps it --
+    // so a tenth-size body covers ten times its own length per
+    // second and small reads as fast. False scales it with you,
+    // which is self-similar and means shrinking has no
+    // consequence you can feel. See DynamicsWorld's long note.
+    bool preserve_speed = true;
     // Positive; applied downwards, and scaled by `size` so a shrunken
     // character does not drop like a stone.
     float gravity = 22.0f;
