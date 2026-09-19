@@ -608,6 +608,44 @@ void PhysicsWorld::overlap(const AABB &box, uint32_t mask,
     }
 }
 
+void PhysicsWorld::query_triangles(const AABB &box, uint32_t mask,
+                                   std::vector<WorldTriangle> &out) const {
+    for (const Slot &slot : slots_) {
+        if (!slot.live) continue;
+        const Collider &c = slot.collider;
+        if (!(c.layer & mask)) continue;
+        if (c.shape.type != ShapeType::Mesh) continue;
+        if (c.mesh < 0 || size_t(c.mesh) >= meshes_.size()) continue;
+        if (!c.bounds.intersects(box)) continue;
+        const TriangleMesh &m = meshes_[size_t(c.mesh)];
+        // The query is in the mesh's own space; the triangles come
+        // back in the world's, because every caller wants them there
+        // and doing it here means one transform per triangle rather
+        // than one per triangle per caller.
+        const Transform3D inv = c.transform.inverse();
+        AABB local;
+        for (int i = 0; i < 8; i++) {
+            const Vec3 corner(((i & 1) ? box.max.x : box.min.x),
+                              ((i & 2) ? box.max.y : box.min.y),
+                              ((i & 4) ? box.max.z : box.min.z));
+            local.expand(inv.xform(corner));
+        }
+        std::vector<uint32_t> tris;
+        m.query(local, tris);
+        for (uint32_t ti : tris) {
+            WorldTriangle wt;
+            Vec3 v[3];
+            m.triangle(ti, v);
+            for (int k = 0; k < 3; k++) wt.v[k] = c.transform.xform(v[k]);
+            wt.collider = ColliderId{uint32_t(&slot - slots_.data()),
+                                     slot.generation};
+            wt.node = c.owner;
+            wt.index = ti;
+            out.push_back(wt);
+        }
+    }
+}
+
 // ---------------------------------------------------------- for scripts
 
 static Dict hit_to_dict(const RayHit &h) {

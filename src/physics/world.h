@@ -142,6 +142,26 @@ public:
     // Everything whose bounds touch `box`.
     void overlap(const AABB &box, uint32_t mask, std::vector<ColliderId> &out) const;
 
+    // ONE TRIANGLE OF THE WORLD, ALREADY IN WORLD SPACE.
+    //
+    // The solver needs the level as triangles, not as colliders: a
+    // box resting on a floor is in contact with two or three of
+    // them and each is a separate manifold with its own warm start.
+    // Handing back the collider and making the caller dig the mesh
+    // out means the mesh table has to be public, and then nothing
+    // owns it.
+    //
+    // `index` is the triangle's index within its mesh, which is
+    // what makes a contact on it identifiable from step to step.
+    struct WorldTriangle {
+        Vec3 v[3];
+        ColliderId collider;
+        Node3D *node = nullptr;
+        uint32_t index = 0;
+    };
+    void query_triangles(const AABB &box, uint32_t mask,
+                         std::vector<WorldTriangle> &out) const;
+
     // --- crossings ----------------------------------------------------------------
     // Did a segment cross a portal? Returns it, or null, with where.
     Portal3D *crossing(const Vec3 &from, const Vec3 &to, float *out_t = nullptr) const;
