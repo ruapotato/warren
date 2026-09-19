@@ -200,6 +200,14 @@ bool CharacterBody3D::cross_portals(PhysicsWorld *world, const Vec3 &before) {
     float where = 0.0f;
     Portal3D *p = world->crossing(before, t.origin, &where);
     if (!p || !p->link()) return false;
+    // DO YOU FIT. The exit decides what size you come out at; the
+    // entrance decides whether you get in. Without the second rule
+    // a size machine has no gate and a small hole is never an
+    // obstacle. The collision agrees -- see
+    // PhysicsWorld::inside_aperture -- so a body refused here was
+    // stopped by a solid wall rather than left standing in a gap.
+    if (!p->admits(world_radius(), world_height() + world_radius() * 2.0f))
+        return false;
 
     Portal3D *q = p->link();
     Transform3D warp = Portal3D::warp(p, q);

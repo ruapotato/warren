@@ -196,6 +196,25 @@ public:
     // for exactly the same visible result.
     bool inside_aperture(const Vec3 &world_point, const Vec3 &surface_normal,
                          float margin = 0.0f) const;
+    // THE SAME, ASKED BY SOMETHING OF A PARTICULAR SIZE.
+    //
+    // A portal is only a hole for a body that fits through it. Told
+    // nothing about the asker, the wall stops being solid for
+    // everything -- so a body too large to get through walks up to
+    // an aperture it cannot use, finds no wall there either, and
+    // stands inside the hole. With an unequal pair that is the
+    // common case rather than the exotic one, because making
+    // yourself too big to get back is exactly the mistake the
+    // mechanic invites.
+    //
+    // The shape doing the query already knows its own size, which
+    // is why this takes the shape rather than a number threaded
+    // down from the caller.
+    bool inside_aperture(const Vec3 &world_point, const Vec3 &surface_normal,
+                         float margin, const Shape *asker) const;
+    // Does this shape fit through that aperture. Static because it
+    // is a statement about the two of them and nothing else.
+    static bool admits_shape(const Portal3D &p, const Shape &s);
     // How far from vertical a portal may lean and still count as
     // wall-mounted, and how flat a surface must be to count as floor.
     float aperture_upright = 0.7f;

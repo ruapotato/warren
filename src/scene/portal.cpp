@@ -1,6 +1,7 @@
 #include "portal.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "core/log.h"
 
@@ -91,6 +92,30 @@ Transform3D Portal3D::warp(const Portal3D *from, const Portal3D *to) {
 }
 
 // ------------------------------------------------------------- traversal
+
+bool Portal3D::admits(float radius, float height) const {
+    const float w = world_width();
+    const float h = world_height();
+    // Flat means floor or ceiling: you arrive end on and your
+    // height is along the normal, not across the opening.
+    const bool flat = std::fabs(normal().y) > 0.7f;
+    const float need_w = radius * 2.0f;
+    const float need_h = flat ? radius * 2.0f : height;
+    // A HAIR OF SLACK. A body exactly as wide as the hole is a body
+    // that gets through or does not depending on the last bit of a
+    // float, and a puzzle whose answer is "nudge left" is not a
+    // puzzle. Two per cent is far below anything anybody can judge
+    // by eye and far above the rounding.
+    const float slack = 1.02f;
+    return w * slack >= need_w && h * slack >= need_h;
+}
+
+float Portal3D::admits_radius() const {
+    const bool flat = std::fabs(normal().y) > 0.7f;
+    const float w = world_width();
+    const float h = world_height();
+    return (flat ? std::min(w, h) : w) * 0.5f * 1.02f;
+}
 
 bool Portal3D::crossed(const Vec3 &from, const Vec3 &to, float *t_out) const {
     Plane p = plane();
@@ -191,6 +216,8 @@ bool Portal3D::screen_rect(const Transform3D &view, const Projection &proj,
 
 static void register_portal_class() {
     ClassBuilder<Portal3D>()
+        .method("admits", &Portal3D::admits).args("radius", "height")
+        .method("admits_radius", &Portal3D::admits_radius)
         .field("width", &Portal3D::width, "range:0.05,64")
         .field("height", &Portal3D::height, "range:0.05,64")
         .field("active", &Portal3D::active)

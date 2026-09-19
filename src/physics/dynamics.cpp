@@ -246,7 +246,7 @@ void DynamicsWorld::collect_pairs() {
             const Vec3 centroid = (wt.v[0] + wt.v[1] + wt.v[2]) * (1.0f / 3.0f);
             const Vec3 tn = cross(wt.v[1] - wt.v[0], wt.v[2] - wt.v[0]);
             if (world_->inside_aperture(centroid, tn.normalized(),
-                                        -world_->aperture_edge))
+                                        -world_->aperture_edge, &sa))
                 continue;
             Manifold m;
             if (!collide_triangle(sa, ta, wt.v, &m, margin)) continue;
@@ -752,6 +752,9 @@ void DynamicsWorld::cross_portals() {
         float t = 0.0f;
         Portal3D *p = world_->crossing(b.prev_position, b.position, &t);
         if (!p || !p->link()) continue;
+        // Same gate as the character's. A crate too big for the
+        // hole bounces off the wall it is cut into.
+        if (!PhysicsWorld::admits_shape(*p, b.sized())) continue;
         const Transform3D warp = Portal3D::warp(p, p->link());
         const float ratio = warp.basis.uniform_scale();
 

@@ -40,6 +40,28 @@ public:
     float world_width() const { return width * global_transform().basis.uniform_scale(); }
     float world_height() const { return height * global_transform().basis.uniform_scale(); }
 
+    // DOES THIS FIT THROUGH, and it is the other half of what makes
+    // an unequal pair a puzzle rather than a curiosity.
+    //
+    // The size you come out at is the exit's business; whether you
+    // get in at all is the entrance's. Without this second rule a
+    // size machine has no gate: any body walks into any aperture
+    // and the only question is what it is when it lands, so a small
+    // portal is never an obstacle and a large one is never a
+    // reward. With it, "make yourself big enough to lift that, and
+    // small enough to get back" is a thing a level can ask.
+    //
+    // The rule has to be one a player can hold in their head while
+    // looking at a hole, so it is the plain one: your girth against
+    // the opening's width, and your height against its height --
+    // except through a floor or a ceiling, where you go through end
+    // on and your girth is all that matters.
+    bool admits(float radius, float height) const;
+    // How big a body this aperture will take, as the radius of the
+    // largest that fits. For a HUD, and for a game that wants to
+    // say why it refused.
+    float admits_radius() const;
+
     // --- the link -----------------------------------------------------------
     // Linking is symmetric: linking A to B links B to A, and linking A
     // to something else unlinks whatever B was pointing at. A portal

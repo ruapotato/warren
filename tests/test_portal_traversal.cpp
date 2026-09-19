@@ -247,6 +247,44 @@ void test_ray_through_a_portal() {
                    "and hits the same place");
 }
 
+// WHAT THE ENTRANCE DECIDES.
+//
+// The exit decides what size you come out at. The entrance decides
+// whether you get in at all, and that second rule is what turns an
+// unequal pair from a curiosity into a gate: a small hole is an
+// obstacle until you are small, and making yourself too big to get
+// back is exactly the mistake the mechanic invites.
+//
+// The half that is easy to forget is the COLLISION. A body refused
+// the crossing has to be stopped by a wall; if the aperture is
+// still a hole in the geometry for it, it walks into the doorway,
+// is refused the teleport, and stands inside the wall.
+void test_too_big_does_not_fit() {
+    section("a body too big for the hole does not get through it");
+    Fixture f(0.5f, 8.0f);
+    const float before = f.body->global_position().z;
+    f.walk(Vec3(0, 0, -1), 4.0f, 4.0f);
+    near_check(f.body->get_size(), 1.0f, 1e-4f, "it is still its own size");
+    check(f.body->global_position().x < 50.0f,
+          "and it is still on this side of the map",
+          double(f.body->global_position().x));
+    // Stopped SHORT of the aperture, not standing in it. The wall
+    // is at z = -6 and the portal is set into it.
+    check(f.body->global_position().z > -6.0f,
+          "and it was stopped by the wall rather than left inside it",
+          double(f.body->global_position().z));
+    (void)before;
+
+    // And the same pair, entered from the big end, lets it through
+    // -- so the refusal is about the size of the hole and not
+    // about the pair being unequal.
+    Fixture g(8.0f, 0.5f);
+    g.walk(Vec3(0, 0, -1), 4.0f, 4.0f);
+    check(g.body->get_size() < 0.5f,
+          "while the same body fits the big end and comes out tiny",
+          double(g.body->get_size()));
+}
+
 void test_equal_pair_does_not_resize() {
     section("an equal pair changes nothing but where you are");
     Fixture f(2.0f, 2.0f);
@@ -261,10 +299,17 @@ void test_size_is_clamped() {
     section("the size cannot run away");
     Fixture f(0.5f, 8.0f);   // 16x each way
     f.body->max_size = 6.0f;
+    // SMALL ENOUGH TO GET IN. A half-metre aperture will not take
+    // a body six tenths of a metre across, and since the entrance
+    // gained a fit rule it does not pretend to -- so growing
+    // sixteenfold now starts from something that fits through the
+    // small end. Which is the mechanic: you have to be small to
+    // use the small hole.
+    f.body->set_size(0.5f);
     f.walk(Vec3(0, 0, -1), 4.0f, 4.0f);
     check(f.body->get_size() <= 6.0f + 1e-4f, "clamped at the maximum",
           double(f.body->get_size()));
-    check(f.body->get_size() > 1.0f, "but it did grow", double(f.body->get_size()));
+    check(f.body->get_size() > 0.5f, "but it did grow", double(f.body->get_size()));
 }
 
 // TRIANGLE MESHES, WHICH ARE WHAT A LEVEL IS MADE OF.
@@ -334,6 +379,7 @@ int main(int argc, char **argv) {
     test_speed_is_relative();
     test_ray_through_a_portal();
     test_equal_pair_does_not_resize();
+    test_too_big_does_not_fit();
     test_size_is_clamped();
     test_mesh_collision();
     std::printf("\n%d checks, %d failed\n", g_checks, g_fail);

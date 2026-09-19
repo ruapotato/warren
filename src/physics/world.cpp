@@ -221,6 +221,11 @@ bool PhysicsWorld::inside_aperture(const Vec3 &point, float margin) const {
 
 bool PhysicsWorld::inside_aperture(const Vec3 &point, const Vec3 &surface_normal,
                                    float margin) const {
+    return inside_aperture(point, surface_normal, margin, nullptr);
+}
+
+bool PhysicsWorld::inside_aperture(const Vec3 &point, const Vec3 &surface_normal,
+                                   float margin, const Shape *asker) const {
     for (Portal3D *p : portals_) {
         if (!p || !p->active || !p->linked()) continue;
         if (std::fabs(p->plane().distance_to(point)) > aperture_thickness) continue;
@@ -230,9 +235,36 @@ bool PhysicsWorld::inside_aperture(const Vec3 &point, const Vec3 &surface_normal
             std::fabs(dot(p->normal(), Vec3::up())) < aperture_upright;
         const bool surface_is_floor = dot(surface_normal, Vec3::up()) > aperture_upright;
         if (portal_is_upright && surface_is_floor) continue;
+        // AND ONLY IF THE ASKER FITS. A hole too small to get
+        // through is a wall, and it has to be a wall to the
+        // COLLISION as well as to the traversal -- otherwise a body
+        // that is refused the crossing is refused it while standing
+        // in a gap where the wall used to be.
+        if (asker && !admits_shape(*p, *asker)) continue;
         return true;
     }
     return false;
+}
+
+bool PhysicsWorld::admits_shape(const Portal3D &p, const Shape &s) {
+    switch (s.type) {
+        case ShapeType::Capsule:
+            return p.admits(s.radius, s.height + s.radius * 2.0f);
+        case ShapeType::Sphere:
+            return p.admits(s.radius, s.radius * 2.0f);
+        case ShapeType::Box: {
+            // A box turns, so what matters is the smallest way
+            // through it and the largest way across it. Using the
+            // half-diagonal would be exact and would refuse a crate
+            // that plainly fits when held square, which is the
+            // wrong way to be wrong in a puzzle.
+            const Vec3 h = s.half_extents;
+            const float girth = std::max(h.x, h.z);
+            return p.admits(girth, h.y * 2.0f);
+        }
+        default:
+            return true;
+    }
 }
 
 // THE PORTAL-AWARE TRACE.
@@ -376,8 +408,11 @@ bool PhysicsWorld::contact_one(const Shape &shape, const Transform3D &at,
     // With the surface's own normal, which is what separates the wall
     // the portal is cut into from the floor it stands on.
     auto in_doorway = [&](const Vec3 &point, const Vec3 &normal) {
+        // WITH THE MOVING SHAPE, so a portal too small for it is
+        // still a wall. The shape is the only thing here that knows
+        // how big the asker is.
         return !portals_.empty() &&
-               inside_aperture(point, normal, -aperture_edge);
+               inside_aperture(point, normal, -aperture_edge, &shape);
     };
     // EVERY EARLY RETURN SETS BOTH OUTPUTS. A path that leaves the
     // normal untouched hands the sweep loop a garbage direction, and
