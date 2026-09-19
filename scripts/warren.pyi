@@ -798,6 +798,9 @@ def mouse_pressed(button: int) -> bool:
 def mouse_released(button: int) -> bool:
     """Was a mouse button released this frame?"""
 
+def screenshot(path: str) -> bool:
+    """Write the last frame to a PNG. Returns whether it worked."""
+
 def mouse_wheel() -> float:
     """How far the wheel turned this frame, in notches."""
 

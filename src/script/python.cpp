@@ -226,6 +226,21 @@ PyObject *py_load(PyObject *, PyObject *args) {
     return object_to_python(r.get());
 }
 
+PyObject *py_screenshot(PyObject *, PyObject *args) {
+    // WRITE THE FRAME TO A FILE, from the game.
+    //
+    // --shot has always been able to do this from the command
+    // line, which is no use at all to somebody who has just SEEN
+    // the thing they want to report: by the time they can get to
+    // a terminal the moment is gone. A key that saves the frame
+    // turns "the shirt looks torn when I run" into a picture of
+    // the shirt looking torn when they run.
+    const char *path = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &path)) return nullptr;
+    if (!g_engine) Py_RETURN_FALSE;
+    return PyBool_FromLong(g_engine->save_screenshot(path) ? 1 : 0);
+}
+
 PyObject *py_mouse_wheel(PyObject *, PyObject *) {
     // How far the wheel turned this frame. Tracked by the input
     // layer since it was written and never reachable from a
@@ -359,6 +374,8 @@ PyMethodDef k_module_methods[] = {
      "Was a key pressed this frame?"},
     {"key_released", py_key_released, METH_VARARGS,
      "Was a key released this frame?"},
+    {"screenshot", py_screenshot, METH_VARARGS,
+     "Write the last frame to a PNG. Returns whether it worked."},
     {"mouse_wheel", py_mouse_wheel, METH_NOARGS,
      "How far the wheel turned this frame, in notches."},
     {"mouse_down", py_mouse_down, METH_VARARGS, "Is a mouse button held?"},
