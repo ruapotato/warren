@@ -272,6 +272,29 @@ void Label::draw_ui(ui::DrawList &out) {
     const ui::TextAlign a = align == 1   ? ui::TextAlign::Centre
                             : align == 2 ? ui::TextAlign::Right
                                          : ui::TextAlign::Left;
+    if (outline > 0.0f && outline_colour.a > 0.0f && opacity > 0.0f) {
+        const uint32_t edge = to_rgba(outline_colour, opacity);
+        if (outline <= 1.0f) {
+            // A drop shadow: one stamp, offset.
+            ui::Rect r = rect_;
+            r.x += shadow_offset.x;
+            r.y += shadow_offset.y;
+            out.text_in(r, text, edge, a, vertical_centre);
+        } else {
+            // Stamped all the way round. Eight offsets rather than
+            // four: the corners are what stop a diagonal edge in
+            // the scene showing through between the stamps.
+            const float d = outline;
+            static const float kx[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+            static const float ky[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
+            for (int i = 0; i < 8; i++) {
+                ui::Rect r = rect_;
+                r.x += kx[i] * d;
+                r.y += ky[i] * d;
+                out.text_in(r, text, edge, a, vertical_centre);
+            }
+        }
+    }
     out.text_in(rect_, text,
                 to_rgba(use_theme_colour ? t.text : colour, opacity), a,
                 vertical_centre);
@@ -610,7 +633,10 @@ static void register_controls() {
         .field("use_theme_colour", &Label::use_theme_colour)
         .field("colour", &Label::colour)
         .field("align", &Label::align, "range:0,2")
-        .field("vertical_centre", &Label::vertical_centre);
+        .field("vertical_centre", &Label::vertical_centre)
+        .field("outline", &Label::outline, "range:0,8")
+        .field("outline_colour", &Label::outline_colour)
+        .field("shadow_offset", &Label::shadow_offset);
     ClassBuilder<Button>()
         .prop("text", &Button::get_text, &Button::set_text)
         .field("toggle_mode", &Button::toggle_mode)

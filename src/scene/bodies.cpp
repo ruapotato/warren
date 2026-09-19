@@ -167,6 +167,15 @@ bool CharacterBody3D::move_and_slide(PhysicsWorld *world, float dt) {
         }
     }
 
+    // --- HELD IN THE MOUTH OF ANY APERTURE IT IS PART WAY
+    // THROUGH. See PhysicsWorld::hold_in_aperture: the hole has
+    // no sides of its own, so without this a character that has
+    // started to fall into a floor portal keeps walking and comes
+    // out from under the floor instead of out of the other end.
+    t.origin = world->hold_in_aperture(t.origin, t.basis.y().normalized(),
+                                       world_height() * 0.5f,
+                                       world_radius());
+
     // Back down to the feet -- KEEPING THE SCALE.
     //
     // `t` came out of body_transform(), whose basis is orthonormal

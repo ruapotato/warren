@@ -21,6 +21,15 @@
 
 namespace wr {
 
+namespace {
+// Not atomic on purpose: it is set from a script on the main
+// thread and read on the main thread at the end of the frame.
+bool g_quit = false;
+}  // namespace
+
+void request_quit() { g_quit = true; }
+bool quit_requested() { return g_quit; }
+
 Engine::~Engine() { shutdown(); }
 
 bool Engine::init(const EngineConfig &cfg) {
@@ -361,6 +370,10 @@ bool Engine::step() {
     frames_++;
     if (want_shot) save_screenshot(config_.screenshot_path);
     if (config_.max_frames && frames_ >= config_.max_frames) return false;
+    if (quit_requested()) {
+        WR_INFO("engine: a script asked to quit");
+        return false;
+    }
     return true;
 }
 

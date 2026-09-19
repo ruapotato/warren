@@ -384,11 +384,18 @@ PyObject *py_pose(PyObject *, PyObject *args, PyObject *kwargs) {
 // The table, and a way to read its names back. See
 // stubs.cpp: the hand-written stub block is checked against
 // this so it cannot silently fall behind.
+PyObject *py_quit(PyObject *, PyObject *) {
+    request_quit();
+    Py_RETURN_NONE;
+}
+
 PyMethodDef k_module_methods[] = {
     {"pose", (PyCFunction)py_pose, METH_VARARGS | METH_KEYWORDS,
      "A Transform3D from a position, a (yaw, pitch, roll) in radians "
      "and a uniform scale. The only way to build an oriented "
      "transform from script."},
+    {"quit", py_quit, METH_NOARGS,
+     "Ask the engine to stop after this frame."},
     {"log", py_log, METH_VARARGS, "Write a line to the engine log."},
     {"warn", py_warn, METH_VARARGS, "Write a warning."},
     {"error", py_error, METH_VARARGS, "Write an error."},

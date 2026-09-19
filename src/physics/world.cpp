@@ -716,6 +716,43 @@ Dict PhysicsWorld::crossing_dict(const Vec3 &from, const Vec3 &to) const {
     return d;
 }
 
+Vec3 PhysicsWorld::hold_in_aperture(const Vec3 &centre, const Vec3 &axis,
+                                    float half, float radius) const {
+    Vec3 out = centre;
+    for (Portal3D *p : portals_) {
+        if (!p || !p->active || !p->link()) continue;
+        const Transform3D g = p->global_transform();
+        const Vec3 n = g.basis.z().normalized();
+        const Vec3 rx = g.basis.x().normalized();
+        const Vec3 ry = g.basis.y().normalized();
+        const Vec3 rel = out - g.origin;
+        const float d = dot(rel, n);
+        // How far the body reaches along the normal. A capsule
+        // standing upright in a floor portal reaches half its
+        // height plus its radius; the same capsule at a wall
+        // portal reaches only its radius.
+        const float reach = std::fabs(dot(n, axis)) * half + radius;
+        if (std::fabs(d) >= reach) continue;
+        // Room for the body's cross section, which is a circle of
+        // its radius whichever way the aperture faces.
+        const float hw = p->world_width() * 0.5f - radius;
+        const float hh = p->world_height() * 0.5f - radius;
+        if (hw <= 0.0f || hh <= 0.0f) continue;
+        const float lx = dot(rel, rx), ly = dot(rel, ry);
+        // ONLY IF IT IS IN THE OPENING AT ALL. A body beside the
+        // portal, against the solid part of the wall, is not in
+        // the mouth of anything and must not be dragged into it.
+        if (std::fabs(lx) > hw + radius * 2.0f ||
+            std::fabs(ly) > hh + radius * 2.0f)
+            continue;
+        const float cx = clampf(lx, -hw, hw);
+        const float cy = clampf(ly, -hh, hh);
+        if (cx == lx && cy == ly) continue;
+        out = g.origin + rx * cx + ry * cy + n * d;
+    }
+    return out;
+}
+
 Dict PhysicsWorld::trace_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const {
     return hit_to_dict(trace(from, to, uint32_t(mask)));
 }

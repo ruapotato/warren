@@ -509,6 +509,9 @@ class Label(Control):
     colour: Color
     align: int  # range:0,2
     vertical_centre: bool
+    outline: float  # range:0,8
+    outline_colour: Color
+    shadow_offset: Vec2
     def __init__(self) -> None: ...
 
 class Light3D(Node3D):
@@ -826,6 +829,9 @@ def shape(spec: dict, cell_size: float = 0.05, detail: int = 0,
 
 def surface(spec: dict, size: int = 512, seed: int = 0) -> Material | None:
     """Build a Material from a procedural surface description."""
+
+def quit() -> None:
+    """Ask the engine to stop after this frame."""
 
 def log(message: str) -> None:
     """Write a line to the engine log."""

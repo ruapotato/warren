@@ -63,6 +63,18 @@ struct EngineConfig {
     uint64_t screenshot_frame = 0;
 };
 
+// A SCRIPT CAN END THE GAME.
+//
+// There was no way at all. A menu's Quit button, a "you win"
+// screen, a headless harness that has finished its work -- every
+// one of them had to wait for max_frames to run out or for
+// somebody to close the window by hand. `request_quit` is what a
+// script's wr.quit() sets and what the frame loop honours at the
+// end of the frame that asked, so the tick that asked to stop
+// still finishes.
+void request_quit();
+bool quit_requested();
+
 class Engine {
 public:
     Engine() = default;

@@ -143,6 +143,24 @@ public:
     int align = 0;              // 0 left, 1 centre, 2 right
     bool vertical_centre = true;
 
+    // READABLE OVER ANYTHING, which a flat colour is not.
+    //
+    // A UI label is drawn over whatever the game happens to be
+    // showing, and there is no colour that reads against every
+    // scene -- white text over a white room is invisible, and so
+    // is black text over a night sky. A dark edge behind light
+    // glyphs (or the reverse) is how every game solves it, and a
+    // label that cannot do it leaves each game to fake it with a
+    // second label offset by a pixel.
+    //
+    // `outline` is the width in pixels, 0 for none. At 1 or less
+    // it is a drop shadow at `shadow_offset`; above that the text
+    // is stamped all the way round, which survives a busy
+    // background that a shadow does not.
+    float outline = 0.0f;
+    Color outline_colour{0.0f, 0.0f, 0.0f, 0.75f};
+    Vec2 shadow_offset{1.0f, 1.0f};
+
     Vec2 minimum_size() const override;
     void draw_ui(ui::DrawList &out) override;
     void set_text(const std::string &t) { text = t; }

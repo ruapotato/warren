@@ -234,6 +234,35 @@ public:
     // bottom of the opening is protected. Anything higher than
     // this is geometry the portal has cut through and it goes.
     float aperture_doorstep = 0.3f;
+
+    // THE RIM OF A HOLE IS SOLID.
+    //
+    // An aperture works by taking the geometry away: contacts
+    // inside the rectangle are dropped, so a body can go through
+    // a wall that is otherwise there. What that leaves is a hole
+    // with no SIDES. A wall is half a metre thick and the hole
+    // through it is a short tunnel whose walls stop you moving
+    // sideways while you are in it; delete the contacts and the
+    // tunnel is gone with them.
+    //
+    // It shows up worst on a floor portal. You walk onto the
+    // hole, you start to fall, and you are still walking -- so
+    // you drift out from under the floor before the point that
+    // decides you went through has crossed the plane. You end up
+    // beneath the level, never having been teleported, which
+    // reads as the portal simply not working.
+    //
+    // So the rim is stated as a constraint: a body whose extent
+    // spans an aperture's plane is IN THE MOUTH of it, and is
+    // held within the opening until it is out the other side or
+    // back the way it came. It is only ever pushed sideways --
+    // never along the normal -- so it is still free to go
+    // through, or to back out.
+    //
+    // Returns the corrected centre, which is the one given if
+    // the body is not in any aperture's mouth.
+    Vec3 hold_in_aperture(const Vec3 &centre, const Vec3 &axis, float half,
+                          float radius) const;
     // How thick a wall a portal can be cut through. A contact within
     // this distance of an aperture's plane AND inside its rectangle is
     // discarded. The default covers any ordinary wall; a thicker one
