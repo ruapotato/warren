@@ -125,6 +125,14 @@ public:
         double mean_cpu_ms = 0;  // the renderer's own, from RenderStats
     };
     FrameTimes frame_times(uint32_t skip_first = 0) const;
+    // THE LAST FRAME, IN MILLISECONDS. A game that cannot time
+    // itself cannot draw an FPS counter, cannot degrade its own
+    // settings, and cannot tell "the portal hitched" from "it
+    // felt like the portal hitched". Zero before the first frame
+    // has been measured.
+    double last_frame_ms() const { return last_frame_ms_; }
+    double last_render_cpu_ms() const { return last_render_cpu_ms_; }
+    uint64_t frame_count() const { return frames_; }
     void record_timings(bool on) { timing_ = on; }
 
 private:
@@ -148,6 +156,7 @@ private:
     bool running_ = false;
     bool timing_ = false;
     std::vector<double> frame_ms_, render_cpu_ms_;
+    double last_frame_ms_ = 0.0, last_render_cpu_ms_ = 0.0;
 };
 
 }  // namespace wr

@@ -384,6 +384,35 @@ PyObject *py_pose(PyObject *, PyObject *args, PyObject *kwargs) {
 // The table, and a way to read its names back. See
 // stubs.cpp: the hand-written stub block is checked against
 // this so it cannot silently fall behind.
+// WHAT THE LAST FRAME COST, AND WHAT IT DREW.
+//
+// A game with no access to this cannot draw an FPS counter,
+// cannot turn its own settings down when it is slow, and cannot
+// tell "going through the portal hitched" from "it felt like
+// going through the portal hitched" -- which is the difference
+// between a bug report and a bug.
+PyObject *py_frame_stats(PyObject *, PyObject *) {
+    if (!g_engine) Py_RETURN_NONE;
+    const RenderStats &s = g_engine->renderer()->stats();
+    Dict d;
+    d["frame_ms"] = Variant(g_engine->last_frame_ms());
+    d["render_cpu_ms"] = Variant(g_engine->last_render_cpu_ms());
+    d["frame"] = Variant(int64_t(g_engine->frame_count()));
+    d["draws"] = Variant(int64_t(s.draw_calls));
+    d["triangles"] = Variant(int64_t(s.triangles));
+    d["views"] = Variant(int64_t(s.views));
+    d["portal_depth"] = Variant(int64_t(s.max_depth_reached));
+    d["portals_culled"] = Variant(int64_t(s.portals_culled));
+    d["visible_meshes"] = Variant(int64_t(s.visible_meshes));
+    d["lights"] = Variant(int64_t(s.lights));
+    d["shadow_draws"] = Variant(int64_t(s.shadow_draws));
+    d["punctual_shadow_draws"] = Variant(int64_t(s.punctual_shadow_draws));
+    // False on a frame that had to redraw the punctual shadow
+    // atlas, which is the expensive kind.
+    d["shadows_reused"] = Variant(s.punctual_shadows_reused);
+    return to_python(Variant(d));
+}
+
 PyObject *py_quit(PyObject *, PyObject *) {
     request_quit();
     Py_RETURN_NONE;
@@ -394,6 +423,8 @@ PyMethodDef k_module_methods[] = {
      "A Transform3D from a position, a (yaw, pitch, roll) in radians "
      "and a uniform scale. The only way to build an oriented "
      "transform from script."},
+    {"frame_stats", py_frame_stats, METH_NOARGS,
+     "What the last frame cost and what it drew, as a dict."},
     {"quit", py_quit, METH_NOARGS,
      "Ask the engine to stop after this frame."},
     {"log", py_log, METH_VARARGS, "Write a line to the engine log."},

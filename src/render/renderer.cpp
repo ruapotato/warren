@@ -1439,20 +1439,45 @@ int Renderer::allocate_punctual_shadows(const Vec3 &eye) {
     const int total_tiles = int(atlas_tiles_per_row_ * atlas_tiles_per_row_);
     if (total_tiles <= 0) return 0;
 
-    // NEAREST FIRST. There are always more lights than tiles in a
-    // scene worth lighting, so the question is not whether to choose
-    // but what to choose by -- and the light whose shadow the player
-    // is standing in is the one closest to them.
+    // NEAREST FIRST, BUT AN INCUMBENT KEEPS ITS TILES.
+    //
+    // There are always more lights than tiles in a scene worth
+    // lighting, so the question is not whether to choose but what to
+    // choose by -- and the light whose shadow the player is standing
+    // in is the one closest to them.
+    //
+    // Straight nearest-first churns. Two lights a similar distance
+    // away swap every time the camera drifts between them, and a
+    // swap changes the atlas hash, and a changed hash redraws the
+    // whole atlas: six scene draws in the frame that moved, which is
+    // 2.8 ms of median frame time on a scene that is otherwise
+    // finished in five. It lands hardest where the camera moves
+    // furthest in one tick, which is going through a portal.
+    //
+    // So a light already holding tiles counts as nearer than it is,
+    // and is displaced only by something decisively closer. The
+    // hysteresis is one-sided and has no state beyond the previous
+    // frame's holders, so it cannot oscillate.
     std::vector<uint32_t> order(lights_.size());
     for (uint32_t i = 0; i < order.size(); i++) order[i] = i;
+    auto weight = [&](uint32_t i) {
+        const LightGpu &L = lights_[i];
+        float d2 = (L.position_range.xyz() - eye).length_sq();
+        // A quarter closer, in distance, is what it takes to
+        // take a tile off somebody.
+        for (const Vec3 &held : shadow_holders_)
+            if ((L.position_range.xyz() - held).length_sq() < 1e-6f)
+                return d2 * 0.5625f;   // 0.75 squared
+        return d2;
+    };
     std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
-        return (lights_[a].position_range.xyz() - eye).length_sq() <
-               (lights_[b].position_range.xyz() - eye).length_sq();
+        return weight(a) < weight(b);
     });
 
     const float near = std::max(settings_.punctual_shadow_near, 1e-3f);
     const float tile_uv = 1.0f / float(atlas_tiles_per_row_);
     int next = 0;
+    std::vector<Vec3> holders;
 
     for (uint32_t li : order) {
         LightGpu &L = lights_[li];
@@ -1464,6 +1489,7 @@ int Renderer::allocate_punctual_shadows(const Vec3 &eye) {
 
         L.shadow = Vec4(float(next), float(atlas_tiles_per_row_), tile_uv, 0.0f);
         L.params.w = near;
+        holders.push_back(pos);
 
         if (spot) {
             // The cone, with a little margin so the penumbra at the
@@ -1507,6 +1533,7 @@ int Renderer::allocate_punctual_shadows(const Vec3 &eye) {
         next += need;
         stats_.shadow_casting_lights++;
     }
+    shadow_holders_.swap(holders);
     return next;
 }
 
@@ -1971,7 +1998,12 @@ bool Renderer::portal_child(const View &v, size_t pi, View *out,
     Rect2 rect;
     if (!p->screen_rect(cam_ortho.inverse_orthonormal(), v.projection, &rect))
         return false;
-    if (rect.area() < settings_.portal_min_coverage) return false;
+    // The threshold this level has to clear. See
+    // portal_depth_falloff: deeper is dearer.
+    float need = settings_.portal_min_coverage;
+    for (int d = 0; d < v.depth; d++)
+        need *= std::max(1.0f, settings_.portal_depth_falloff);
+    if (rect.area() < need) return false;
 
     // Intersect with the parent's scissor: a portal seen through a
     // portal cannot be wider than the hole it is seen through.

@@ -46,6 +46,27 @@ struct RenderSettings {
     bool portal_debug_tint = false;
     // Skip a portal covering less than this fraction of the screen.
     float portal_min_coverage = 0.0002f;
+    // AND ASK FOR MORE OF THE SCREEN AT EVERY LEVEL DOWN.
+    //
+    // A recursion level costs a whole scene draw whatever depth
+    // it is at, and is worth less the deeper it goes: the second
+    // reflection in a pair of portals is a small patch inside a
+    // small patch, and nobody looking at the room can tell it
+    // from the wall. With one threshold for every level the
+    // deepest views were free to cost the same as the first, and
+    // the frames that drew them were the frames that missed
+    // vsync -- 27.7 ms at the 95th percentile against 18.2 for
+    // the frames that did not, on a scene whose CPU cost is five
+    // milliseconds. That is the "frame hiccup going between
+    // portals": not the crossing, the extra view you are looking
+    // at while you cross.
+    //
+    // Multiplying the threshold by this at each level keeps the
+    // first recursion anywhere it is worth having and drops the
+    // rest. It is a function of screen area alone, so it changes
+    // smoothly as you move rather than flickering the way a
+    // per-frame budget would.
+    float portal_depth_falloff = 6.0f;
 
     // SHADOWS.
     //
@@ -100,6 +121,21 @@ struct RenderSettings {
     // do not cast.
     bool punctual_shadows = true;
     uint32_t shadow_atlas_size = 2048;
+    // 512, AND THE TILE COUNT IS A BUDGET RATHER THAN A LIMIT.
+    //
+    // An omni wants six tiles, so a 2048 atlas of these holds
+    // sixteen: two shadow-casting point lights, whatever the
+    // scene. That looks like a ceiling worth raising and it is
+    // not. Dropping the tile to 256 makes it sixty-four tiles
+    // and ten lights, and measured on a thirteen-light room it
+    // took the median frame from 16.3 ms to 22.1 -- because the
+    // cost is the NUMBER of shadowed lights, in tile draws and
+    // again in per-pixel lookups, and not the resolution of any
+    // one of them. The small number is doing useful work.
+    //
+    // What does need fixing is the CHURN: see
+    // allocate_punctual_shadows, which now keeps a light's tiles
+    // unless something is decisively closer.
     uint32_t shadow_tile_size = 512;
     // Nearer than this to the light's own centre, nothing casts. Too
     // small and the depth range is wasted; too large and a lamp
@@ -419,6 +455,11 @@ private:
     std::vector<uint32_t> cluster_counts_;
     std::vector<uint32_t> cluster_indices_;
     int clustered_views_ = 0;
+    // WHICH LIGHTS HELD SHADOW TILES LAST FRAME, by position --
+    // an index would go stale the moment the light list is
+    // rebuilt, which it is every frame. See
+    // allocate_punctual_shadows.
+    std::vector<Vec3> shadow_holders_;
     // The sun, after the scene has had its say: a DirectionalLight3D
     // in the tree overrides the renderer's own fields.
     Vec3 sun_dir_used_{0, -1, 0};

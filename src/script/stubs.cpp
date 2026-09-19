@@ -261,6 +261,14 @@ def shape(spec: dict, cell_size: float = 0.05, detail: int = 0,
 def surface(spec: dict, size: int = 512, seed: int = 0) -> Material | None:
     """Build a Material from a procedural surface description."""
 
+def frame_stats() -> dict:
+    """What the last frame cost and what it drew.
+
+    Keys: frame_ms, render_cpu_ms, frame, draws, triangles,
+    views, portal_depth, portals_culled, visible_meshes,
+    lights, shadow_draws, punctual_shadow_draws, shadows_reused.
+    """
+
 def quit() -> None:
     """Ask the engine to stop after this frame."""
 

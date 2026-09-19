@@ -358,14 +358,21 @@ bool Engine::step() {
         device_->end_frame();
     }
 
+    // WALL CLOCK AROUND THE WHOLE STEP, submission included. The
+    // renderer's own cpu_ms covers recording only, and a frame that
+    // spends its time waiting on a fence spends it outside that.
+    // Both are kept, because the gap between them is where "the GPU
+    // is the bottleneck" lives.
+    //
+    // THE LAST ONE ALWAYS, THE HISTORY ONLY WHEN ASKED. Two doubles
+    // a frame is free and it is what a game needs to draw an FPS
+    // counter or turn its own settings down; the vectors grow
+    // without bound, so they stay behind record_timings.
+    last_frame_ms_ = (Clock::now() - frame_start) * 1000.0;
+    last_render_cpu_ms_ = renderer_.stats().cpu_ms;
     if (timing_) {
-        // WALL CLOCK AROUND THE WHOLE STEP, submission included. The
-        // renderer's own cpu_ms covers recording only, and a frame
-        // that spends its time waiting on a fence spends it outside
-        // that. Both are kept, because the gap between them is where
-        // "the GPU is the bottleneck" lives.
-        frame_ms_.push_back((Clock::now() - frame_start) * 1000.0);
-        render_cpu_ms_.push_back(renderer_.stats().cpu_ms);
+        frame_ms_.push_back(last_frame_ms_);
+        render_cpu_ms_.push_back(last_render_cpu_ms_);
     }
     frames_++;
     if (want_shot) save_screenshot(config_.screenshot_path);
