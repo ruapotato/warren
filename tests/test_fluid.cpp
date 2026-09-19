@@ -20,6 +20,7 @@
 // liquid on the far side, warped into place so the neighbourhood
 // is continuous -- and the test measures exactly that, by running
 // the same pour with the ghosts suppressed and comparing.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -365,8 +366,20 @@ int main() {
             const auto t1 = std::chrono::steady_clock::now();
             return std::chrono::duration<double, std::milli>(t1 - t0).count();
         };
-        const double dense = sample_chunks(false);
-        const double sparse = sample_chunks(true);
+        // THE BEST OF THREE, INTERLEAVED. A single timing is a
+        // sample of whatever else the machine was doing, and this
+        // test failed under `ctest -j4` on a commit it passed
+        // alone -- not because the ratio moved but because one of
+        // the two runs was descheduled. Taking the minimum of a
+        // few is the standard answer: the fastest run is the one
+        // with the least interference in it, and interleaving
+        // them means neither side gets a quiet patch the other
+        // did not.
+        double dense = 1e30, sparse = 1e30;
+        for (int i = 0; i < 3; i++) {
+            dense = std::min(dense, sample_chunks(false));
+            sparse = std::min(sparse, sample_chunks(true));
+        }
         std::printf("      whole box %.1f ms, occupied chunks only %.1f ms\n",
                     dense, sparse);
         // A THIRD OFF, ON THE WORST CASE FOR IT. This stream has
