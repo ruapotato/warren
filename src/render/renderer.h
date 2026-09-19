@@ -287,8 +287,21 @@ private:
 
     rhi::BindGroupLayoutH frame_layout_, view_layout_, material_layout_,
         portal_layout_, tonemap_layout_;
+    // THE CURRENT SLOT'S GROUPS. Every call site binds these; they
+    // are pointed at the right slot once per frame, in render().
     rhi::BindGroupH frame_group_, view_group_, portal_group_, tonemap_group_;
     rhi::BindGroupH frame_group_no_shadow_;
+    // ONE SET PER FRAME IN FLIGHT. See Device::frame_slot: a buffer
+    // written every frame cannot be a single buffer, because the CPU
+    // writes frame N while the GPU is still reading frame N-1.
+    std::vector<rhi::BindGroupH> frame_groups_, frame_groups_no_shadow_;
+    std::vector<rhi::BindGroupH> bone_groups_;
+    uint32_t ring_ = 1;          // frames in flight
+    uint32_t slot_ = 0;          // which one is being recorded
+    // Bytes of each per-frame buffer belonging to one slot.
+    uint64_t frame_span_ = 0, view_span_ = 0, portal_span_ = 0;
+    uint64_t light_span_ = 0, cluster_span_ = 0, light_index_span_ = 0;
+    uint64_t bone_span_ = 0;
     rhi::BufferH light_buffer_, cluster_buffer_, light_index_buffer_;
     // Every skinned body in the frame, end to end: three rows per
     // bone, one upload, one bind. See Renderable::bone_base.

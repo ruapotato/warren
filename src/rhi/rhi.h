@@ -674,6 +674,24 @@ public:
     // Human-readable dump of every live resource, for a leak hunt.
     virtual std::string resource_report() const = 0;
 
+    // WHICH FRAME SLOT IS BEING RECORDED, and how many there are.
+    //
+    // A renderer writing a uniform or storage buffer every frame
+    // CANNOT use one buffer. The CPU runs ahead: while the GPU is
+    // still drawing frame N-1, the CPU is writing frame N, and a
+    // host-visible write is a memcpy straight through a persistent
+    // mapping with nothing to stop it landing in the middle of a
+    // draw that is reading it. What comes out is some draws using
+    // this frame's data and some using last frame's -- on a
+    // skinned figure, the shirt a frame behind the body.
+    //
+    // So anything written per frame needs one copy per slot, and
+    // these are how a renderer indexes them. An immediate backend
+    // reports one slot and zero, which makes the same code correct
+    // and free there.
+    virtual uint32_t frame_slot() const = 0;
+    virtual uint32_t frames_in_flight() const = 0;
+
     // HOW MANY DESTROYED RESOURCES ARE STILL WAITING FOR THE GPU.
     //
     // A backend that records command buffers ahead of the GPU cannot

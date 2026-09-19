@@ -134,6 +134,18 @@ static void register_material_class() {
         .field("emissive_strength", &Material::emissive_strength, "range:0,32")
         .field("normal_scale", &Material::normal_scale, "range:0,4")
         .field("occlusion_strength", &Material::occlusion_strength, "range:0,1")
+        // TRIPLANAR, WHICH NOTHING COULD REACH. It worked, the
+        // shader sampled it, and it was not a property -- so no
+        // script could turn it on and it did not survive being
+        // packed into a scene either. A town built out of boxes of
+        // arbitrary sizes is exactly what it is for: box UVs run
+        // 0..1 per face, one face of a ground slab is forty metres
+        // and the next is twenty centimetres, and no single tiling
+        // is right for both. Projecting from the world instead has
+        // no seam at a slab edge and nothing to pinch.
+        .field("triplanar", &Material::triplanar, "range:0,8")
+        .field("triplanar_sharpness", &Material::triplanar_sharpness,
+               "range:0.1,16")
         .field("uv_scale", &Material::uv_scale)
         .field("uv_offset", &Material::uv_offset)
         .field("alpha_cutoff", &Material::alpha_cutoff, "range:0,1")

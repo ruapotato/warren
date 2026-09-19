@@ -328,6 +328,9 @@ public:
     // Immediate: a GL call is ordered against everything before it,
     // so a delete needs no deferral and nothing is ever outstanding.
     size_t pending_deletions() const override { return 0; }
+    // And nothing is ever in flight, so one slot is enough.
+    uint32_t frame_slot() const override { return 0; }
+    uint32_t frames_in_flight() const override { return 1; }
 
     // --- used by the command list -----------------------------------------
     HandlePool<GlBuffer, BufferH> buffers;

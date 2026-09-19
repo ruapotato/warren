@@ -164,17 +164,28 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     tl.name = "tonemap";
     tonemap_layout_ = dev->create_bind_group_layout(tl);
 
-    // --- uniform buffers
+    // --- uniform buffers, ONE COPY PER FRAME IN FLIGHT
+    //
+    // See Device::frame_slot. A host-visible buffer written every
+    // frame is a memcpy through a persistent mapping, and the CPU
+    // is a frame ahead of the GPU -- so a single copy means some
+    // draws read this frame's data and some last frame's. On a
+    // skinned figure that is the hair and the shirt posed a frame
+    // behind the body, which is exactly how it was reported.
+    ring_ = std::max(1u, dev->frames_in_flight());
     BufferDesc bd;
     bd.usage = BufferUsage::Uniform;
     bd.access = MemoryAccess::CpuToGpu;
-    bd.size = align_up(uint32_t(sizeof(FrameUniforms)), ubo_align);
+    frame_span_ = align_up(uint32_t(sizeof(FrameUniforms)), ubo_align);
+    bd.size = frame_span_ * ring_;
     bd.name = "frame ubo";
     frame_ubo_ = dev->create_buffer(bd);
-    bd.size = uint64_t(view_stride_) * kViewRing;
+    view_span_ = uint64_t(view_stride_) * kViewRing;
+    bd.size = view_span_ * ring_;
     bd.name = "view ring";
     view_ubo_ = dev->create_buffer(bd);
-    bd.size = uint64_t(portal_stride_) * kPortalRing;
+    portal_span_ = uint64_t(portal_stride_) * kPortalRing;
+    bd.size = portal_span_ * ring_;
     bd.name = "portal ring";
     portal_ubo_ = dev->create_buffer(bd);
 
@@ -186,13 +197,21 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         BufferDesc lb;
         lb.usage = BufferUsage::Storage;
         lb.access = MemoryAccess::CpuToGpu;
-        lb.size = uint64_t(std::max(1, settings_.max_lights)) * sizeof(LightGpu);
+        // Each span rounded up, because a bind group's buffer
+        // offset has an alignment the device sets and 256 clears
+        // every desktop one.
+        auto span = [](uint64_t bytes) { return align_up(uint32_t(bytes), 256u); };
+        light_span_ = span(uint64_t(std::max(1, settings_.max_lights)) *
+                           sizeof(LightGpu));
+        lb.size = light_span_ * ring_;
         lb.name = "lights";
         light_buffer_ = dev->create_buffer(lb);
-        lb.size = cluster_counts_.size() * sizeof(uint32_t);
+        cluster_span_ = span(cluster_counts_.size() * sizeof(uint32_t));
+        lb.size = cluster_span_ * ring_;
         lb.name = "light clusters";
         cluster_buffer_ = dev->create_buffer(lb);
-        lb.size = cluster_indices_.size() * sizeof(uint32_t);
+        light_index_span_ = span(cluster_indices_.size() * sizeof(uint32_t));
+        lb.size = light_index_span_ * ring_;
         lb.name = "light indices";
         light_index_buffer_ = dev->create_buffer(lb);
     }
@@ -312,7 +331,25 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
         at.sampler = SamplerCache::shadow(dev);
         fg.entries.push_back(at);
     }
-    frame_group_ = dev->create_bind_group(fg);
+    // ONE GROUP PER SLOT, each pointing at that slot's slice of
+    // every buffer in it. The textures are shared; only the
+    // buffers move.
+    auto slice = [&](BindGroupDesc &d, uint32_t slot) {
+        for (BindGroupEntry &e : d.entries) {
+            if (!e.buffer.valid()) continue;
+            if (e.binding == 0) { e.offset = frame_span_ * slot; e.range = frame_span_; }
+            if (e.binding == 2) { e.offset = light_span_ * slot; e.range = light_span_; }
+            if (e.binding == 3) { e.offset = cluster_span_ * slot; e.range = cluster_span_; }
+            if (e.binding == 4) { e.offset = light_index_span_ * slot; e.range = light_index_span_; }
+        }
+    };
+    frame_groups_.resize(ring_);
+    for (uint32_t i = 0; i < ring_; i++) {
+        BindGroupDesc d = fg;
+        slice(d, i);
+        frame_groups_[i] = dev->create_bind_group(d);
+    }
+    frame_group_ = frame_groups_[0];
 
     // The same frame data with the stand-in in place of the real map,
     // for the pass that renders the real map.
@@ -321,7 +358,13 @@ bool Renderer::init(rhi::Device *dev, const RenderSettings &s) {
     for (BindGroupEntry &e : fg.entries)
         if (e.binding == 7) e.texture = shadow_atlas_dummy_;
     fg.name = "frame (shadow pass)";
-    frame_group_no_shadow_ = dev->create_bind_group(fg);
+    frame_groups_no_shadow_.resize(ring_);
+    for (uint32_t i = 0; i < ring_; i++) {
+        BindGroupDesc d = fg;
+        slice(d, i);
+        frame_groups_no_shadow_[i] = dev->create_bind_group(d);
+    }
+    frame_group_no_shadow_ = frame_groups_no_shadow_[0];
 
     {
         BindGroupDesc eg;
@@ -382,8 +425,17 @@ void Renderer::shutdown() {
     for (auto &kv : pipe_.tonemap)
         if (kv.second.valid()) device_->destroy(kv.second);
     pipe_ = Pipelines();
-    for (BindGroupH *g : {&frame_group_, &view_group_, &portal_group_, &tonemap_group_})
+    for (BindGroupH *g : {&view_group_, &portal_group_, &tonemap_group_})
         if (g->valid()) device_->destroy(*g);
+    for (auto *list : {&frame_groups_, &frame_groups_no_shadow_, &bone_groups_})
+        for (BindGroupH &g : *list)
+            if (g.valid()) device_->destroy(g);
+    frame_groups_.clear();
+    frame_groups_no_shadow_.clear();
+    bone_groups_.clear();
+    frame_group_ = BindGroupH();
+    frame_group_no_shadow_ = BindGroupH();
+    bone_group_ = BindGroupH();
     for (BufferH *b : {&frame_ubo_, &view_ubo_, &portal_ubo_})
         if (b->valid()) device_->destroy(*b);
     if (shadow_map_.valid()) device_->destroy(shadow_map_);
@@ -867,7 +919,7 @@ void Renderer::upload_frame() {
                      ? float(env_mips_)
                      : 0.0f,
                  settings_.env_intensity, 0.0f, 0.0f);
-    device_->write_buffer(frame_ubo_, &f, sizeof(f));
+    device_->write_buffer(frame_ubo_, &f, sizeof(f), frame_span_ * slot_);
 }
 
 uint32_t Renderer::upload_view(const View &v) {
@@ -905,7 +957,10 @@ uint32_t Renderer::upload_view(const View &v) {
     } else {
         u.cluster = Vec4(0, 0, 0, 0);
     }
-    uint32_t offset = view_cursor_ * view_stride_;
+    // The slot's slice first, then this view within it. The
+    // returned offset is handed straight to bind_group as the
+    // dynamic offset, so it has to carry the slot too.
+    uint32_t offset = uint32_t(view_span_ * slot_) + view_cursor_ * view_stride_;
     device_->write_buffer(view_ubo_, &u, sizeof(u), offset);
     view_cursor_++;
     return offset;
@@ -917,7 +972,8 @@ uint32_t Renderer::upload_portal(const Portal3D *p) {
     u.edge_colour = p->edge_colour.rgba();
     float aspect = p->height > 1e-4f ? p->width / p->height : 1.0f;
     u.edge_params = Vec4(p->edge_width, p->open, aspect, 0.0f);
-    uint32_t offset = portal_cursor_ * portal_stride_;
+    uint32_t offset =
+        uint32_t(portal_span_ * slot_) + portal_cursor_ * portal_stride_;
     device_->write_buffer(portal_ubo_, &u, sizeof(u), offset);
     portal_cursor_++;
     return offset;
@@ -1044,27 +1100,43 @@ void Renderer::upload_bones() {
     const uint32_t need = uint32_t(bone_rows_.size());
     if (need > bone_capacity_) {
         if (bone_buffer_.valid()) device_->destroy(bone_buffer_);
-        if (bone_group_.valid()) device_->destroy(bone_group_);
+        // The per-slot groups are rebuilt below; the old ones go
+        // with the buffer they pointed at.
         // Rounded up generously, so a crowd that grows by one body
         // does not reallocate.
         bone_capacity_ = std::max(need * 2u, 3u * 256u);
+        bone_span_ = align_up(
+            uint32_t(uint64_t(bone_capacity_) * sizeof(Vec4)), 256u);
         rhi::BufferDesc bd;
-        bd.size = uint64_t(bone_capacity_) * sizeof(Vec4);
+        // ONE SLICE PER FRAME IN FLIGHT. This is the buffer whose
+        // absence of a ring was visible: a crowd of skinned bodies
+        // rewritten every frame while the previous frame was still
+        // drawing them, so a figure's shirt and hair were posed
+        // from a different frame than its skin.
+        bd.size = bone_span_ * ring_;
         bd.usage = rhi::BufferUsage::Storage;
         bd.access = rhi::MemoryAccess::CpuToGpu;
         bd.name = "bones";
         bone_buffer_ = device_->create_buffer(bd);
-        rhi::BindGroupDesc gd;
-        gd.layout = bone_layout_;
-        rhi::BindGroupEntry e;
-        e.binding = 24;
-        e.buffer = bone_buffer_;
-        gd.entries.push_back(e);
-        gd.name = "bones";
-        bone_group_ = device_->create_bind_group(gd);
+        for (rhi::BindGroupH &g : bone_groups_)
+            if (g.valid()) device_->destroy(g);
+        bone_groups_.assign(ring_, rhi::BindGroupH());
+        for (uint32_t i = 0; i < ring_; i++) {
+            rhi::BindGroupDesc gd;
+            gd.layout = bone_layout_;
+            rhi::BindGroupEntry e;
+            e.binding = 24;
+            e.buffer = bone_buffer_;
+            e.offset = bone_span_ * i;
+            e.range = bone_span_;
+            gd.entries.push_back(e);
+            gd.name = "bones";
+            bone_groups_[i] = device_->create_bind_group(gd);
+        }
+        bone_group_ = bone_groups_[slot_ < ring_ ? slot_ : 0];
     }
     device_->write_buffer(bone_buffer_, bone_rows_.data(),
-                          uint64_t(need) * sizeof(Vec4));
+                          uint64_t(need) * sizeof(Vec4), bone_span_ * slot_);
 }
 
 // --------------------------------------------------------------- drawing
@@ -1670,13 +1742,16 @@ void Renderer::upload_lights() {
     // behind a zero count is worse than one pointing at zeroes.
     if (!lights_.empty())
         device_->write_buffer(light_buffer_, lights_.data(),
-                              lights_.size() * sizeof(LightGpu));
+                              lights_.size() * sizeof(LightGpu),
+                              light_span_ * slot_);
     if (!cluster_counts_.empty())
         device_->write_buffer(cluster_buffer_, cluster_counts_.data(),
-                              cluster_counts_.size() * sizeof(uint32_t));
+                              cluster_counts_.size() * sizeof(uint32_t),
+                              cluster_span_ * slot_);
     if (!cluster_indices_.empty())
         device_->write_buffer(light_index_buffer_, cluster_indices_.data(),
-                              cluster_indices_.size() * sizeof(uint32_t));
+                              cluster_indices_.size() * sizeof(uint32_t),
+                              light_index_span_ * slot_);
 }
 
 int Renderer::cluster_view(const View &v, int slot) {
@@ -2115,6 +2190,16 @@ bool Renderer::dump_shadow_map(const std::string &path) const {
 
 void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
                       rhi::TextureH target) {
+    // WHICH SLOT THIS FRAME IS. Everything written per frame goes
+    // into that slot's slice, and every group that points at one
+    // is swapped to match -- once, here, so the hundred bind
+    // sites below do not each have to know.
+    slot_ = device_ ? (device_->frame_slot() % std::max(1u, ring_)) : 0;
+    if (slot_ < frame_groups_.size()) frame_group_ = frame_groups_[slot_];
+    if (slot_ < frame_groups_no_shadow_.size())
+        frame_group_no_shadow_ = frame_groups_no_shadow_[slot_];
+    if (slot_ < bone_groups_.size()) bone_group_ = bone_groups_[slot_];
+
     if (!device_ || !cmd || !camera) return;
     double t0 = Clock::now();
     const uint64_t bakes = env_bakes_;

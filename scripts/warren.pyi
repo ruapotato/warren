@@ -287,6 +287,8 @@ class Material(Resource):
     emissive_strength: float  # range:0,32
     normal_scale: float  # range:0,4
     occlusion_strength: float  # range:0,1
+    triplanar: float  # range:0,8
+    triplanar_sharpness: float  # range:0.1,16
     uv_scale: Vec2
     uv_offset: Vec2
     alpha_cutoff: float  # range:0,1

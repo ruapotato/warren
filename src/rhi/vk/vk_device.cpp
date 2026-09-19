@@ -350,6 +350,8 @@ public:
     const FrameStats &stats() const override { return stats_; }
     std::string resource_report() const override;
     size_t pending_deletions() const override;
+    uint32_t frame_slot() const override { return frame_index_; }
+    uint32_t frames_in_flight() const override { return frames_in_flight_; }
 
     // --- used by the command list ----------------------------------------
     HandlePool<VkBufferRes, BufferH> buffers;
