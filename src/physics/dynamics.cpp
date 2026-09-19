@@ -59,6 +59,11 @@ BodyId DynamicsWorld::add(const Shape &shape, const Transform3D &at, float mass,
     live_++;
     BodyId id{index, s.generation};
     refresh_mass(id);
+    if (world_) {
+        s.body.proxy = world_->add_shape(s.body.sized(), s.body.pose(),
+                                         s.body.layer, owner,
+                                         /*is_static=*/false);
+    }
     return id;
 }
 
@@ -66,6 +71,8 @@ void DynamicsWorld::remove(BodyId id) {
     if (!id.valid() || id.index >= slots_.size()) return;
     Slot &s = slots_[id.index];
     if (!s.live || s.generation != id.generation) return;
+    if (world_ && s.body.proxy.valid()) world_->remove(s.body.proxy);
+    s.body.proxy = ColliderId{};
     s.live = false;
     s.generation++;
     if (s.generation == 0) s.generation = 1;
@@ -173,6 +180,7 @@ void DynamicsWorld::step(float dt) {
     apply_restitution();
     cross_portals();
     settle(dt);
+    sync_proxies();
     for (Slot &s : slots_) {
         if (!s.live) continue;
         s.body.force = Vec3();
@@ -218,7 +226,7 @@ void DynamicsWorld::collect_pairs() {
         RigidBody &a = si.body;
         if (a.kind != BodyKind::Dynamic || a.sleeping) continue;
         const Shape sa = a.sized();
-        const Transform3D ta = a.transform();
+        const Transform3D ta = a.pose();
         // THE MARGIN HAS TO COVER THE MOTION, or the speculative
         // contact is never generated for the body that needs it.
         //
@@ -290,6 +298,11 @@ void DynamicsWorld::collect_pairs() {
         for (ColliderId cid : hits) {
             const Collider *c = world_->get(cid);
             if (!c || c->shape.type == ShapeType::Mesh || c->is_trigger) continue;
+            // A NON-STATIC COLLIDER IS ANOTHER BODY'S PROXY. It is
+            // handled by the body-against-body pass below; picking
+            // it up here as well would have every dynamic object
+            // colliding with an immovable copy of itself.
+            if (!c->is_static) continue;
             Manifold m;
             if (!collide(sa, ta, c->shape, c->transform, &m, margin)) continue;
             PairKey key{i, 0x80000000u | cid.index, 0};
@@ -329,7 +342,7 @@ void DynamicsWorld::collect_pairs() {
             if (!(a.mask & b.layer) || !(b.mask & a.layer)) continue;
             if (a.inv_mass == 0.0f && b.inv_mass == 0.0f) continue;
             const Shape sb = b.sized();
-            const Transform3D tb = b.transform();
+            const Transform3D tb = b.pose();
             if (!swept.intersects(sb.world_bounds(tb).grown(margin))) continue;
             Manifold m;
             if (!collide(sa, ta, sb, tb, &m, margin)) continue;
@@ -387,7 +400,7 @@ void DynamicsWorld::collect_pairs() {
         RigidBody &a = slots_[i].body;
         if (a.kind != BodyKind::Dynamic) continue;
         const Shape sa = a.sized();
-        const Transform3D ta = a.transform();
+        const Transform3D ta = a.pose();
         const float ma = speculative_margin + a.linear_velocity.length() * fixed_step;
         const AABB ba = sa.world_bounds(ta).grown(ma + 0.02f);
         for (uint32_t j = i + 1; j < slots_.size(); j++) {
@@ -397,7 +410,7 @@ void DynamicsWorld::collect_pairs() {
             if (!(a.mask & b.layer) || !(b.mask & a.layer)) continue;
             if (a.inv_mass == 0.0f && b.inv_mass == 0.0f) continue;
             const Shape sb = b.sized();
-            const Transform3D tb = b.transform();
+            const Transform3D tb = b.pose();
             const float mb =
                 speculative_margin + b.linear_velocity.length() * fixed_step;
             const float margin = std::max(ma, mb);
@@ -815,6 +828,21 @@ void DynamicsWorld::cross_portals() {
                 ++it;
         }
         stats.portal_crossings++;
+    }
+}
+
+void DynamicsWorld::sync_proxies() {
+    if (!world_) return;
+    for (Slot &s : slots_) {
+        if (!s.live || !s.body.proxy.valid()) continue;
+        Collider *c = world_->get(s.body.proxy);
+        if (!c) continue;
+        c->transform = s.body.pose();
+        // The SIZE too, because portals change it and a proxy at
+        // the old size is a crate you can shoot where it was.
+        c->shape = s.body.sized();
+        c->layer = s.body.layer;
+        world_->set_transform(s.body.proxy, c->transform);
     }
 }
 

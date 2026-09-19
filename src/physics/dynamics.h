@@ -44,6 +44,7 @@
 
 #include "core/math/transform.h"
 #include "physics/manifold.h"
+#include "physics/world.h"
 #include "physics/shapes.h"
 
 namespace wr {
@@ -119,6 +120,21 @@ struct RigidBody {
     // physics believes it is.
     float scale = 1.0f;
 
+    // THE BODY'S SHADOW IN THE COLLIDER WORLD.
+    //
+    // Queries -- raycast, trace, sweep, overlap -- walk the
+    // PhysicsWorld's colliders, and a rigid body lives in the
+    // dynamics world instead. Without a proxy in the other list a
+    // dynamic object is INVISIBLE to every query in the engine:
+    // you cannot shoot a crate, click one, pick one up, or have a
+    // character controller walk into one. All of which read as
+    // the object not being there, because it is not.
+    //
+    // The proxy is kept in step after every integration and is
+    // marked non-static, so the dynamics' own broad phase knows
+    // to skip it rather than treating it as a second, immovable
+    // copy of itself.
+    ColliderId proxy;
     bool sleeping = false;
     float sleep_timer = 0.0f;
     // Set for one step after the body came through an aperture, so a
@@ -126,7 +142,25 @@ struct RigidBody {
     bool warped = false;
     Transform3D last_warp = Transform3D::identity();
 
-    Transform3D transform() const {
+    // WHERE IT IS AND WHICH WAY UP, WITHOUT THE SIZE.
+    //
+    // The size lives in `sized()`, on the shape, and it must not
+    // also live here -- a scaled basis with an already-scaled
+    // shape collides the body at the SQUARE of its size. A
+    // three-times barrel is collided as a nine-times one, which
+    // means it spawns overlapping whatever is near it and the
+    // depenetration fires it across the room at the cap. Nothing
+    // reports an error; the object simply leaves.
+    //
+    // Every collision query wants this one. The renderer wants
+    // `render_transform`, which is this with the size put back.
+    Transform3D pose() const {
+        Transform3D t;
+        t.basis = Basis(orientation);
+        t.origin = position;
+        return t;
+    }
+    Transform3D render_transform() const {
         Transform3D t;
         t.basis = Basis(orientation) * scale;
         t.origin = position;
@@ -352,6 +386,7 @@ private:
     void integrate_positions(float dt);
     void cross_portals();
     void settle(float dt);
+    void sync_proxies();
 
     PhysicsWorld *world_ = nullptr;
     std::vector<Slot> slots_;

@@ -323,6 +323,97 @@ int main() {
                    "and four times the spin -- a skater pulling their arms in");
     }
 
+    // ------------------------------------ a body you can shoot at
+    //
+    // Queries walk the PhysicsWorld's colliders and a rigid body
+    // lives in the dynamics world, so without a proxy in the
+    // other list a dynamic object is INVISIBLE to every query in
+    // the engine. You cannot shoot a crate, click one, pick one
+    // up, or walk a character controller into one -- all of which
+    // read as the object not being there, because as far as
+    // anything asking is concerned it is not.
+    //
+    // Found the hard way: picking up a barrel in a game failed
+    // silently, because the ray looking for it went straight
+    // through.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        add_floor(w, keep);
+        DynamicsWorld d(&w);
+        BodyId id = d.add(Shape::box(Vec3(0.4f, 0.4f, 0.4f)),
+                          Transform3D(Vec3(0, 1.0f, 0)), 10.0f);
+        d.step(d.fixed_step);
+
+        RayHit h = w.raycast(Vec3(0, 1.0f, 4.0f), Vec3(0, 1.0f, -4.0f));
+        check(h.hit, "a ray finds a rigid body");
+        check(h.hit && h.position.z > 0.0f && h.position.z < 1.0f,
+              "at its near face");
+
+        // AND IT FOLLOWS THE BODY. A proxy left where the body
+        // started is worse than none: the crate is shootable
+        // where it used to be.
+        d.get(id)->position = Vec3(3.0f, 1.0f, 0.0f);
+        d.step(d.fixed_step);
+        RayHit miss = w.raycast(Vec3(0, 1.0f, 4.0f), Vec3(0, 1.0f, -4.0f));
+        RayHit found = w.raycast(Vec3(3.0f, 1.0f, 4.0f),
+                                 Vec3(3.0f, 1.0f, -4.0f));
+        check(!miss.hit, "and it is not still where it was");
+        check(found.hit, "it is where it is now");
+
+        // A body that has been through a portal is bigger, and
+        // the thing you shoot at has to be bigger with it.
+        d.get(id)->scale = 2.0f;
+        d.step(d.fixed_step);
+        RayHit wide = w.raycast(Vec3(3.0f + 0.6f, 1.0f, 4.0f),
+                                Vec3(3.0f + 0.6f, 1.0f, -4.0f));
+        check(wide.hit, "and a body that grew is bigger to shoot at too");
+
+        d.remove(id);
+        RayHit gone = w.raycast(Vec3(3.0f, 1.0f, 4.0f),
+                                Vec3(3.0f, 1.0f, -4.0f));
+        check(!gone.hit, "and a removed body leaves nothing behind");
+    }
+
+    // ------------------------------ a body at a size that is not one
+    //
+    // The size lives on the shape, via sized(). It must not ALSO
+    // live in the transform handed to the narrow phase, or the
+    // body is collided at the square of its size -- a three-times
+    // crate as a nine-times one. Which does not look like a
+    // scaling bug: the crate spawns overlapping whatever is near
+    // it and the depenetration throws it across the room at the
+    // cap, so it reads as the solver exploding.
+    //
+    // A box of half-extent 0.4 at three times the size is 2.4 m
+    // across and rests with its centre 1.2 m up. At the square it
+    // would be 7.2 m across and rest at 3.6.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        add_floor(w, keep);
+        DynamicsWorld d(&w);
+        BodyId id = d.add(Shape::box(Vec3(0.4f, 0.4f, 0.4f)),
+                          Transform3D(Vec3(0, 4.0f, 0)), 10.0f);
+        d.get(id)->scale = 3.0f;
+        d.refresh_mass(id);
+        run(d, 4.0f);
+        const RigidBody *b = d.get(id);
+        check_near(b->position.y, 1.2f, 0.05f,
+                   "a 3x box rests at 3x its half-extent, not 9x");
+        check_lt(b->linear_velocity.length(), 0.1f, "and it is still");
+        check_lt(std::sqrt(b->position.x * b->position.x +
+                           b->position.z * b->position.z),
+                 0.1f, "and it did not get thrown anywhere");
+
+        // And the thing you can shoot at is the same size as the
+        // thing that rests on the floor.
+        RayHit edge = w.raycast(Vec3(1.0f, 1.2f, 4.0f), Vec3(1.0f, 1.2f, -4.0f));
+        RayHit past = w.raycast(Vec3(1.6f, 1.2f, 4.0f), Vec3(1.6f, 1.2f, -4.0f));
+        check(edge.hit, "a ray inside its 2.4 m width finds it");
+        check(!past.hit, "and one outside that does not");
+    }
+
     std::printf("  %s\n", g_fail ? "FAILED" : "all good");
     return g_fail ? 1 : 0;
 }

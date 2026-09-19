@@ -74,10 +74,7 @@ void RigidBody3D::on_physics(float) {
         b->orientation = t.basis.orthonormalized().to_quat();
         return;
     }
-    Transform3D t;
-    t.basis = Basis(b->orientation) * b->scale;
-    t.origin = b->position;
-    set_global_transform(t);
+    set_global_transform(b->render_transform());
 }
 
 Vec3 RigidBody3D::get_velocity() const {
