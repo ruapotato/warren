@@ -104,6 +104,30 @@ void MeshBuilder::add_cylinder(const Vec3 &centre, float radius, float height,
     xform_ = keep;
 }
 
+// A CYLINDER BETWEEN TWO POINTS, which is the form nearly every
+// caller actually wants. add_cylinder builds one standing on
+// its end, so anything else -- a limb, a handrail, a pipe, the
+// barrel of a gun -- has to be posed by the caller, and posing
+// one from script means building a basis by hand from a
+// direction. Two points is how you describe those things.
+void MeshBuilder::add_cylinder_between(const Vec3 &from, const Vec3 &to,
+                                       float radius, int segments) {
+    const Vec3 axis = to - from;
+    const float len = axis.length();
+    if (len < EPS) return;
+    const Vec3 dir = axis * (1.0f / len);
+    // Any pair square to the axis will do; the seam's roll is
+    // not something a caller can see on a cylinder.
+    const Vec3 hint = std::fabs(dir.y) > 0.95f ? Vec3(1, 0, 0) : Vec3(0, 1, 0);
+    const Vec3 x = cross(hint, dir).normalized();
+    const Vec3 z = cross(x, dir);
+    Ref<Mesh> m = Mesh::cylinder(radius, len, std::max(3, segments), true);
+    Transform3D keep = xform_;
+    xform_ = keep * Transform3D(Basis(x, dir, z), (from + to) * 0.5f);
+    emit(*m, Vec2(radius * TAU, len));
+    xform_ = keep;
+}
+
 void MeshBuilder::add_cone(const Vec3 &centre, float radius, float height,
                            int segments) {
     Ref<Mesh> m = Mesh::cone(radius, height, std::max(3, segments));
@@ -292,6 +316,9 @@ static void register_mesh_builder() {
             .args("centre", "radius", "rings", "segments")
         .method("add_cylinder", &MeshBuilder::add_cylinder, {Variant(20)})
             .args("centre", "radius", "height", "segments")
+        .method("add_cylinder_between", &MeshBuilder::add_cylinder_between,
+                {Variant(20)})
+            .args("from_point", "to_point", "radius", "segments")
         .method("add_cone", &MeshBuilder::add_cone, {Variant(20)})
             .args("centre", "radius", "height", "segments")
         .method("add_quad", &MeshBuilder::add_quad).args("a", "b", "c", "d")

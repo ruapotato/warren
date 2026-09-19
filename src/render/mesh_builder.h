@@ -66,6 +66,10 @@ public:
     void add_sphere(const Vec3 &centre, float radius, int rings, int segments);
     void add_cylinder(const Vec3 &centre, float radius, float height,
                       int segments);
+    // The same, described by where it starts and where it ends,
+    // which is how a limb, a pipe or a handrail is described.
+    void add_cylinder_between(const Vec3 &from, const Vec3 &to, float radius,
+                              int segments);
     void add_cone(const Vec3 &centre, float radius, float height, int segments);
     void add_quad(const Vec3 &a, const Vec3 &b, const Vec3 &c, const Vec3 &d);
     // Another mesh, through the current transform. Its own material
