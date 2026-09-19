@@ -69,6 +69,22 @@ public:
         LeftWide, RightWide, TopWide, BottomWide, FullRect
     };
     void set_anchors_preset(Preset p, bool keep_size = true);
+    // THE SAME, BY NAME, for a script.
+    //
+    // Worth binding rather than leaving a game to set four anchors
+    // by hand, because the hand-rolled version has a trap in it: a
+    // fresh Control is a hundred by thirty, so setting the anchors
+    // to fill a parent WITHOUT clearing the offsets makes it a
+    // hundred pixels wider and thirty taller than the thing it is
+    // filling -- and everything anchored proportionally inside it
+    // is then displaced by half of that. It cost this project a
+    // crosshair fifty pixels right of where the shot went, which
+    // read for a long time as the aiming being wrong.
+    //
+    // Names: "full", "centre"/"center", "top_left", "top_right",
+    // "bottom_left", "bottom_right", "left_wide", "right_wide",
+    // "top_wide", "bottom_wide".
+    void set_anchors(const std::string &preset);
 
     // --- how a container should treat it ---------------------------------
     enum SizeFlags {

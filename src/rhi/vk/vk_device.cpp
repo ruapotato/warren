@@ -443,6 +443,20 @@ private:
     Format swapchain_format_ = Format::BGRA8_SRGB;
     VkFormat swapchain_vk_format_ = VK_FORMAT_B8G8R8A8_SRGB;
     std::vector<TextureH> swapchain_images_;
+    // ONE PRESENT SEMAPHORE PER IMAGE, not per frame in flight.
+    //
+    // vkQueuePresentKHR waits on a semaphore and never tells you
+    // when it is finished with it -- the only thing that can be
+    // relied on is that the image will not come back out of
+    // vkAcquireNextImageKHR until the present is done. So the
+    // semaphore has to be tied to the IMAGE, which is the thing
+    // whose availability is knowable, rather than to the frame
+    // slot, which is reused on a different schedule.
+    std::vector<VkSemaphore> image_rendered_;
+    // Set when a present or an acquire says the swapchain is out
+    // of date but the frame is still usable. Acted on between
+    // frames, never in the middle of one.
+    bool swapchain_stale_ = false;
     TextureH swapchain_handle_;      // aliases the current image
     uint32_t image_index_ = 0;
 
@@ -838,6 +852,11 @@ bool VkDeviceImpl::create_swapchain(uint32_t w, uint32_t h) {
         VK_CHECK(vkCreateImageView(device_, &vi, nullptr, &t->view),
                  "swapchain image view");
         swapchain_images_.push_back(h);
+        VkSemaphoreCreateInfo ri{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VkSemaphore done = VK_NULL_HANDLE;
+        if (vkCreateSemaphore(device_, &ri, nullptr, &done) != VK_SUCCESS)
+            return false;
+        image_rendered_.push_back(done);
     }
     WR_INFO("vk: swapchain %ux%u, %zu images, %s, %s", extent_.width, extent_.height,
             swapchain_images_.size(), format_name(swapchain_format_),
@@ -848,6 +867,9 @@ bool VkDeviceImpl::create_swapchain(uint32_t w, uint32_t h) {
 }
 
 void VkDeviceImpl::destroy_swapchain() {
+    for (VkSemaphore s : image_rendered_)
+        if (s) vkDestroySemaphore(device_, s, nullptr);
+    image_rendered_.clear();
     for (TextureH h : swapchain_images_) {
         if (VkTextureRes *t = textures.get(h)) {
             if (t->view) vkDestroyImageView(device_, t->view, nullptr);
@@ -2064,6 +2086,15 @@ CommandList *VkDeviceImpl::begin_frame() {
         WR_ERROR("vk: begin_frame called twice");
         return cmd_;
     }
+    if (swapchain_stale_) {
+        // Between frames, with nothing in flight: the only safe
+        // moment to throw the images away.
+        swapchain_stale_ = false;
+        int w = 0, h = 0;
+        SDL_Vulkan_GetDrawableSize(window_, &w, &h);
+        vkDeviceWaitIdle(device_);
+        if (!create_swapchain(uint32_t(w), uint32_t(h))) return nullptr;
+    }
     Frame &f = frames_[frame_index_];
     vkWaitForFences(device_, 1, &f.fence, VK_TRUE, UINT64_MAX);
 
@@ -2074,14 +2105,28 @@ CommandList *VkDeviceImpl::begin_frame() {
 
     VkResult r = vkAcquireNextImageKHR(device_, swapchain_, UINT64_MAX, f.acquired,
                                        VK_NULL_HANDLE, &image_index_);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+    // VK_SUBOPTIMAL_KHR IS A SUCCESS. The image WAS acquired and
+    // the semaphore WILL be signalled, so bailing out here leaks
+    // both: the image is never presented and nothing ever waits
+    // on the signal. Four of those and the swapchain is starved,
+    // which is what the validation layer reports as "already
+    // acquired 4 images, only 2 available" followed by a
+    // semaphore with pending operations -- and then the frame
+    // loop stops making progress.
+    //
+    // So the frame is finished normally and the swapchain is
+    // rebuilt between frames, where nothing is in flight.
+    if (r == VK_SUBOPTIMAL_KHR) {
+        swapchain_stale_ = true;
+    } else if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+        // A real failure: nothing was acquired, so there is
+        // nothing to release.
         int w = 0, h = 0;
         SDL_Vulkan_GetDrawableSize(window_, &w, &h);
         vkDeviceWaitIdle(device_);
         create_swapchain(uint32_t(w), uint32_t(h));
         return nullptr;
-    }
-    if (r != VK_SUCCESS) {
+    } else if (r != VK_SUCCESS) {
         WR_ERROR("vk: vkAcquireNextImageKHR failed (%d)", int(r));
         return nullptr;
     }
@@ -2129,7 +2174,11 @@ void VkDeviceImpl::end_frame() {
     wait.semaphore = f.acquired;
     wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
-    signal.semaphore = f.rendered;
+    // The IMAGE's semaphore, not the frame's -- see image_rendered_.
+    VkSemaphore done = image_index_ < image_rendered_.size()
+                           ? image_rendered_[image_index_]
+                           : f.rendered;
+    signal.semaphore = done;
     signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
     VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
     cbi.commandBuffer = f.cb;
@@ -2144,17 +2193,13 @@ void VkDeviceImpl::end_frame() {
 
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &f.rendered;
+    pi.pWaitSemaphores = &done;
     pi.swapchainCount = 1;
     pi.pSwapchains = &swapchain_;
     pi.pImageIndices = &image_index_;
     VkResult r = vkQueuePresentKHR(queue_, &pi);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        int w = 0, h = 0;
-        SDL_Vulkan_GetDrawableSize(window_, &w, &h);
-        vkDeviceWaitIdle(device_);
-        create_swapchain(uint32_t(w), uint32_t(h));
-    }
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
+        swapchain_stale_ = true;
     frame_index_ = (frame_index_ + 1) % frames_in_flight_;
 }
 

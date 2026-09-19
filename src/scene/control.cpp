@@ -27,6 +27,29 @@ const Theme &Control::theme() const {
 
 // -------------------------------------------------------------- layout
 
+void Control::set_anchors(const std::string &preset) {
+    static const struct { const char *name; Preset p; } table[] = {
+        {"full", Preset::FullRect},
+        {"centre", Preset::Centre},
+        {"center", Preset::Centre},
+        {"top_left", Preset::TopLeft},
+        {"top_right", Preset::TopRight},
+        {"bottom_left", Preset::BottomLeft},
+        {"bottom_right", Preset::BottomRight},
+        {"left_wide", Preset::LeftWide},
+        {"right_wide", Preset::RightWide},
+        {"top_wide", Preset::TopWide},
+        {"bottom_wide", Preset::BottomWide},
+    };
+    for (const auto &e : table) {
+        if (preset == e.name) {
+            set_anchors_preset(e.p, true);
+            return;
+        }
+    }
+    WR_WARN("control: '%s' is not an anchor preset", preset.c_str());
+}
+
 void Control::set_anchors_preset(Preset p, bool keep_size) {
     const Vec2 size = keep_size ? Vec2(offset_right - offset_left,
                                        offset_bottom - offset_top)
@@ -162,6 +185,7 @@ static void register_control() {
         .field("border_width", &Theme::border_width, "range:0,8");
 
     ClassBuilder<Control>()
+        .method("set_anchors", &Control::set_anchors).args("preset")
         .field("anchor_left", &Control::anchor_left, "range:0,1")
         .field("anchor_top", &Control::anchor_top, "range:0,1")
         .field("anchor_right", &Control::anchor_right, "range:0,1")
