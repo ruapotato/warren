@@ -971,7 +971,7 @@ uint32_t Renderer::upload_portal(const Portal3D *p) {
     PortalUniforms u{};
     u.edge_colour = p->edge_colour.rgba();
     float aspect = p->height > 1e-4f ? p->width / p->height : 1.0f;
-    u.edge_params = Vec4(p->edge_width, p->open, aspect, 0.0f);
+    u.edge_params = Vec4(p->edge_width, p->open, aspect, p->corner_radius);
     uint32_t offset =
         uint32_t(portal_span_ * slot_) + portal_cursor_ * portal_stride_;
     device_->write_buffer(portal_ubo_, &u, sizeof(u), offset);
@@ -1301,6 +1301,21 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
             stats_.portals_considered++;
             if (!portal_child(v, pi, &inner, &scissor)) {
                 stats_.portals_culled++;
+                // A PORTAL WITH NOWHERE TO GO IS STILL A PORTAL.
+                //
+                // Everything above bails on a portal whose
+                // partner is not placed yet, so the first of a
+                // pair was drawn as absolutely nothing -- and a
+                // player who has just fired one has no way to
+                // tell it from a shot that missed. It reads as
+                // the gun refusing, and then both appear at
+                // once when the second lands, which reads as
+                // the gun having lied.
+                //
+                // Its rim is drawn on its own: an outline on
+                // the wall, no hole cut, nothing to see
+                // through. Which is exactly what it is.
+                draw_orphan_rim(cmd, v, pi, view_offset, stencil_ref);
                 continue;
             }
             Portal3D *p = portals_[pi];
@@ -1874,6 +1889,48 @@ int Renderer::cluster_view(const View &v, int slot) {
 // cascades. Two copies of a rule this fiddly would disagree within a
 // week, and the symptom would be shadows that are subtly wrong only
 // inside portals -- which is exactly the bug nobody finds.
+// The rim of a portal that has no destination, drawn alone.
+// See the call site: the alternative is drawing nothing, and a
+// player cannot tell "placed, unconnected" from "missed".
+void Renderer::draw_orphan_rim(rhi::CommandList *cmd, const View &v, size_t pi,
+                               uint32_t view_offset, uint32_t stencil_ref) {
+    if (pi >= portals_.size()) return;
+    Portal3D *p = portals_[pi];
+    if (!p->active || p->edge_width <= 0.0f) return;
+    // Only when it has no destination. Every other reason
+    // portal_child refuses -- facing away, too deep, off screen
+    // -- is a reason to draw nothing at all.
+    Portal3D *q = p->link();
+    if (q && q->active) return;
+    if (!p->faces(v.camera.origin)) return;
+
+    Transform3D cam_ortho = v.camera;
+    cam_ortho.basis = cam_ortho.basis.orthonormalized();
+    Rect2 rect;
+    if (!p->screen_rect(cam_ortho.inverse_orthonormal(), v.projection, &rect))
+        return;
+
+    const uint32_t portal_offset = upload_portal(p);
+    const Transform3D quad_model =
+        p->global_transform() *
+        Transform3D(Basis::scaled({p->width, p->height, 1.0f}), Vec3());
+    PushUniforms pu{};
+    pu.model = to_projection(quad_model);
+    pu.tint = Vec4(1, 1, 1, 1);
+
+    cmd->set_scissor({0, 0, width_, height_});
+    cmd->bind_pipeline(pipe_.portal_rim);
+    cmd->set_stencil_reference(stencil_ref);
+    cmd->bind_group(0, frame_group_);
+    cmd->bind_group(1, view_group_, &view_offset, 1);
+    cmd->bind_group(2, portal_group_, &portal_offset, 1);
+    cmd->push_constants(&pu, sizeof(pu));
+    cmd->bind_vertex_buffer(0, portal_quad_->vertex_buffer());
+    cmd->bind_index_buffer(portal_quad_->index_buffer(), IndexType::U32);
+    cmd->draw_indexed(portal_quad_->index_count());
+    stats_.draw_calls++;
+}
+
 bool Renderer::portal_child(const View &v, size_t pi, View *out,
                             rhi::Rect *scissor_out) const {
     if (pi >= portals_.size()) return false;

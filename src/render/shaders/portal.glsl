@@ -23,8 +23,30 @@
 
 layout(set = SET_MATERIAL, binding = B_MATERIAL(0), std140) uniform PortalData {
     vec4 edge_colour;    // rgb, a = unused
-    vec4 edge_params;    // width, open, aspect, unused
+    vec4 edge_params;    // width, open, aspect, corner radius
 } portal;
+
+// THE APERTURE'S SHAPE, as a signed distance: negative inside.
+//
+// A rounded rectangle rather than a rectangle, because a hole in
+// the world with four sharp corners reads as a decal stuck to
+// the wall and one with rounded ones reads as a hole. The radius
+// is a fraction of the shorter half-axis, so a square portal at
+// 1.0 is a circle and the same number means the same thing at
+// every aspect.
+//
+// The MARK pass discards on this, so the stencil -- and with it
+// the hole the inner view is drawn through -- takes the same
+// shape. Portal3D::within_aperture computes the identical
+// function, because the hole the physics believes in and the
+// hole you can see have to be the same hole.
+float aperture_distance(vec2 uv, float aspect, float radius) {
+    vec2 half_ext = vec2(max(aspect, 1e-3), 1.0);
+    vec2 p = (uv - vec2(0.5)) * 2.0 * half_ext;
+    float r = clamp(radius, 0.0, 1.0) * min(half_ext.x, half_ext.y);
+    vec2 q = abs(p) - (half_ext - vec2(r));
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+}
 
 #pragma stage vertex
 
@@ -53,17 +75,22 @@ layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_colour;
 
 void main() {
-    // The mark and restore passes have colour writes masked off, so
-    // what this returns only matters for the rim pass.
-    vec2 d = abs(v_uv - vec2(0.5)) * 2.0;
-    // Corrected for the aperture's aspect, so a wide portal's rim is
-    // the same thickness all the way round instead of stretched.
     float aspect = max(portal.edge_params.z, 1e-3);
-    d.x *= aspect;
-    float edge = max(d.x / max(aspect, 1e-3), d.y);
-    float w = max(portal.edge_params.x, 1e-4);
-    float rim = smoothstep(1.0 - w, 1.0 - w * 0.25, edge);
     float open = clamp(portal.edge_params.y, 0.0, 1.0);
+    float dist = aperture_distance(v_uv, aspect, portal.edge_params.w);
+
+    // OUTSIDE THE SHAPE IS NOT THE PORTAL. Discarding here is
+    // what rounds the stencil, so the corners of the quad are
+    // wall in the mark pass, in the restore pass and in the rim
+    // -- three passes, one shape, no way for them to disagree.
+    if (dist > 0.0) discard;
+
+    // The rim rides the same distance field, so it is the same
+    // thickness all the way round including through the curves.
+    // The width is in half-axis units, matched to the old
+    // rectangular behaviour.
+    float w = max(portal.edge_params.x, 1e-4) * 2.0;
+    float rim = smoothstep(-w, -w * 0.25, dist);
     out_colour = vec4(portal.edge_colour.rgb * (1.0 + 2.0 * open),
                       rim * (0.35 + 0.65 * open));
 }

@@ -234,6 +234,8 @@ private:
     void gather_views(const View &v, std::vector<View> *out) const;
     // The one copy of "does this portal recurse from here, and with
     // what camera" -- used by the gather walk and by the draw.
+    void draw_orphan_rim(rhi::CommandList *cmd, const View &v, size_t pi,
+                         uint32_t view_offset, uint32_t stencil_ref);
     bool portal_child(const View &v, size_t portal_index, View *out,
                       rhi::Rect *scissor) const;
     void fit_cascades(const std::vector<View> &views);

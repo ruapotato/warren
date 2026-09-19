@@ -88,6 +88,18 @@ public:
     // 0 uses the renderer's global limit.
     int max_recursion = 0;
 
+    // HOW ROUNDED THE CORNERS ARE, as a fraction of the shorter
+    // half-axis. 0 is a rectangle, 1 is a stadium -- an ellipse
+    // in all but name when the aperture is square.
+    //
+    // IT IS NOT ONLY A LOOK. The shape is used by the stencil
+    // that cuts the hole AND by `within_aperture`, which is what
+    // the physics asks whether a point is in the doorway. Round
+    // one and not the other and there are four corners you can
+    // walk through and cannot see through, which is the worst
+    // kind of bug in a game about holes.
+    float corner_radius = 0.32f;
+
     // --- looks ---------------------------------------------------------------
     Color edge_colour = Color::hex(0xFF8C1A);
     float edge_width = 0.04f;

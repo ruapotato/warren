@@ -140,8 +140,21 @@ Vec3 Portal3D::local_point(const Vec3 &world_point) const {
 bool Portal3D::within_aperture(const Vec3 &world_point, float margin) const {
     Transform3D g = global_transform();
     Vec3 local = g.inverse().xform(world_point);
-    return std::fabs(local.x) <= width * 0.5f + margin &&
-           std::fabs(local.y) <= height * 0.5f + margin;
+    const float hw = width * 0.5f + margin;
+    const float hh = height * 0.5f + margin;
+    if (hw <= 0.0f || hh <= 0.0f) return false;
+    // THE SAME ROUNDED RECTANGLE THE SHADER CUTS. See
+    // corner_radius: the hole the physics believes in and the
+    // hole you can see have to be the same hole.
+    const float r = clampf(corner_radius, 0.0f, 1.0f) * std::min(hw, hh);
+    if (r <= 1e-5f)
+        return std::fabs(local.x) <= hw && std::fabs(local.y) <= hh;
+    const float qx = std::fabs(local.x) - (hw - r);
+    const float qy = std::fabs(local.y) - (hh - r);
+    const float ox = std::max(qx, 0.0f), oy = std::max(qy, 0.0f);
+    const float dist = std::sqrt(ox * ox + oy * oy) +
+                       std::min(std::max(qx, qy), 0.0f) - r;
+    return dist <= 0.0f;
 }
 
 Vec3 Portal3D::closest_point(const Vec3 &world_point) const {
@@ -220,6 +233,7 @@ bool Portal3D::screen_rect(const Transform3D &view, const Projection &proj,
 
 static void register_portal_class() {
     ClassBuilder<Portal3D>()
+        .field("corner_radius", &Portal3D::corner_radius)
         .method("admits", &Portal3D::admits).args("radius", "height")
         .method("admits_radius", &Portal3D::admits_radius)
         .field("width", &Portal3D::width, "range:0.05,64")
