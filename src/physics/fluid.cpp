@@ -649,6 +649,43 @@ void Fluid::finish(float dt) {
     }
 
     for (size_t i = 0; i < n; i++) pos_[i] = predicted_[i];
+
+    // --- what has landed
+    const float limit = settle_speed * settle_speed;
+    const float inv = 1.0f / std::max(1e-4f, settle_spacing);
+    for (size_t i = 0; i < n; i++) {
+        if (contact_[i].length_sq() < 1e-8f) continue;
+        if (vel_[i].length_sq() > limit) continue;
+        const int64_t key =
+            ((int64_t(std::floor(pos_[i].x * inv)) & 0x1FFFFF) << 42) |
+            ((int64_t(std::floor(pos_[i].y * inv)) & 0x1FFFFF) << 21) |
+            (int64_t(std::floor(pos_[i].z * inv)) & 0x1FFFFF);
+        const auto it = std::lower_bound(settled_seen_.begin(),
+                                         settled_seen_.end(), key);
+        if (it != settled_seen_.end() && *it == key) continue;
+        settled_seen_.insert(it, key);
+        settled_pos_.push_back(pos_[i]);
+        settled_nrm_.push_back(contact_[i].normalized());
+    }
+    // A CEILING ON THE MEMORY OF IT. The set of places liquid has
+    // ever settled grows for as long as the level is running, and
+    // a hose left on would fill it. Past this the oldest are
+    // forgotten, which means a very old patch can be reported
+    // again -- harmless, and much better than unbounded.
+    if (settled_seen_.size() > 20000) {
+        settled_seen_.erase(settled_seen_.begin(),
+                            settled_seen_.begin() + 10000);
+    }
+}
+
+size_t Fluid::drain_settled(std::vector<Vec3> *positions,
+                            std::vector<Vec3> *normals) {
+    const size_t n = settled_pos_.size();
+    if (positions) positions->swap(settled_pos_);
+    if (normals) normals->swap(settled_nrm_);
+    settled_pos_.clear();
+    settled_nrm_.clear();
+    return n;
 }
 
 // --------------------------------------------------------- sampling

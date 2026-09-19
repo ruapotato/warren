@@ -175,6 +175,27 @@ public:
     // handful of cell lookups and not a scan.
     bool occupied(const AABB &box) const;
 
+    // WHERE LIQUID HAS COME TO REST AGAINST SOMETHING, since the
+    // last time this was asked.
+    //
+    // A game wants this for wetness, for staining, for a gel that
+    // paints the floor it lands on -- and it is exactly the sort
+    // of thing that gets written in script by pulling every
+    // particle's position across the bridge every frame, which
+    // costs more than the simulation. The solver already knows:
+    // it records the surface each particle ended up against, and
+    // a particle with a contact and no speed has landed.
+    //
+    // Deduplicated on a coarse grid, so a hose pointed at one
+    // spot reports that spot once and not four hundred times a
+    // second, and DRAINED -- each landing is reported once.
+    size_t drain_settled(std::vector<Vec3> *positions,
+                         std::vector<Vec3> *normals);
+    // Below this speed, and against a surface, counts as landed.
+    float settle_speed = 1.0f;
+    // How far apart two landings have to be to be two landings.
+    float settle_spacing = 0.12f;
+
     // --- what happened ---------------------------------------------
     struct Stats {
         uint32_t particles = 0;
@@ -260,6 +281,8 @@ private:
     std::vector<uint32_t> nbr_start_, nbr_count_;
 
     std::vector<uint32_t> scratch_;
+    std::vector<Vec3> settled_pos_, settled_nrm_;
+    std::vector<int64_t> settled_seen_;
     float accumulator_ = 0.0f;
 };
 

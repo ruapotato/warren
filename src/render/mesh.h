@@ -151,6 +151,28 @@ public:
     bool upload(rhi::Device *dev, const char *name = nullptr);
     void release(rhi::Device *dev);
     bool uploaded() const { return vertex_buffer_.valid(); }
+
+    // SAY THAT THE ARRAYS CHANGED.
+    //
+    // `vertices` and `indices` are public, which is the right
+    // call -- a mesher wants to fill them directly and a wrapper
+    // round a vector earns nothing -- and it means nothing can
+    // detect a change. The renderer uploaded a mesh once and
+    // never looked again, so ANY mesh rebuilt after its first
+    // frame was silently frozen at that first frame: a contoured
+    // liquid surface, a deforming prop, a debug overlay. It
+    // builds, it has the right bounds, it reports the right
+    // triangle count, and what is drawn is the first version of
+    // it for ever.
+    //
+    // A revision, and the same `touch()` spelling Material
+    // already uses, so there is one convention for "I changed
+    // this" across the engine.
+    void touch() { revision_++; }
+    uint32_t revision() const { return revision_; }
+    bool needs_upload() const {
+        return !uploaded() || uploaded_revision_ != revision_;
+    }
     rhi::BufferH vertex_buffer() const { return vertex_buffer_; }
     rhi::BufferH index_buffer() const { return index_buffer_; }
     rhi::BufferH skin_buffer() const { return skin_buffer_; }
@@ -189,6 +211,8 @@ public:
 
 private:
     AABB bounds_;
+    uint32_t revision_ = 1;
+    uint32_t uploaded_revision_ = 0;
     rhi::BufferH vertex_buffer_;
     rhi::BufferH index_buffer_;
     rhi::BufferH skin_buffer_;

@@ -254,6 +254,20 @@ int64_t Fluid3D::particle_count() const {
     return fluid_ ? int64_t(fluid_->count()) : 0;
 }
 
+Array Fluid3D::take_settled() {
+    Array out;
+    if (!fluid_) return out;
+    std::vector<Vec3> ps, ns;
+    fluid_->drain_settled(&ps, &ns);
+    for (size_t i = 0; i < ps.size(); i++) {
+        Dict d;
+        d["position"] = Variant(ps[i]);
+        d["normal"] = Variant(i < ns.size() ? ns[i] : Vec3(0, 1, 0));
+        out.push_back(Variant(d));
+    }
+    return out;
+}
+
 void Fluid3D::spray(const Vec3 &at, const Vec3 &direction, float rate,
                     float speed, float spread, float dt) {
     if (!fluid_) return;
@@ -434,6 +448,10 @@ void Fluid3D::rebuild_surface() {
     sm.material_slot = 0;
     surface_mesh_->submeshes.assign(1, sm);
     surface_mesh_->set_bounds(whole);
+    // THE ARRAYS CHANGED. Without this the renderer uploads the
+    // first surface and draws it for ever -- the liquid moves in
+    // the simulation and stands perfectly still on the screen.
+    surface_mesh_->touch();
     surface_node_->mesh = surface_mesh_;
     if (surface_material) surface_node_->materials.assign(1, surface_material);
     surface_chunks_ = uint32_t(jobs.size());
@@ -499,6 +517,7 @@ static void register_rigid_classes() {
         .method("clear", &Fluid3D::clear)
         .method("particle_count", &Fluid3D::particle_count)
         .method("surface_chunks", &Fluid3D::surface_chunks)
+        .method("take_settled", &Fluid3D::take_settled)
         .method("spray", &Fluid3D::spray)
         .args("at", "direction", "rate", "speed", "spread", "dt");
 }

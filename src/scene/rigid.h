@@ -144,6 +144,12 @@ public:
     int64_t fill_box(const Vec3 &from, const Vec3 &to);
     void clear();
     int64_t particle_count() const;
+    // WHERE GEL HAS LANDED SINCE YOU LAST ASKED, as a list of
+    // {"position", "normal"}. Drained: each landing comes back
+    // once. See Fluid::drain_settled -- the alternative is
+    // pulling every particle across the bridge every frame,
+    // which costs more than simulating them.
+    Array take_settled();
     // How many chunks the surface was built out of last time. The
     // cost of drawing the liquid, in one number.
     int64_t surface_chunks() const { return int64_t(surface_chunks_); }

@@ -43,6 +43,7 @@ Mesh::~Mesh() {
 }
 
 void Mesh::clear() {
+    revision_++;
     vertices.clear();
     indices.clear();
     skin.clear();
@@ -614,6 +615,7 @@ bool Mesh::upload(rhi::Device *dev, const char *name) {
     }
     release(dev);
     owner_ = dev;
+    uploaded_revision_ = revision_;
     if (submeshes.empty()) {
         SubMesh sm;
         sm.first_index = 0;
@@ -965,6 +967,7 @@ Ref<Mesh> Mesh::wire_box(const AABB &box) {
 static void register_mesh_class() {
     ClassBuilder<Mesh>()
         .method("clear", &Mesh::clear)
+        .method("touch", &Mesh::touch)
         .method("compute_normals", &Mesh::compute_normals,
                 {Variant(double(deg2rad(60.0f)))})
         .args("smooth_angle")

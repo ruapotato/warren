@@ -1042,7 +1042,11 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
         // is exactly backwards for a first-person body.
         (void)cull_mask;
         Mesh *mesh = mi->mesh.get();
-        if (!mesh->uploaded() && !mesh->upload(device_, mi->name().c_str())) continue;
+        // needs_upload, not !uploaded: a mesh whose arrays have
+        // been rebuilt has to go up again. See Mesh::touch.
+        if (mesh->needs_upload() &&
+            !mesh->upload(device_, mi->name().c_str()))
+            continue;
 
         // A SKINNED BODY WRITES ITS BONES INTO THE FRAME'S ONE BUFFER
         // and remembers where. Done here rather than at draw time
