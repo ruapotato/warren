@@ -193,6 +193,55 @@ int main() {
                    "a neighbour walking away is not avoided");
     }
 
+    // ----------------------------------------- a target with no route
+    //
+    // ASKED TO WALK SOMEWHERE THAT CANNOT BE ROUTED TO. find_path
+    // fails outright -- not a partial route, no route -- and that
+    // used to leave the body in the worst state available: a
+    // target, an empty path, and nothing anyone could read. The
+    // follow loop skipped it, so it never moved; it was not stuck,
+    // because it was not trying; its path was not partial, because
+    // there was no path. It looked in every way like a body that
+    // was fine, and anything waiting on it waited for ever.
+    //
+    // Hard to reach on purpose, which is why it went unnoticed:
+    // nearest_point deliberately widens to the whole mesh rather
+    // than failing, so any target at all resolves as long as there
+    // is one polygon. An unbaked mesh is the honest way in, and it
+    // is not hypothetical -- a region asked for a route before its
+    // first bake is exactly this.
+    {
+        NavMesh floor;
+        open_floor(&floor, 12.0f);
+        NavMesh nothing;                  // never baked; no polygons
+
+        Crowd crowd;
+        crowd.set_navmesh(&nothing);
+        uint32_t id = crowd.add(walker(Vec3(0, 0, 0)));
+        check(!crowd.set_target(id, Vec3(6, 0, 0)),
+              "a route that cannot be found is refused");
+        const CrowdAgent *a = crowd.find(id);
+        check(a && a->no_route, "and the body says it has no route");
+        check(a && a->has_target,
+              "and keeps the target, because it may be routable later");
+
+        for (int i = 0; i < 600; i++) crowd.step(dt);
+        a = crowd.find(id);
+        check(a && a->no_route, "still no route ten seconds later");
+        check(a && !a->arrived,
+              "and it never claims to have arrived somewhere it cannot reach");
+
+        // AND IT PICKS ITSELF UP. The mesh appears -- a bake
+        // finishes, a door opens -- and the body finds the route on
+        // its own, without being asked again. That is the half that
+        // makes keeping the target worth anything.
+        crowd.set_navmesh(&floor);
+        for (int i = 0; i < 900; i++) crowd.step(dt);
+        a = crowd.find(id);
+        check(a && !a->no_route, "once the mesh exists, the route is found");
+        check(a && a->arrived, "and the body walks it without being re-asked");
+    }
+
     // --------------------------------------------------- head to head
     //
     // Two bodies swapping places on open ground. The classic failure

@@ -87,6 +87,19 @@ struct CrowdAgent {
     float goal_radius = 0.0f;
     bool has_target = false;
     bool path_partial = false;
+    // NO ROUTE AT ALL, which is not the same as a partial one.
+    //
+    // A partial path goes as far as it can and the body walks it.
+    // This is find_path failing outright -- the body is off the
+    // mesh, or the target is, or the mesh is empty -- and it used
+    // to leave the agent with a target, an empty path, and no way
+    // for anyone to find out: the follow loop skipped it, so it
+    // never moved, never re-planned, never arrived and never
+    // reported. A round waiting on that body waits for ever.
+    //
+    // Now it retries on a timer and says so in the meantime.
+    bool no_route = false;
+    float repath_in = 0.0f;
     // True while crossing an off-mesh link. The game reads this to
     // play a climb or a vault; the crowd just moves the body along
     // the link at its own speed.

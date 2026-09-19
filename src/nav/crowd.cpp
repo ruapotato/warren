@@ -249,8 +249,16 @@ bool Crowd::set_target(uint32_t id, const Vec3 &target) {
     a->on_link = false;
     a->best_progress = 1e30f;
     a->stuck_for = 0.0f;
-    return mesh_->find_path(a->position, target, &a->path, &a->path_partial,
-                            a->filter);
+    const bool got = mesh_->find_path(a->position, target, &a->path,
+                                      &a->path_partial, a->filter);
+    // THE TARGET IS KEPT EITHER WAY. A body that cannot be routed
+    // this instant usually can be a moment later -- the crowd in
+    // front of it moves, a door opens, it is nudged back onto the
+    // mesh -- so dropping the target is throwing away the only
+    // record of what it wanted. The follow loop retries.
+    a->no_route = !got;
+    if (!got) a->path.clear();
+    return got;
 }
 
 void Crowd::stop(uint32_t id) {
@@ -270,6 +278,8 @@ bool Crowd::warp(uint32_t id, const Vec3 &to) {
     a->path.clear();
     a->path_partial = false;
     a->arrived = false;
+    a->no_route = false;
+    a->repath_in = 0.0f;
     // The target is kept: a body moved somewhere else usually still
     // wants what it wanted. The cleared path makes it ask for a new
     // route from where it now is, on the next step.
@@ -286,7 +296,33 @@ void Crowd::follow_paths(float dt) {
         a.desired = Vec3();
         a.on_link = false;
         a.link = 0xffff;
-        if (!a.has_target || a.path.empty()) continue;
+        if (!a.has_target) continue;
+        if (a.path.empty()) {
+            // A TARGET AND NO ROUTE. Ask again, on a timer and
+            // out of the same budget as a replan, so a hundred
+            // unroutable bodies cost one path a step rather than
+            // a hundred. Until one is found the body stands
+            // still, and `no_route` is how anybody finds out --
+            // it is not stuck (it is not trying) and its path is
+            // not partial (there is no path), so without this it
+            // looks in every way like a body that is fine.
+            a.repath_in -= dt;
+            if (a.repath_in <= 0.0f && replanned < replans_per_step) {
+                a.repath_in = 0.5f;
+                ++replanned;
+                if (mesh_ && mesh_->find_path(a.position, a.target, &a.path,
+                                              &a.path_partial, a.filter)) {
+                    a.leg = 1;
+                    a.best_progress = 1e30f;
+                    a.stuck_for = 0.0f;
+                    a.no_route = false;
+                } else {
+                    a.path.clear();
+                    a.no_route = true;
+                }
+            }
+            if (a.path.empty()) continue;
+        }
 
         // WHEN NOTHING IS HAPPENING, TRY SOMETHING ELSE.
         //

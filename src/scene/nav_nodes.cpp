@@ -334,6 +334,11 @@ bool NavAgent3D::arrived() const {
     const nav::CrowdAgent *a = me();
     return a && a->arrived;
 }
+bool NavAgent3D::no_route() const {
+    const nav::CrowdAgent *a = me();
+    return a && a->no_route;
+}
+
 bool NavAgent3D::path_partial() const {
     const nav::CrowdAgent *a = me();
     return a && a->path_partial;
@@ -498,6 +503,7 @@ static void register_nav_nodes() {
         .method("has_target", &NavAgent3D::has_target)
         .method("arrived", &NavAgent3D::arrived)
         .method("path_partial", &NavAgent3D::path_partial)
+        .method("no_route", &NavAgent3D::no_route)
         .method("velocity", &NavAgent3D::velocity)
         .method("on_link", &NavAgent3D::on_link)
         .method("deflection", &NavAgent3D::deflection)

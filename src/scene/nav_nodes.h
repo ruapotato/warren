@@ -266,6 +266,13 @@ public:
     // True when the route ran out before reaching the target, which
     // usually means the goal is somewhere nothing can get to.
     bool path_partial() const;
+    // True when the last attempt to route to the target failed
+    // outright -- the body is off the mesh, or the target is.
+    // Distinct from a partial path, which is a route that stops
+    // short: this is no route at all, and the body is standing
+    // still. The crowd keeps retrying; a game that cares can stop
+    // waiting on it.
+    bool no_route() const;
 
     Vec3 velocity() const;
     // Where the crowd wants the body, whether or not the node is
