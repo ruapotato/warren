@@ -192,6 +192,34 @@ private:
         rhi::Rect scissor;
         int depth = 0;
         int portal_id = -1;
+        // THE DEPTH RANGE THIS VIEW IS REALLY A SLICE OF.
+        //
+        // An oblique near plane rewrites the projection's third
+        // row, which is exactly the two entries get_z_near and
+        // get_z_far read back. So a portal view's projection LIES
+        // about its depth range: ask it and you get a number that
+        // depends on where the oblique cut happened to fall
+        // rather than on the camera it was warped from, and when
+        // the cut is behind the eye you get a negative one.
+        //
+        // Clustered lighting slices the depth range with that
+        // number. A bad near put every fragment of the portal
+        // view into one froxel slice, which held the lights for
+        // some other depth or none -- so the view through a
+        // portal came out darker than the room it was showing,
+        // and how much darker depended on the angle.
+        //
+        // Recorded before the cut, and zero means "ask the
+        // projection", which is right for every view that has
+        // not been cut.
+        float z_near = 0.0f;
+        float z_far = 0.0f;
+        float near_of() const {
+            return z_near > 0.0f ? z_near : projection.get_z_near();
+        }
+        float far_of() const {
+            return z_far != 0.0f ? z_far : projection.get_z_far();
+        }
         // A shadow cascade is uploaded through this same struct, and
         // it must not take a froxel grid: it is the light's view, not
         // a view lights are gathered for.

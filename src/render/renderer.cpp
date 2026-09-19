@@ -938,8 +938,8 @@ uint32_t Renderer::upload_view(const View &v) {
     u.inv_view = to_projection(cam);
     u.inv_proj = v.projection.inverse();
     u.eye = Vec4(cam.origin, 1.0f);
-    float zf = v.projection.get_z_far();
-    u.near_far = Vec4(v.projection.get_z_near(), std::isfinite(zf) ? zf : -1.0f,
+    float zf = v.far_of();
+    u.near_far = Vec4(v.near_of(), std::isfinite(zf) ? zf : -1.0f,
                       0.0f, 0.0f);
     u.portal[0] = v.depth;
     u.portal[1] = v.portal_id;
@@ -950,7 +950,7 @@ uint32_t Renderer::upload_view(const View &v) {
     if (v.clustered && settings_.punctual_lights && !lights_.empty() &&
         clustered_views_ < settings_.max_clustered_views) {
         const int base = cluster_view(v, clustered_views_++);
-        const float near = std::max(v.projection.get_z_near(), 1e-3f);
+        const float near = std::max(v.near_of(), 1e-3f);
         const float log_ratio = std::log2(kClusterFar / near);
         u.cluster = Vec4(float(base), 0.0f, float(kClusterZ) / log_ratio,
                          -float(kClusterZ) * std::log2(near) / log_ratio);
@@ -1254,6 +1254,12 @@ void Renderer::render_view(rhi::CommandList *cmd, const View &view,
     // of a portal.
     View v = view;
     if (v.has_clip) {
+        // READ THE DEPTH RANGE OFF THE HONEST MATRIX FIRST. After
+        // the cut the projection cannot be asked -- see View::z_near.
+        if (v.z_near <= 0.0f) {
+            v.z_near = v.projection.get_z_near();
+            v.z_far = v.projection.get_z_far();
+        }
         Transform3D cam = v.camera;
         cam.basis = cam.basis.orthonormalized();
         Plane view_space = v.clip.transformed_orthonormal(cam.inverse_orthonormal());
@@ -1792,7 +1798,7 @@ int Renderer::cluster_view(const View &v, int slot) {
     cam.basis = cam.basis.orthonormalized();
     const Transform3D to_view = cam.inverse_orthonormal();
 
-    const float near = std::max(v.projection.get_z_near(), 1e-3f);
+    const float near = std::max(v.near_of(), 1e-3f);
     const float far = kClusterFar;
 
     // The view-space z at each slice boundary. The shader inverts
@@ -1876,6 +1882,15 @@ int Renderer::cluster_view(const View &v, int slot) {
         }
     }
     stats_.light_assignments += uint32_t(assigned);
+    // WR_TRACE_CLUSTERS=1 prints what each view got, which is the
+    // only way to tell "the portal view is lit differently" from
+    // "the portal view is showing a darker part of the room" --
+    // and the answer, the once it was asked, was the second.
+    if (std::getenv("WR_TRACE_CLUSTERS"))
+        WR_INFO("cluster: slot %d depth %d near %.3f far %.1f -- %zu bins "
+                "from %zu lights",
+                slot, v.depth, double(near), double(far), assigned,
+                lights_.size());
     return base;
 }
 
