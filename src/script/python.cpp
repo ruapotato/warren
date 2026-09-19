@@ -410,6 +410,11 @@ PyObject *py_frame_stats(PyObject *, PyObject *) {
     // False on a frame that had to redraw the punctual shadow
     // atlas, which is the expensive kind.
     d["shadows_reused"] = Variant(s.punctual_shadows_reused);
+    d["light_assignments"] = Variant(int64_t(s.light_assignments));
+    // Froxels that wanted more lights than one can hold. See
+    // RenderStats::cluster_overflows -- non-zero is what
+    // tile-shaped steps in the picture look like from here.
+    d["cluster_overflows"] = Variant(int64_t(s.cluster_overflows));
     return to_python(Variant(d));
 }
 

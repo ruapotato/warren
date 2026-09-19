@@ -69,7 +69,23 @@ constexpr int kClusterX = 16;
 constexpr int kClusterY = 9;
 constexpr int kClusterZ = 24;
 constexpr int kClusterCount = kClusterX * kClusterY * kClusterZ;
-constexpr int kClusterMaxLights = 8;
+// SIXTEEN, AND AN OVERFLOW THAT IS NOT SILENT.
+//
+// It was eight, and a froxel touched by a ninth light simply
+// dropped it. That is invisible in a scene with a handful of
+// lights and unmissable the moment there are more: a froxel is
+// a screen-space tile, its neighbour keeps a different eight,
+// and the difference between them is a hard step down the tile
+// boundary. Grey squares across the picture, a hundred pixels
+// on a side at 1600 wide -- which is exactly 1600/16.
+//
+// Sixteen covers a ceiling grid over a room, which is the
+// ordinary case that broke it. Beyond that see the replacement
+// rule below: an overflow now drops the light that matters
+// least to THAT froxel rather than whichever arrived ninth, so
+// neighbouring tiles keep nearly the same set and the step is
+// small instead of a visible edge.
+constexpr int kClusterMaxLights = 16;
 // The far end of the froxel grid. Beyond it everything lands in the
 // last slice, which is correct but coarse -- and punctual lights that
 // reach further than this are not punctual lights.
@@ -1847,10 +1863,17 @@ int Renderer::cluster_view(const View &v, int slot) {
         v.projection.get_extents_at(slice_z[k], &ex_l[k], &ex_r[k], &ex_b[k],
                                     &ex_t[k]);
 
+    // Every light's centre in this view's space, so the
+    // replacement rule below can measure one without redoing the
+    // transform inside the innermost loop.
+    std::vector<Vec3> vcentre(lights_.size());
+    for (size_t i = 0; i < lights_.size(); i++)
+        vcentre[i] = to_view.xform(lights_[i].position_range.xyz());
+
     size_t assigned = 0;
     for (uint32_t li = 0; li < uint32_t(lights_.size()); li++) {
         const LightGpu &L = lights_[li];
-        const Vec3 centre = to_view.xform(L.position_range.xyz());
+        const Vec3 centre = vcentre[li];
         const float radius = L.position_range.w;
         // View space looks down -Z, so a point in front has z < 0.
         const float dist = -centre.z;
@@ -1900,10 +1923,36 @@ int Renderer::cluster_view(const View &v, int slot) {
                         continue;
 
                     const int c = (z * kClusterY + ty) * kClusterX + tx;
-                    if (counts[c] >= uint32_t(kClusterMaxLights)) continue;
-                    indices[size_t(c) * kClusterMaxLights + counts[c]] = li;
-                    counts[c]++;
-                    assigned++;
+                    uint32_t *slot = indices + size_t(c) * kClusterMaxLights;
+                    if (counts[c] < uint32_t(kClusterMaxLights)) {
+                        slot[counts[c]++] = li;
+                        assigned++;
+                        continue;
+                    }
+                    // FULL. DROP THE ONE THAT MATTERS LEAST HERE.
+                    //
+                    // Dropping whichever light arrived last makes
+                    // the kept set depend on iteration order, so
+                    // two neighbouring froxels keep different
+                    // sets and the boundary between them is a
+                    // visible edge. Keeping the nearest instead
+                    // makes the set a function of the froxel, and
+                    // the one given up is the one contributing
+                    // least -- so the error is small and it
+                    // varies smoothly from tile to tile.
+                    const float mine = froxel.distance_squared_to(centre);
+                    int worst = -1;
+                    float worst_d = mine;
+                    for (int k = 0; k < kClusterMaxLights; k++) {
+                        const float od =
+                            froxel.distance_squared_to(vcentre[slot[k]]);
+                        if (od > worst_d) {
+                            worst_d = od;
+                            worst = k;
+                        }
+                    }
+                    if (worst >= 0) slot[worst] = li;
+                    stats_.cluster_overflows++;
                 }
             }
         }

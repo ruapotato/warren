@@ -266,7 +266,8 @@ def frame_stats() -> dict:
 
     Keys: frame_ms, render_cpu_ms, frame, draws, triangles,
     views, portal_depth, portals_culled, visible_meshes,
-    lights, shadow_draws, punctual_shadow_draws, shadows_reused.
+    lights, shadow_draws, punctual_shadow_draws, shadows_reused,
+    light_assignments, cluster_overflows.
     """
 
 def quit() -> None:

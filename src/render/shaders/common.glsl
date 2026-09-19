@@ -61,7 +61,7 @@ layout(set = SET_FRAME, binding = B_FRAME(0), std140) uniform FrameData {
 // Per froxel. A froxel that more lights than this reach keeps the
 // nearest; the binder sorts by distance so what is dropped is what
 // contributed least.
-#define CLUSTER_MAX_LIGHTS 8
+#define CLUSTER_MAX_LIGHTS 16
 
 #define LIGHT_OMNI 0
 #define LIGHT_SPOT 1

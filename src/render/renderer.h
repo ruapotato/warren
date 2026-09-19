@@ -164,6 +164,12 @@ struct RenderStats {
     uint32_t punctual_shadow_draws = 0;
     bool punctual_shadows_reused = false;
     uint32_t light_assignments = 0; // light-froxel pairs binned
+    // FROXELS THAT WANTED MORE LIGHTS THAN THEY CAN HOLD. Not an
+    // error -- the replacement rule keeps the ones that matter --
+    // but it is the thing to look at when the picture has
+    // tile-shaped steps in it, because that is what a silent
+    // overflow looks like.
+    uint32_t cluster_overflows = 0;
     uint32_t clustered_views = 0;
     // Counts up over the session, not per frame: an environment that
     // rebakes every frame is a bug that costs milliseconds and is
