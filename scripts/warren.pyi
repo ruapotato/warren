@@ -64,7 +64,10 @@ class Color(_Vector):
     def __init__(self, r: float = 0, g: float = 0, b: float = 0,
                  a: float = 1) -> None: ...
 
-class Quat(_Value):
+class _Invertible(_Value):
+    def inverse(self) -> Any: ...
+
+class Quat(_Invertible):
     x: float
     y: float
     z: float
@@ -79,12 +82,12 @@ class Quat(_Value):
     @staticmethod
     def between(from_dir: Vec3, to_dir: Vec3) -> Quat: ...
 
-class Basis(_Value):
+class Basis(_Invertible):
     def __init__(self) -> None: ...
     @staticmethod
     def from_axis_angle(axis: Vec3, angle: float) -> Basis: ...
 
-class Transform3D(_Value):
+class Transform3D(_Invertible):
     origin: Vec3
     basis: Basis
     def __init__(self, origin_or_basis: Any = ..., origin: Vec3 = ...) -> None: ...

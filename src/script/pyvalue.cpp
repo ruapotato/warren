@@ -418,7 +418,24 @@ PyMethodDef k_basis_statics[] = {
      "A rotation of `angle` radians about `axis`."},
     {nullptr, nullptr, 0, nullptr}};
 
+// THE OTHER WAY THROUGH. A transform you cannot invert from a
+// script is half a transform: every "where is that, in this
+// thing's own frame" question is an inverse, and a script that
+// cannot ask it has to be handed the answer by something else.
+PyObject *value_inverse(PyObject *self, PyObject *) {
+    ValueObject *v = (ValueObject *)self;
+    if (v->value.type() == VType::Transform)
+        return to_python(Variant(v->value.to_transform().inverse()));
+    if (v->value.type() == VType::Basis)
+        return to_python(Variant(v->value.to_basis().inverse()));
+    if (v->value.type() == VType::Quat)
+        return to_python(Variant(v->value.to_quat().inverse()));
+    Py_RETURN_NONE;
+}
+
 PyMethodDef k_value_methods[] = {
+    {"inverse", value_inverse, METH_NOARGS,
+     "The inverse of this transform, basis or rotation."},
     {"xform", value_xform, METH_O,
      "A point through this transform or basis."},
     {"xform_dir", value_xform_dir, METH_O,
