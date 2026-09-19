@@ -469,6 +469,13 @@ PyObject *init_module() {
         {"TAB", int(Key::Tab)}, {"RETURN", int(Key::Return)},
         {"UP", int(Key::Up)}, {"DOWN", int(Key::Down)},
         {"LEFT", int(Key::Left)}, {"RIGHT", int(Key::Right)},
+        // F6 UPWARD TOO. The platform layer has had them since
+        // it was written and only F1..F5 were ever exposed, so a
+        // game reaching for F6 got an AttributeError on a name
+        // that plainly ought to exist.
+        {"F6", int(Key::F6)}, {"F7", int(Key::F7)}, {"F8", int(Key::F8)},
+        {"F9", int(Key::F9)}, {"F10", int(Key::F10)},
+        {"F11", int(Key::F11)}, {"F12", int(Key::F12)},
         {"F1", int(Key::F1)}, {"F2", int(Key::F2)}, {"F3", int(Key::F3)},
         {"F4", int(Key::F4)}, {"F5", int(Key::F5)},
         // The number row, which any game with weapon slots needs and

@@ -829,7 +829,8 @@ class _Keys:
     Y: int; Z: int
     NUM1: int; NUM2: int; NUM3: int; NUM4: int; NUM5: int
     NUM6: int; NUM7: int; NUM8: int; NUM9: int; NUM0: int
-    F1: int; F2: int; F3: int; F4: int; F5: int
+    F1: int; F2: int; F3: int; F4: int; F5: int; F6: int
+    F7: int; F8: int; F9: int; F10: int; F11: int; F12: int
     SPACE: int; ESCAPE: int; TAB: int; RETURN: int; BACKSPACE: int
     SHIFT: int; LSHIFT: int; RSHIFT: int
     CTRL: int; LCTRL: int; RCTRL: int; ALT: int
