@@ -210,6 +210,69 @@ int main() {
         check(peak > 0.4f && peak < 1.1f, "and comes back to about the right height");
     }
 
+    // ------------------------------- a crossing survives its own frame
+    //
+    // THE FLAG IS READ ONCE A FRAME AND SET INSIDE A SUB-STEP.
+    //
+    // The physics runs up to four times per frame and `warped` was
+    // cleared at the top of every one of them, so a body that went
+    // through in the first sub-step of two had the flag wiped before
+    // the game could read it. A game tracking which side of an
+    // aperture the thing it is carrying is on then had that wrong
+    // for good: the hand stayed a room away from the barrel, the
+    // spring holding it saturated pulling it back, and the barrel
+    // fired off across the level.
+    //
+    // Between begin_frame and end_frame the flag belongs to the
+    // FRAME. And the count is there for anyone who would rather not
+    // depend on that at all.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        add_floor(w, keep);
+        DynamicsWorld d(&w);
+        d.gravity = Vec3();
+
+        Portal3D a, b;
+        a.width = 2.0f;
+        a.height = 2.0f;
+        a.active = true;
+        a.open = 1.0f;
+        a.set_position(Vec3(0, 1, -4));
+        b.width = 2.0f;
+        b.height = 2.0f;
+        b.active = true;
+        b.open = 1.0f;
+        b.set_position(Vec3(0, 1, 4));
+        b.set_euler(Vec3(3.14159265f, 0, 0));
+        a.link_to(&b);
+        w.add_portal(&a);
+        w.add_portal(&b);
+
+        BodyId id = d.add(Shape::box(Vec3(0.2f, 0.2f, 0.2f)),
+                          Transform3D(Vec3(0, 1, -1)), 4.0f);
+        d.get(id)->linear_velocity = Vec3(0, 0, -5.0f);
+        d.get(id)->linear_damping = 0.0f;
+
+        // Frames of two sub-steps, the way a 30 fps frame drives a
+        // 60 Hz solver -- and the flag read once per frame, after
+        // both, the way a script reads it.
+        bool seen = false;
+        uint32_t count = 0;
+        for (int frame = 0; frame < 200 && !seen; frame++) {
+            d.begin_frame();
+            d.step(d.fixed_step);
+            d.step(d.fixed_step);
+            d.end_frame();
+            seen = d.get(id)->warped;
+            count = d.get(id)->crossings;
+        }
+        check(seen,
+              "a crossing in the first of two sub-steps is still "
+              "reported at the end of the frame");
+        check(count >= 1, "and the crossing count saw it too");
+    }
+
     // -------------------------------------------------- through a portal
     {
         PhysicsWorld w;
@@ -255,6 +318,8 @@ int main() {
         }
         const RigidBody *r = d.get(id);
         check(crossed, "a body driven at an aperture goes through it");
+        check(r->crossings == 1,
+              "and the count that is never cleared says so once");
         check_near(r->scale, 2.0f, 0.01f,
                    "and comes out the far end at the far end's size");
         // SPEED IS KEPT, NOT SCALED, and that is a deliberate

@@ -139,7 +139,20 @@ struct RigidBody {
     float sleep_timer = 0.0f;
     // Set for one step after the body came through an aperture, so a
     // game can cut a camera or play a sound without guessing.
+    // TRUE FOR THE FRAME IT CROSSED IN, NOT THE SUB-STEP.
+    //
+    // This was cleared at the top of every step, and the step
+    // runs up to four times per frame while a script runs once
+    // -- so a body that crossed in the first sub-step of two had
+    // the flag cleared before anything could read it, and the
+    // game never heard about a crossing that happened. See
+    // begin_frame.
     bool warped = false;
+    // AND A COUNT THAT IS NEVER CLEARED, which is the one to
+    // build on: a reader compares it with what it saw last time
+    // and cannot miss a crossing however the steps fall.
+    // CharacterBody3D::portals_traversed is the same idea.
+    uint32_t crossings = 0;
     Transform3D last_warp = Transform3D::identity();
     // WHICH HOLE IT WENT IN AND WHICH IT CAME OUT OF, kept after
     // `warped` has been cleared. A game carrying an object
@@ -219,6 +232,15 @@ public:
     // steps of `fixed_step`, and hands back how much is left over so
     // a game can interpolate.
     void step(float dt);
+    // THE FRAME AROUND THE SUB-STEPS. Per-frame flags -- warped,
+    // and anything else that a script reads once a frame -- are
+    // cleared here rather than in step(), because step() runs
+    // several times inside one frame and clearing there means
+    // the flag only survives if the crossing happened in the
+    // last of them. A caller that steps without bracketing gets
+    // the old behaviour: step() clears on its own.
+    void begin_frame();
+    void end_frame();
     float advance(float real_dt);
 
     Vec3 gravity{0.0f, -9.81f, 0.0f};
@@ -337,6 +359,11 @@ public:
     Stats stats;
 
 private:
+    // See begin_frame: true between begin_frame and end_frame,
+    // which is when step() must NOT clear the per-frame flags.
+    bool in_frame_ = false;
+    void clear_frame_flags();
+
     struct Slot {
         RigidBody body;
         uint32_t generation = 0;

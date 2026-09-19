@@ -224,6 +224,10 @@ bool Engine::step() {
         physics_accumulator_ += dt;
         const float step = tree_->physics_step();
         int steps = 0;
+        // THE FRAME AROUND THE SUB-STEPS, so a flag set in the
+        // first of four survives to be read by a script that runs
+        // once, after all four. See DynamicsWorld::begin_frame.
+        if (physics_) physics_->dynamics().begin_frame();
         while (physics_accumulator_ >= step && steps < 4) {
             // THE SOLVER FIRST, THEN THE NODES. A RigidBody3D reads
             // its transform back out of the solver in its own
@@ -237,6 +241,7 @@ bool Engine::step() {
             steps++;
         }
         if (steps == 4) physics_accumulator_ = 0.0;
+        if (physics_) physics_->dynamics().end_frame();
     } else {
         if (physics_) physics_->dynamics().step(dt);
         tree_->physics_tick(dt);

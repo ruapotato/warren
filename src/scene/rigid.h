@@ -103,8 +103,13 @@ public:
     // whole of the fix, and it has to reach the solver and the
     // query proxy, not just the node's own field.
     void set_layer(int64_t value);
-    // True for one tick after it came through an aperture.
+    // True for the FRAME in which it came through an aperture.
     bool warped() const;
+    // HOW MANY TIMES IT HAS EVER BEEN THROUGH ONE, which is the
+    // one to build on: compare it with what you saw last time
+    // and you cannot miss a crossing however the sub-steps fall.
+    // The same counter CharacterBody3D keeps.
+    int64_t portals_traversed() const;
     // The pair it last went through, kept after `warped` clears.
     // Null until it has been through one.
     Portal3D *warp_from() const;

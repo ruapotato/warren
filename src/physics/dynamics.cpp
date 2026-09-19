@@ -148,14 +148,25 @@ float DynamicsWorld::advance(float real_dt) {
     return accumulator_ / fixed_step;
 }
 
+void DynamicsWorld::begin_frame() {
+    in_frame_ = true;
+    clear_frame_flags();
+}
+
+void DynamicsWorld::end_frame() { in_frame_ = false; }
+
+void DynamicsWorld::clear_frame_flags() {
+    for (Slot &s : slots_)
+        if (s.live) s.body.warped = false;
+}
+
 void DynamicsWorld::step(float dt) {
     stats.manifolds = 0;
     stats.contacts = 0;
     stats.warm_started = 0;
     stats.bodies_awake = 0;
-    for (Slot &s : slots_) {
-        if (s.live) s.body.warped = false;
-    }
+    // Only when nobody is bracketing the frame. See begin_frame.
+    if (!in_frame_) clear_frame_flags();
     integrate_velocities(dt);
     collect_pairs();
     prepare(dt);
@@ -824,6 +835,7 @@ void DynamicsWorld::cross_portals() {
         // object immovable and there is nothing to do with it.
         b.mass = b.mass * ratio * ratio * ratio;
         b.warped = true;
+        b.crossings++;
         b.last_warp = warp;
         b.warp_from = p;
         b.warp_to = p->link();

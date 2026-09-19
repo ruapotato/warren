@@ -153,6 +153,13 @@ bool RigidBody3D::warped() const {
         const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
     return b && b->warped;
 }
+int64_t RigidBody3D::portals_traversed() const {
+    if (!world_) return 0;
+    const RigidBody *b =
+        const_cast<PhysicsWorld *>(world_)->dynamics().get(body_);
+    return b ? int64_t(b->crossings) : 0;
+}
+
 Portal3D *RigidBody3D::warp_from() const {
     if (!world_) return nullptr;
     const RigidBody *b =
@@ -596,6 +603,7 @@ static void register_rigid_classes() {
         .method("align_to", &RigidBody3D::align_to,
                 {Variant(12.0), Variant(3.0)})
         .args("target", "strength", "damping")
+        .method("portals_traversed", &RigidBody3D::portals_traversed)
         .method("warp_from", &RigidBody3D::warp_from)
         .method("warp_to", &RigidBody3D::warp_to);
 
