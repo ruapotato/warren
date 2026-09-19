@@ -1,0 +1,295 @@
+// Warren -- does the liquid behave like a liquid.
+//
+// A particle solver is easy to write and hard to trust. It will
+// produce something that moves and sparkles long before it produces
+// something that holds its volume, and the difference is not
+// visible in a screenshot. So every question here is a number:
+//
+//   does a block of it fall, land and STOP, without exploding and
+//     without sinking through the floor;
+//   does it hold its density -- the one measurement that separates
+//     a liquid from a cloud of sand;
+//   does it stay inside a container;
+//   and does it cross a portal WITHOUT TEARING.
+//
+// The last is the one this engine exists to answer. Warping a
+// particle at the plane is easy and on its own it looks wrong: a
+// particle just short of the hole has neighbours on its own side
+// only, reads as under-dense, and is pushed away from the opening.
+// The stream splits and sprays. The fix is ghost particles -- the
+// liquid on the far side, warped into place so the neighbourhood
+// is continuous -- and the test measures exactly that, by running
+// the same pour with the ghosts suppressed and comparing.
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
+#include "core/log.h"
+#include "physics/fluid.h"
+#include "physics/shapes.h"
+#include "physics/world.h"
+#include "render/mesh.h"
+#include "scene/portal.h"
+
+using namespace wr;
+
+namespace {
+
+int g_fail = 0;
+
+void check(bool ok, const char *what) {
+    std::printf("    %s %s\n", ok ? "ok  " : "FAIL", what);
+    if (!ok) g_fail++;
+}
+
+void check_lt(float got, float limit, const char *what) {
+    const bool ok = got < limit;
+    std::printf("    %s %s (%.4f < %.3f)\n", ok ? "ok  " : "FAIL", what, got,
+                limit);
+    if (!ok) g_fail++;
+}
+
+void check_gt(float got, float limit, const char *what) {
+    const bool ok = got > limit;
+    std::printf("    %s %s (%.4f > %.3f)\n", ok ? "ok  " : "FAIL", what, got,
+                limit);
+    if (!ok) g_fail++;
+}
+
+// An open-topped box out of six slabs, which is what a fluid test
+// needs and what a level is made of.
+void tank(PhysicsWorld &w, std::vector<Ref<Mesh>> &keep, const AABB &inner,
+          float wall = 0.2f, bool lid = false) {
+    const Vec3 c = (inner.min + inner.max) * 0.5f;
+    const Vec3 s = inner.max - inner.min;
+    struct Slab {
+        Vec3 centre, size;
+    };
+    std::vector<Slab> slabs = {
+        {Vec3(c.x, inner.min.y - wall * 0.5f, c.z),
+         Vec3(s.x + wall * 2, wall, s.z + wall * 2)},
+        {Vec3(inner.min.x - wall * 0.5f, c.y, c.z), Vec3(wall, s.y, s.z)},
+        {Vec3(inner.max.x + wall * 0.5f, c.y, c.z), Vec3(wall, s.y, s.z)},
+        {Vec3(c.x, c.y, inner.min.z - wall * 0.5f), Vec3(s.x, s.y, wall)},
+        {Vec3(c.x, c.y, inner.max.z + wall * 0.5f), Vec3(s.x, s.y, wall)},
+    };
+    if (lid)
+        slabs.push_back({Vec3(c.x, inner.max.y + wall * 0.5f, c.z),
+                         Vec3(s.x + wall * 2, wall, s.z + wall * 2)});
+    for (const Slab &sl : slabs) {
+        Ref<Mesh> m = Mesh::box(sl.size);
+        keep.push_back(m);
+        w.add_mesh(*m, Transform3D(sl.centre), 1);
+    }
+}
+
+void run(Fluid &f, float seconds, float dt = 1.0f / 60.0f) {
+    const int n = int(seconds / dt);
+    for (int i = 0; i < n; i++) f.step(dt);
+}
+
+float lowest(const Fluid &f) {
+    float lo = 1e30f;
+    for (const Vec3 &p : f.positions()) lo = std::min(lo, p.y);
+    return lo;
+}
+float highest(const Fluid &f) {
+    float hi = -1e30f;
+    for (const Vec3 &p : f.positions()) hi = std::max(hi, p.y);
+    return hi;
+}
+
+}  // namespace
+
+int main() {
+    log_set_level(LogLevel::Warn);
+    std::printf("fluid\n");
+
+    // ------------------------------------------- it falls and it stops
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        tank(w, keep, AABB(Vec3(-0.5f, 0, -0.5f), Vec3(0.5f, 2.0f, 0.5f)));
+        Fluid f(&w);
+        f.particle_radius = 0.035f;
+        f.material.smoothing_radius = 0.105f;
+        const int n = f.fill(AABB(Vec3(-0.4f, 0.6f, -0.4f), Vec3(0.4f, 1.2f, 0.4f)));
+        check(n > 300, "a block of liquid fills with a useful number of particles");
+        run(f, 3.0f);
+        check(f.count() == size_t(n), "none of it leaked out of the tank");
+        check_gt(lowest(f), -0.05f, "and none of it fell through the floor");
+        // Settled: it should be a puddle in the bottom, not a
+        // column still standing where it started.
+        check_lt(highest(f), 1.0f, "it has settled into the bottom");
+        // THE AVERAGE, NOT THE MAXIMUM. A tank of a thousand
+        // particles always has one at the surface being flicked
+        // about by its neighbours, and a test on the maximum is a
+        // test on that one particle. What "settled" means is that
+        // the body of the liquid is not moving.
+        float total = 0.0f, worst = 0.0f;
+        for (const Vec3 &v : f.velocities()) {
+            total += v.length();
+            worst = std::max(worst, v.length());
+        }
+        const float mean = total / float(std::max<size_t>(1, f.count()));
+        std::printf("      settled: mean speed %.3f, fastest %.3f\n", mean,
+                    worst);
+        // A POSITION-BASED FLUID AT REST SIMMERS, and the number
+        // it simmers at is about one step of gravity -- 0.16 m/s
+        // at 60 Hz. That is not a defect to be tuned out: the
+        // constraint is resolved in POSITION every step, so each
+        // particle falls a little and is caught a little, and the
+        // velocity that comes back out of (x* - x)/dt never
+        // reaches zero. It is three millimetres of motion a frame
+        // and invisible behind a surface.
+        //
+        // Checked against vorticity and viscosity both off: the
+        // number does not move, so it is the method and not a
+        // term that could be turned down.
+        check_lt(mean, 0.35f, "and the body of it has stopped moving");
+        check_lt(worst, 3.2f, "with nothing flying about");
+    }
+
+    // ------------------------------------------------ it holds its volume
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        tank(w, keep, AABB(Vec3(-0.5f, 0, -0.5f), Vec3(0.5f, 2.0f, 0.5f)));
+        Fluid f(&w);
+        f.particle_radius = 0.035f;
+        f.material.smoothing_radius = 0.105f;
+        if (const char *e = getenv("WR_IT")) f.solver_iterations = atoi(e);
+        f.fill(AABB(Vec3(-0.45f, 0.05f, -0.45f), Vec3(0.45f, 0.8f, 0.45f)));
+        if (!getenv("WR_IT")) f.solver_iterations = 16;
+        run(f, 4.0f);
+        // THE MEASUREMENT THAT SEPARATES A LIQUID FROM SAND, and
+        // it is the density and not the height.
+        //
+        // Height was the first thing tried and it is the wrong
+        // question: how tall a settled column is depends on how
+        // the lattice was seeded, and a block laid out on a cubic
+        // grid is not at the packing the kernel calls rest. It
+        // will settle a little however good the solver is, and
+        // measuring that says nothing.
+        std::printf("      interior density %.3f of rest over %u particles, "
+                    "worst compression %.3f\n",
+                    f.stats.interior_density, f.stats.interior_count,
+                    f.stats.worst_compression);
+        check_gt(f.stats.interior_count, 50.0f,
+                 "the settled liquid has an interior to measure");
+        // At sixteen iterations, on a column about twenty
+        // particles deep. See Fluid::solver_iterations -- this
+        // number is a statement about how many iterations were
+        // paid for, not about whether the solver is right.
+        check_lt(std::fabs(f.stats.interior_density - 1.0f), 0.06f,
+                 "and it is at the rest density -- it is not being crushed");
+        check_lt(f.stats.worst_compression, 0.22f,
+                 "and no single particle is badly compressed");
+    }
+
+    // -------------------------------------------------- through a portal
+    //
+    // Two apertures: one in the floor of a raised box, one in the
+    // ceiling of a lower one, so the liquid pours in at the top and
+    // falls out below. The measurement is what happens AT the
+    // mouth.
+    float tear[2] = {0.0f, 0.0f};
+    for (int ghosts = 0; ghosts < 2; ghosts++) {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        // A floor with a hole is not needed: the aperture makes the
+        // slab non-solid where it is.
+        Ref<Mesh> floor = Mesh::box(Vec3(4, 0.2f, 4));
+        keep.push_back(floor);
+        w.add_mesh(*floor, Transform3D(Vec3(0, -0.1f, 0)), 1);
+        Ref<Mesh> low = Mesh::box(Vec3(4, 0.2f, 4));
+        keep.push_back(low);
+        w.add_mesh(*low, Transform3D(Vec3(0, -5.1f, 0)), 1);
+
+        // Facing up out of the floor, and up out of the lower floor.
+        Portal3D in, out;
+        in.width = in.height = 0.9f;
+        in.active = true;
+        in.open = 1.0f;
+        in.set_position(Vec3(0, 0.001f, 0));
+        // +Z is a portal's normal; turn it to face straight up.
+        in.set_euler(Vec3(0.0f, -1.5707963f, 0.0f));
+        out.width = out.height = 0.9f;
+        out.active = true;
+        out.open = 1.0f;
+        out.set_position(Vec3(0, -4.999f, 0));
+        out.set_euler(Vec3(0.0f, -1.5707963f, 0.0f));
+        in.link_to(&out);
+        w.add_portal(&in);
+        w.add_portal(&out);
+
+        Fluid f(&w);
+        f.particle_radius = 0.035f;
+        f.material.smoothing_radius = 0.105f;
+        f.kill_below_y = -20.0f;
+        // Suppressing the ghosts is the control. Pushing the
+        // smoothing radius below the distance at which a ghost is
+        // collected would change the physics too; instead the
+        // portals are simply not registered for the control run,
+        // and the crossing is done by hand.
+        // THE SAME SCENE BOTH WAYS. The portals stay registered
+        // in both runs, so the liquid crosses in both and the only
+        // difference is whether a particle at the mouth can see
+        // the liquid on the other side of it.
+        f.portal_ghosts = ghosts != 0;
+        f.fill(AABB(Vec3(-0.3f, 0.30f, -0.3f), Vec3(0.3f, 0.95f, 0.3f)));
+        const size_t started = f.count();
+
+        // HOW BADLY IT TEARS, measured where the tearing is: the
+        // spread of the stream in the plane of the aperture, a
+        // moment after the front of it has gone through. A
+        // neighbourhood that stops at the hole pushes particles
+        // sideways out of the opening, so the stream fans; one
+        // that sees through does not.
+        float worst = 0.0f, spread = 0.0f;
+        const int n = int(1.2f / (1.0f / 60.0f));
+        for (int i = 0; i < n; i++) {
+            f.step(1.0f / 60.0f);
+            worst = std::max(worst, f.stats.worst_compression);
+            // Particles within a hand's width of the entry plane.
+            float far = 0.0f;
+            int seen = 0;
+            for (const Vec3 &p : f.positions()) {
+                if (std::fabs(p.y) > 0.08f) continue;
+                far += std::sqrt(p.x * p.x + p.z * p.z);
+                seen++;
+            }
+            if (seen > 20) spread = std::max(spread, far / float(seen));
+        }
+        tear[ghosts] = spread;
+        if (ghosts) {
+            std::printf("      with ghosts:    %u crossed, %u ghosts, "
+                        "worst compression %.3f, spread at the mouth %.3f\n",
+                        f.stats.portal_crossings, f.stats.ghosts, worst,
+                        tear[1]);
+            check(f.stats.portal_crossings > 0, "liquid poured through the portal");
+            check(f.stats.ghosts > 0,
+                  "and the far side was visible to it as ghost particles");
+            check(f.count() > started / 2,
+                  "and most of it survived the crossing");
+            // It should be BELOW, having come out of the lower
+            // aperture, not piled on the upper floor.
+            check_lt(lowest(f), -1.0f, "and it came out the other end");
+            // THE CLAIM, MEASURED. Same scene, same crossing, the
+            // only difference being whether the neighbourhood
+            // reaches through the hole.
+            check(tear[1] < tear[0] * 0.9f,
+                  "and the stream is measurably narrower at the mouth "
+                  "than without them -- it does not tear");
+        } else {
+            std::printf("      without ghosts: worst compression %.3f, "
+                        "spread at the mouth %.3f\n",
+                        worst, tear[0]);
+        }
+    }
+
+    std::printf("  %s\n", g_fail ? "FAILED" : "all good");
+    return g_fail ? 1 : 0;
+}
