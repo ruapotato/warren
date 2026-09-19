@@ -414,6 +414,70 @@ int main() {
         check(!past.hit, "and one outside that does not");
     }
 
+    // ------------------- a portal in a wall made of big triangles
+    //
+    // A portal stops the wall being solid where it is cut, and
+    // the dynamics decided that PER TRIANGLE, by the triangle's
+    // centroid. That is wrong the moment a triangle is bigger
+    // than the hole -- and level geometry is made of triangles
+    // far bigger than a hole.
+    //
+    // A wall panel's face is two triangles. One centroid falls
+    // outside the aperture, so half of that panel stays solid,
+    // and a crate thrown at a three-metre opening bounces off
+    // thin air in front of it. The player never saw it: the
+    // character controller filters by the closest point on the
+    // triangle, which is precise, so a body walked through a
+    // hole a crate could not.
+    //
+    // Two triangles, six metres across, one metre of hole.
+    {
+        PhysicsWorld w;
+        std::vector<Ref<Mesh>> keep;
+        add_floor(w, keep);
+        Ref<Mesh> wall = Mesh::box(Vec3(8.0f, 6.0f, 0.4f));
+        keep.push_back(wall);
+        w.add_mesh(*wall, Transform3D(Vec3(0, 3.0f, -4.0f)), 1);
+
+        Portal3D in, out;
+        in.width = 1.6f;
+        in.height = 2.4f;
+        in.active = true;
+        in.open = 1.0f;
+        in.set_position(Vec3(0, 1.2f, -3.78f));
+        out.width = 1.6f;
+        out.height = 2.4f;
+        out.active = true;
+        out.open = 1.0f;
+        out.set_position(Vec3(0, 1.2f, 6.0f));
+        out.set_euler(Vec3(3.14159265f, 0, 0));
+        in.link_to(&out);
+        w.add_portal(&in);
+        w.add_portal(&out);
+
+        DynamicsWorld d(&w);
+        BodyId id = d.add(Shape::box(Vec3(0.3f, 0.3f, 0.3f)),
+                          Transform3D(Vec3(0, 0.35f, 0.0f)), 10.0f);
+        d.get(id)->linear_velocity = Vec3(0, 0, -8.0f);
+        d.get(id)->linear_damping = 0.0f;
+        d.get(id)->friction = 0.0f;
+        bool crossed = false;
+        for (int i = 0; i < 500 && !crossed; i++) {
+            d.step(d.fixed_step);
+            crossed = d.get(id)->warped;
+        }
+        check(crossed, "a crate goes through a hole in a two-triangle wall");
+        // And the wall is still a wall beside the hole.
+        BodyId other = d.add(Shape::box(Vec3(0.3f, 0.3f, 0.3f)),
+                             Transform3D(Vec3(3.0f, 0.35f, 0.0f)), 10.0f);
+        d.get(other)->linear_velocity = Vec3(0, 0, -8.0f);
+        d.get(other)->linear_damping = 0.0f;
+        d.get(other)->friction = 0.0f;
+        for (int i = 0; i < 300; i++) d.step(d.fixed_step);
+        check(d.get(other)->position.z > -4.0f,
+              "and one aimed beside the hole is stopped by the wall");
+    }
+
     std::printf("  %s\n", g_fail ? "FAILED" : "all good");
     return g_fail ? 1 : 0;
 }

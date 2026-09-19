@@ -247,17 +247,35 @@ void DynamicsWorld::collect_pairs() {
         tris.clear();
         world_->query_triangles(swept, a.mask, tris);
         for (const auto &wt : tris) {
-            // A CONTACT INSIDE AN OPEN APERTURE IS NOT A CONTACT.
-            // The level is one mesh with no hole cut in it, so
-            // without this a cube pushed at a portal is stopped by
-            // the wall it can see straight through.
-            const Vec3 centroid = (wt.v[0] + wt.v[1] + wt.v[2]) * (1.0f / 3.0f);
-            const Vec3 tn = cross(wt.v[1] - wt.v[0], wt.v[2] - wt.v[0]);
-            if (world_->inside_aperture(centroid, tn.normalized(),
-                                        -world_->aperture_edge, &sa))
-                continue;
             Manifold m;
             if (!collide_triangle(sa, ta, wt.v, &m, margin)) continue;
+            // A CONTACT INSIDE AN OPEN APERTURE IS NOT A CONTACT.
+            // The level is one mesh with no hole cut in it, so
+            // without this a crate pushed at a portal is stopped
+            // by the wall it can see straight through.
+            //
+            // FILTERED PER CONTACT POINT, NOT PER TRIANGLE. The
+            // first version tested the triangle's centroid, which
+            // is wrong the moment a triangle is bigger than the
+            // hole -- and level geometry is made of triangles far
+            // bigger than a hole. A wall panel's face is TWO
+            // triangles; one centroid falls outside the aperture,
+            // so half of that panel stays solid and an object
+            // thrown at a three-metre opening bounces off thin
+            // air in front of it. The player never saw it because
+            // the character controller filters by the closest
+            // point on the triangle, which is precise.
+            if (!world_->portals().empty()) {
+                int kept = 0;
+                for (int c = 0; c < m.count; c++) {
+                    if (world_->inside_aperture(m.points[c].position, m.normal,
+                                                -world_->aperture_edge, &sa))
+                        continue;
+                    m.points[kept++] = m.points[c];
+                }
+                m.count = kept;
+                if (kept == 0) continue;
+            }
             PairKey key{i, wt.collider.index, wt.index};
             Pair &p = pairs_[key];
             // Carry last step's impulses onto the points that
