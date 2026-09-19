@@ -94,6 +94,15 @@ public:
     // and not two that can disagree. Mass goes as the cube, which
     // is why a big one is hard to shift.
     void set_body_scale(float value);
+    // WHICH LAYER IT IS ON, changed at runtime.
+    //
+    // Picking something up needs it: a carried object is held
+    // directly in front of its carrier, so if the carrier
+    // collides with it the carrier cannot walk forwards. Moving
+    // it to a layer the carrier does not test against is the
+    // whole of the fix, and it has to reach the solver and the
+    // query proxy, not just the node's own field.
+    void set_layer(int64_t value);
     // True for one tick after it came through an aperture.
     bool warped() const;
 

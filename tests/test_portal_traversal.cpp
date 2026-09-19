@@ -309,6 +309,72 @@ void test_too_big_does_not_fit() {
           double(g.body->get_size()));
 }
 
+// THE SECOND HALF OF A SIZE PUZZLE, and the half that is easy to
+// get wrong: having made yourself large, you have to be able to
+// get back.
+//
+// A three-times body entering the three-times end of a pair whose
+// other end is a doorway comes out a doorway's worth of body --
+// which is the trip that turns a giant barrel into a normal one.
+// It only works if the large aperture admits a large body, which
+// is the same rule that refuses a large body a small aperture,
+// read the other way.
+void test_big_body_through_big_hole() {
+    section("a large body fits the large end and comes back normal");
+    Fixture f(3.15f, 1.05f);
+    f.body->set_size(3.0f);
+    // Clear of the wall, and standing on the floor at its new
+    // size.
+    f.body->set_global_position({0, 0.05f, 2.5f});
+    f.walk(Vec3(0, 0, -1), 6.0f, 6.0f);
+    near_check(f.body->get_size(), 1.0f, 0.05f,
+               "three times in, one times out");
+    check(f.body->global_position().x > 150.0f,
+          "and it is at the other end", double(f.body->global_position().x));
+}
+
+// A LEDGE ACROSS THE MIDDLE OF AN OPENING IS NOT A DOORSTEP.
+//
+// A wall-mounted portal must not remove the floor it stands on,
+// or a body walking through drops through the threshold. Saying
+// that as "do not remove upward-facing surfaces" is far too
+// broad: it keeps solid ANY horizontal surface inside the
+// opening at ANY height, so a skirting board, a ledge, or the
+// top edge of a decorative panel part-way up the wall survives
+// as an invisible bar across the hole.
+//
+// Which is exactly what happened: a chamber with a white band
+// round its lower walls had the band's top edge, at 3.1 m,
+// sitting inside a six-metre portal. A body walked up to an
+// aperture it plainly fitted and was stopped by nothing it
+// could see, at a distance that looked like the portal simply
+// not working.
+//
+// Only the bottom of the opening is doorstep. Everything above
+// it is geometry the portal has cut through.
+void test_a_ledge_in_the_opening_is_cut() {
+    section("a ledge inside an aperture does not block it");
+    Fixture f(3.0f, 3.0f);
+    // A shelf sticking out of the wall, at waist height, right
+    // across the middle of the opening. Its top faces up, which
+    // is what used to save it.
+    f.world->add_shape(Shape::box({2.0f, 0.15f, 0.4f}),
+                       Transform3D(Vec3(0, 1.4f, -5.9f)), 1);
+    f.walk(Vec3(0, 0, -1), 5.0f, 5.0f);
+    check(f.body->global_position().x > 150.0f,
+          "the body got through anyway",
+          double(f.body->global_position().x));
+
+    // And the doorstep itself still works: a floor at the very
+    // bottom of the opening stays solid, or a body walking
+    // through drops through the threshold.
+    Fixture g(3.0f, 3.0f);
+    g.walk(Vec3(0, 0, -1), 5.0f, 5.0f);
+    check(g.body->global_position().y > -1.0f,
+          "and one with no ledge does not fall through the doorstep",
+          double(g.body->global_position().y));
+}
+
 void test_equal_pair_does_not_resize() {
     section("an equal pair changes nothing but where you are");
     Fixture f(2.0f, 2.0f);
@@ -404,6 +470,8 @@ int main(int argc, char **argv) {
     test_ray_through_a_portal();
     test_equal_pair_does_not_resize();
     test_too_big_does_not_fit();
+    test_big_body_through_big_hole();
+    test_a_ledge_in_the_opening_is_cut();
     test_size_is_clamped();
     test_mesh_collision();
     std::printf("\n%d checks, %d failed\n", g_checks, g_fail);

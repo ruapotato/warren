@@ -57,6 +57,11 @@ public:
     // except through a floor or a ceiling, where you go through end
     // on and your girth is all that matters.
     bool admits(float radius, float height) const;
+    // A world point in the aperture's own frame: x across, y up
+    // the opening, z out of its face. Callers that need to know
+    // WHERE in the opening something is -- rather than just
+    // whether it is in it -- want this.
+    Vec3 local_point(const Vec3 &world_point) const;
     // How big a body this aperture will take, as the radius of the
     // largest that fits. For a HUD, and for a game that wants to
     // say why it refused.

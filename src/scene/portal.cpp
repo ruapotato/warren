@@ -133,6 +133,10 @@ bool Portal3D::crossed(const Vec3 &from, const Vec3 &to, float *t_out) const {
     return true;
 }
 
+Vec3 Portal3D::local_point(const Vec3 &world_point) const {
+    return global_transform().inverse().xform(world_point);
+}
+
 bool Portal3D::within_aperture(const Vec3 &world_point, float margin) const {
     Transform3D g = global_transform();
     Vec3 local = g.inverse().xform(world_point);

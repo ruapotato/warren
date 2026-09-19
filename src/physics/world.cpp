@@ -234,7 +234,13 @@ bool PhysicsWorld::inside_aperture(const Vec3 &point, const Vec3 &surface_normal
         const bool portal_is_upright =
             std::fabs(dot(p->normal(), Vec3::up())) < aperture_upright;
         const bool surface_is_floor = dot(surface_normal, Vec3::up()) > aperture_upright;
-        if (portal_is_upright && surface_is_floor) continue;
+        if (portal_is_upright && surface_is_floor) {
+            // Only near the bottom of the opening -- that is the
+            // doorstep. See aperture_doorstep.
+            const float up_the_opening =
+                p->local_point(point).y + p->height * 0.5f;
+            if (up_the_opening <= aperture_doorstep) continue;
+        }
         // AND ONLY IF THE ASKER FITS. A hole too small to get
         // through is a wall, and it has to be a wall to the
         // COLLISION as well as to the traversal -- otherwise a body

@@ -195,6 +195,13 @@ bool RigidBody3D::is_kinematic() const {
     return b ? b->kind == BodyKind::Kinematic : kinematic;
 }
 
+void RigidBody3D::set_layer(int64_t value) {
+    layer = value;
+    if (!world_) return;
+    if (RigidBody *b = world_->dynamics().get(body_))
+        b->layer = uint32_t(value);
+}
+
 void RigidBody3D::set_body_scale(float value) {
     if (!world_) return;
     RigidBody *b = world_->dynamics().get(body_);
@@ -546,6 +553,7 @@ static void register_rigid_classes() {
         .method("set_kinematic", &RigidBody3D::set_kinematic).args("on")
         .method("is_kinematic", &RigidBody3D::is_kinematic)
         .method("set_body_scale", &RigidBody3D::set_body_scale).args("value")
+        .method("set_layer", &RigidBody3D::set_layer).args("value")
         .method("warped", &RigidBody3D::warped)
         .method("carry_to", &RigidBody3D::carry_to,
                 {Variant(18.0), Variant(4.0)})

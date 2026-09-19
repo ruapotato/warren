@@ -218,6 +218,22 @@ public:
     // How far from vertical a portal may lean and still count as
     // wall-mounted, and how flat a surface must be to count as floor.
     float aperture_upright = 0.7f;
+    // HOW MUCH OF THE BOTTOM OF AN UPRIGHT APERTURE IS DOORSTEP.
+    //
+    // A wall-mounted portal must not remove the floor it stands
+    // on, or a body walking through drops through the threshold.
+    // But "do not remove upward-facing surfaces" is far too broad
+    // a way to say that: it keeps solid ANY horizontal surface
+    // inside the opening, at any height -- so a ledge, a skirting
+    // board, or the top edge of a decorative panel part-way up
+    // the wall stays put and becomes an invisible bar across the
+    // hole. A body walks up to a portal it plainly fits and is
+    // stopped by nothing it can see.
+    //
+    // The floor is at the BOTTOM of the opening, so only the
+    // bottom of the opening is protected. Anything higher than
+    // this is geometry the portal has cut through and it goes.
+    float aperture_doorstep = 0.3f;
     // How thick a wall a portal can be cut through. A contact within
     // this distance of an aperture's plane AND inside its rectangle is
     // discarded. The default covers any ordinary wall; a thicker one
