@@ -450,6 +450,8 @@ int main() {
                       "one second long, as the sampler's times say");
                 check(c && c->tracks.size() == 1,
                       "with one track, for the one channel");
+
+                (void)0;
             }
         }
         root->queue_free();
@@ -457,6 +459,50 @@ int main() {
         ResourceLoader::forget_all();
         std::filesystem::remove_all(dir, ec);
         ResourceLoader::set_base_directory(".");
+    }
+
+    // --- RE-ASKING FOR THE CLIP ALREADY FADING IN MUST NOT RESTART IT
+    //
+    // A gait does exactly this. It calls play() every frame with
+    // the clip for the current speed, and the speed it passes
+    // drifts while the player is still accelerating -- so the
+    // same clip is requested over and over during the cross-fade
+    // into it. If each request restarts the fade target at phase
+    // zero, the first fraction of a second of the run cycle plays
+    // again and again, which is what "the run animation plays its
+    // beginning twice" turned out to be.
+    //
+    // Two clips, because the bug only shows when a fade is
+    // actually running: asking for the clip that is already the
+    // CURRENT one returns early and never reaches the fade.
+    {
+        auto make = [](const char *name, float duration) {
+            Ref<AnimationClip> c(new AnimationClip());
+            c->name = name;
+            c->duration = duration;
+            return c;
+        };
+        AnimationPlayer *ap = new AnimationPlayer();
+        ap->add_clip(make("walk", 1.0f));
+        ap->add_clip(make("run", 1.0f));
+
+        ap->play("walk", 0.0f, 1.0f);
+        check(ap->playing() == "walk", "it plays what it was asked for");
+
+        ap->play("run", 0.25f, 1.0f);      // a fade into "run" begins
+        check(ap->fading_to() == "run", "and a fade into the next one starts");
+        // Pretend some of the fade has elapsed.
+        ap->advance_fade_for_test(0.12f);
+        const float before = ap->fade_phase();
+        check(before > 0.0f, "the incoming clip has advanced");
+        ap->play("run", 0.25f, 1.35f);     // the same clip, a new speed
+        check(std::fabs(ap->fade_phase() - before) < 1e-4f,
+              "asking again for the clip already fading in leaves its "
+              "phase alone");
+        ap->play("walk", 0.25f, 1.0f);
+        check(ap->fading_to() == "walk",
+              "and a different one still interrupts");
+        delete ap;
     }
 
     std::printf("  %d checks\n%s\n", g_checks, g_fail ? "FAILED" : "ok");

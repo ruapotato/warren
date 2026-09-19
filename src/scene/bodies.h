@@ -91,6 +91,18 @@ public:
     // How many portals this body has been through, and the last ratio.
     int portals_traversed() const { return portals_traversed_; }
     float last_portal_scale() const { return last_scale_; }
+    // THE TRANSFORM THE LAST TRAVERSAL APPLIED.
+    //
+    // A body is not the only thing that goes through a portal. A
+    // third-person camera has its own position, usually smoothed,
+    // and a game that only moves the body leaves the camera on the
+    // far side of the level -- it then slides across to catch up,
+    // which is the opposite of seamless. Anything the game is
+    // carrying alongside the body (the camera, a boom, an aim
+    // direction) has to go through the same warp, and this is it.
+    //
+    // Identity until something has been through one.
+    const Transform3D &last_portal_warp() const { return last_warp_; }
 
     // WHERE THE CAPSULE IS, GIVEN WHERE THE NODE IS.
     //
@@ -125,6 +137,7 @@ private:
     Vec3 floor_normal_{0, 1, 0};
     int portals_traversed_ = 0;
     float last_scale_ = 1.0f;
+    Transform3D last_warp_;
 };
 
 }  // namespace wr

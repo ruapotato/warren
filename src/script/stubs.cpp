@@ -305,6 +305,9 @@ def mouse_pressed(button: int) -> bool:
 def mouse_released(button: int) -> bool:
     """Was a mouse button released this frame?"""
 
+def mouse_wheel() -> float:
+    """How far the wheel turned this frame, in notches."""
+
 def mouse_captured() -> bool:
     """Is the pointer locked to the window?"""
 

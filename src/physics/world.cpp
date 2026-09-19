@@ -623,6 +623,19 @@ static Dict hit_to_dict(const RayHit &h) {
     return d;
 }
 
+Dict PhysicsWorld::crossing_dict(const Vec3 &from, const Vec3 &to) const {
+    Dict d;
+    float t = 0.0f;
+    Portal3D *p = crossing(from, to, &t);
+    Portal3D *q = p ? p->link() : nullptr;
+    d["hit"] = Variant(p != nullptr && q != nullptr);
+    d["t"] = Variant(double(t));
+    d["warp"] = Variant(p && q ? Portal3D::warp(p, q) : Transform3D());
+    d["scale"] = Variant(double(p && q ? Portal3D::scale_ratio(p, q) : 1.0f));
+    d["portal"] = Variant(static_cast<Object *>(p));
+    return d;
+}
+
 Dict PhysicsWorld::trace_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const {
     return hit_to_dict(trace(from, to, uint32_t(mask)));
 }
@@ -652,6 +665,8 @@ int64_t PhysicsWorld::add_capsule(const Transform3D &at, float radius,
 
 static void register_physics_classes() {
     ClassBuilder<PhysicsWorld>()
+        .method("portal_crossing", &PhysicsWorld::crossing_dict)
+                .args("from_point", "to_point")
         .method("trace", &PhysicsWorld::trace_dict,
                 {Variant(int64_t(0xFFFFFFFF))})
         .args("from_point", "to_point", "mask")

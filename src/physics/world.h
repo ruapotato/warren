@@ -198,6 +198,21 @@ public:
     // The same queries, returning a Dictionary: "hit", "position",
     // "normal", "distance", "portals", "node".
     Dict trace_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const;
+    // DOES THIS SEGMENT GO THROUGH A PORTAL, and if so what does
+    // that do to it.
+    //
+    // A body is not the only thing that crosses one. A
+    // third-person camera sits at the end of a boom behind the
+    // player, and when the player walks through a doorway the
+    // boom is what should follow them through it -- the camera
+    // stays on the near side looking through the hole until the
+    // boom's own tail passes the plane, and only then comes out
+    // the other end. Teleporting the camera when the BODY crosses
+    // instead makes a doorway into a cut.
+    //
+    // Returns hit, the fraction along the segment, the warp, and
+    // the scale it carries.
+    Dict crossing_dict(const Vec3 &from, const Vec3 &to) const;
     Dict raycast_dict(const Vec3 &from, const Vec3 &to, int64_t mask) const;
     // Convenience constructors for the common shapes.
     // THE LEVEL, for a script. add_mesh above takes a reference and

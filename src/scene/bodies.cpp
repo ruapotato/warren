@@ -236,6 +236,7 @@ bool CharacterBody3D::cross_portals(PhysicsWorld *world, const Vec3 &before) {
 
     portals_traversed_++;
     last_scale_ = ratio;
+    last_warp_ = warp;
     Array args{Variant(p), Variant(double(ratio))};
     emitv("portal_traversed", args);
     return true;
@@ -271,6 +272,8 @@ static void register_body_classes() {
         .method("eye_height", &CharacterBody3D::eye_height)
         .method("scaled", &CharacterBody3D::scaled).args("value")
         .method("portals_traversed", &CharacterBody3D::portals_traversed)
+        .method("last_portal_scale", &CharacterBody3D::last_portal_scale)
+        .method("last_portal_warp", &CharacterBody3D::last_portal_warp)
         .signal("portal_traversed", {VType::Object, VType::Float});
 }
 WR_REGISTER(register_body_classes)

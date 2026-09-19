@@ -194,6 +194,7 @@ static void register_portal_class() {
         .field("width", &Portal3D::width, "range:0.05,64")
         .field("height", &Portal3D::height, "range:0.05,64")
         .field("active", &Portal3D::active)
+        .field("cull_mask", &Portal3D::cull_mask)
         .field("max_recursion", &Portal3D::max_recursion, "range:0,8")
         .field("edge_colour", &Portal3D::edge_colour)
         .field("edge_width", &Portal3D::edge_width, "range:0,0.5")

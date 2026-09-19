@@ -140,7 +140,19 @@ void AnimationPlayer::on_ready() {
 }
 
 void AnimationPlayer::play(const std::string &name, float fade, float speed) {
-    if (a_ == name && fade_left_ <= 0.0f) {
+    // ASKING FOR WHAT IS ALREADY PLAYING CHANGES ONLY THE SPEED.
+    //
+    // Including while a cross-fade INTO it is still running, which
+    // is the case this used to miss: `a_ == name` was checked but
+    // `b_ == name` was not, so a caller that re-issued the same
+    // clip during the fade -- which a gait does, every frame, as
+    // the speed it is scaled by drifts -- restarted the fade
+    // target at phase zero each time. The result is the first
+    // fifth of a second of a run cycle played over and over for
+    // as long as the player is still accelerating, which reads as
+    // a stutter and was reported as the run animation playing its
+    // beginning twice.
+    if ((a_ == name && fade_left_ <= 0.0f) || b_ == name) {
         speed_ = speed;
         return;
     }
@@ -289,6 +301,9 @@ static void register_animated_classes() {
         .method("acting", &AnimationPlayer::acting)
         .method("has", &AnimationPlayer::has).args("name")
         .method("playing", &AnimationPlayer::playing)
+        .method("fading_to", &AnimationPlayer::fading_to)
+        .method("fade_phase", &AnimationPlayer::fade_phase)
+        .method("fade_left", &AnimationPlayer::fade_left)
         .prop("phase", &AnimationPlayer::phase, &AnimationPlayer::set_phase)
         .prop("clips", &AnimationPlayer::get_clips, &AnimationPlayer::set_clips);
 }

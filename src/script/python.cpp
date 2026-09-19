@@ -226,6 +226,14 @@ PyObject *py_load(PyObject *, PyObject *args) {
     return object_to_python(r.get());
 }
 
+PyObject *py_mouse_wheel(PyObject *, PyObject *) {
+    // How far the wheel turned this frame. Tracked by the input
+    // layer since it was written and never reachable from a
+    // script, which meant a game could not bind the one control
+    // everybody uses for "cycle the thing in my hand".
+    return PyFloat_FromDouble(double(Input::wheel()));
+}
+
 PyObject *py_environment(PyObject *, PyObject *) {
     // One per engine, made on first ask and kept -- a script that
     // holds on to it must keep working, and handing back a fresh
@@ -351,6 +359,8 @@ PyMethodDef k_module_methods[] = {
      "Was a key pressed this frame?"},
     {"key_released", py_key_released, METH_VARARGS,
      "Was a key released this frame?"},
+    {"mouse_wheel", py_mouse_wheel, METH_NOARGS,
+     "How far the wheel turned this frame, in notches."},
     {"mouse_down", py_mouse_down, METH_VARARGS, "Is a mouse button held?"},
     {"mouse_pressed", py_mouse_pressed, METH_VARARGS,
      "Was a mouse button pressed this frame?"},

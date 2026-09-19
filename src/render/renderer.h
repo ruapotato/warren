@@ -196,6 +196,11 @@ private:
         // it must not take a froxel grid: it is the light's view, not
         // a view lights are gathered for.
         bool clustered = true;
+        // What this view is allowed to see. The primary view takes
+        // the camera's mask; a portal view takes the portal's, so
+        // a game can show through a hole what it hides from the
+        // eye.
+        uint32_t cull_mask = 0xFFFFFFFFu;
     };
 
     struct Renderable {
@@ -213,6 +218,13 @@ private:
         // constant, so twenty characters cost one upload and no
         // per-draw binding.
         int bone_base = -1;
+        // WHICH VIEWS MAY DRAW IT. Kept per renderable rather than
+        // filtered away at collection, because a mesh can be
+        // wanted in one view and not another -- a first-person
+        // body is hidden from the eye that is inside its head and
+        // still has to appear through a portal, where seeing
+        // yourself walk up to the other side is the entire point.
+        uint32_t layers = 0xFFFFFFFFu;
     };
 
     // Walks the portal recursion without drawing anything, so the

@@ -323,7 +323,48 @@ PyObject *value_as_tuple(PyObject *self, PyObject *) {
     return t;
 }
 
+// APPLYING A TRANSFORM OR A BASIS TO A POINT, from a script.
+//
+// A script could read a Transform3D's origin and basis and do
+// nothing with either -- there was no way to put a point through
+// one. That matters the moment a game carries anything alongside a
+// body that also has to go through a portal: a third-person
+// camera, a smoothed boom, an aim direction. Without this the
+// camera stays on the far side of the level and slides across to
+// catch up, which is the opposite of what a portal is for.
+//
+// `xform` moves a point (rotation, scale and translation);
+// `xform_dir` turns a direction (no translation), which is what a
+// look vector wants.
+PyObject *value_xform(PyObject *self, PyObject *other) {
+    ValueObject *v = (ValueObject *)self;
+    Variant p;
+    if (!from_python(other, &p)) Py_RETURN_NONE;
+    const Vec3 point = p.to_vec3();
+    if (v->value.type() == VType::Transform)
+        return to_python(Variant(v->value.to_transform().xform(point)));
+    if (v->value.type() == VType::Basis)
+        return to_python(Variant(v->value.to_basis().xform(point)));
+    Py_RETURN_NONE;
+}
+
+PyObject *value_xform_dir(PyObject *self, PyObject *other) {
+    ValueObject *v = (ValueObject *)self;
+    Variant p;
+    if (!from_python(other, &p)) Py_RETURN_NONE;
+    const Vec3 dir = p.to_vec3();
+    if (v->value.type() == VType::Transform)
+        return to_python(Variant(v->value.to_transform().basis.xform(dir)));
+    if (v->value.type() == VType::Basis)
+        return to_python(Variant(v->value.to_basis().xform(dir)));
+    Py_RETURN_NONE;
+}
+
 PyMethodDef k_value_methods[] = {
+    {"xform", value_xform, METH_O,
+     "A point through this transform or basis."},
+    {"xform_dir", value_xform_dir, METH_O,
+     "A direction through it -- rotation and scale, no translation."},
     {"length", value_length, METH_NOARGS, "Its magnitude."},
     {"normalized", value_normalized, METH_NOARGS, "A unit vector in the same direction."},
     {"dot", value_dot, METH_O, "The dot product with another."},

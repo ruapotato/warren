@@ -101,6 +101,18 @@ public:
     const std::string &playing() const { return a_; }
     float phase() const { return phase_a_; }
     void set_phase(float p) { phase_a_ = p; }
+    // WHAT IS COMING IN, while a cross-fade runs. Empty when
+    // none is. A game driving a blend by hand needs to know, and
+    // so does anything checking that asking twice for the same
+    // clip does not restart it.
+    const std::string &fading_to() const { return b_; }
+    float fade_phase() const { return phase_b_; }
+    // How much of the fade is left, in seconds.
+    float fade_left() const { return fade_left_; }
+    // FOR A TEST, and named so nobody mistakes it for anything
+    // else: moves the incoming clip on without needing a
+    // skeleton, a pose and a frame to do it through.
+    void advance_fade_for_test(float dt) { phase_b_ += dt; }
     void set_speed(float s) { speed_ = s; }
 
     void on_ready() override;

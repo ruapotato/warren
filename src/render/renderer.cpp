@@ -1037,7 +1037,10 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
         }
         MeshInstance3D *mi = n->cast_to<MeshInstance3D>();
         if (!mi || !mi->mesh || !mi->visible_in_tree()) continue;
-        if (!(mi->layers() & cull_mask)) continue;
+        // EVERYTHING IS COLLECTED, and the views filter. Dropping
+        // it here would hide it from the portal views too, which
+        // is exactly backwards for a first-person body.
+        (void)cull_mask;
         Mesh *mesh = mi->mesh.get();
         if (!mesh->uploaded() && !mesh->upload(device_, mi->name().c_str())) continue;
 
@@ -1078,6 +1081,7 @@ void Renderer::collect(SceneTree *tree, uint32_t cull_mask) {
             r.tint = mi->tint;
             r.key = r.material->sort_key();
             r.bone_base = bone_base;
+            r.layers = mi->layers();
             renderables_.push_back(r);
         }
     }
@@ -1155,6 +1159,8 @@ void Renderer::draw_geometry(rhi::CommandList *cmd, const View &view,
     items.reserve(renderables_.size());
     Vec3 eye = view.camera.origin;
     for (const Renderable &r : renderables_) {
+        // What this view may see. See Renderable::layers.
+        if (!(r.layers & view.cull_mask)) continue;
         if (r.material->pass != pass) continue;
         if (!visible_in(frustum, r.bounds)) continue;
         items.push_back({&r, distance_sq(r.bounds.center(), eye)});
@@ -1931,6 +1937,11 @@ bool Renderer::portal_child(const View &v, size_t pi, View *out,
     inner.portal_id = -1;
     for (size_t k = 0; k < portals_.size(); k++)
         if (portals_[k] == q) inner.portal_id = int(k);
+    // THE PORTAL DECIDES WHAT IS VISIBLE THROUGH IT, not the eye.
+    // Everything by default; a game that hides its own body from
+    // a first-person camera leaves it in here, and the player
+    // sees themselves walk up to the other side.
+    inner.cull_mask = p->cull_mask;
     *out = inner;
     return true;
 }
@@ -2214,13 +2225,17 @@ void Renderer::render(rhi::CommandList *cmd, SceneTree *tree, Camera3D *camera,
     if (td.width != width_ || td.height != height_)
         if (!create_targets(td.width, td.height)) return;
 
-    collect(tree, camera->cull_mask());
+    collect(tree, 0xFFFFFFFFu);
 
     float aspect = height_ ? float(width_) / float(height_) : 1.0f;
     View root;
     root.camera = camera->global_transform();
     root.projection = camera->projection(aspect);
     root.depth = 0;
+    // The eye sees what the camera is told to see. A portal view
+    // gets its own mask below, so what is hidden from the eye can
+    // still be seen through a hole.
+    root.cull_mask = camera->cull_mask();
 
     // THE CASCADES ARE FITTED BEFORE ANYTHING IS DRAWN, and to every
     // view -- the camera's and every portal view the frame will

@@ -52,6 +52,12 @@ public:
     bool linked() const { return link_ != nullptr; }
 
     bool active = true;
+    // WHAT IS DRAWN THROUGH THIS HOLE. Everything, unless a game
+    // says otherwise. It is separate from the camera's own mask
+    // on purpose: the usual reason to hide something from the eye
+    // is that the eye is inside it, and that is exactly the thing
+    // you want to see from the other side.
+    uint32_t cull_mask = 0xFFFFFFFFu;
     // 0 uses the renderer's global limit.
     int max_recursion = 0;
 
