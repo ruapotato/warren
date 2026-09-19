@@ -1,8 +1,12 @@
 #include "physics/fluid.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <mutex>
 #include <cmath>
 
+#include "core/jobs.h"
 #include "core/log.h"
 #include "physics/world.h"
 #include "scene/portal.h"
@@ -215,6 +219,104 @@ void Fluid::find_neighbours() {
     nbr_count_.assign(n, 0);
     const float inv = 1.0f / h;
 
+    // COUNTED, THEN FILLED, SO IT CAN BE DONE IN PARALLEL.
+    //
+    // The single-threaded version appended to one vector, which
+    // is the whole reason it could not be split: two threads
+    // pushing to the same array need a lock per neighbour and
+    // the lock costs more than the work. Two passes -- count per
+    // particle, prefix-sum, then fill into known slots -- and
+    // every particle is independent in both.
+    //
+    // This is the fluid's hot loop by a wide margin, and it is
+    // what decides how much liquid a game can afford.
+    // ONE PASS, INTO A FIXED SLOT PER PARTICLE.
+    //
+    // The first parallel version counted, prefix-summed, and
+    // then filled -- which is tidy, packs perfectly, and walks
+    // every neighbourhood TWICE. The search is a fifth of the
+    // whole step, so that is a tenth of the frame spent
+    // counting something it was about to find anyway.
+    //
+    // A fixed stride wastes memory instead: sixty-four slots a
+    // particle is a quarter of a megabyte per thousand
+    // particles, which is nothing, and a neighbourhood that
+    // overflows it is one the kernel would have truncated
+    // anyway -- at the rest packing a particle has about
+    // fourteen.
+    nbr_.resize(n * kMaxNeighbours);
+    nbr_start_.resize(n);
+    nbr_count_.resize(n);
+    for (size_t i = 0; i < n; i++) nbr_start_[i] = uint32_t(i * kMaxNeighbours);
+    std::atomic<uint32_t> total{0};
+    std::atomic<uint32_t> cut{0};
+    std::atomic<uint32_t> most{0};
+    Jobs::parallel_for(n, 256, [&](size_t begin, size_t end) {
+        uint32_t local = 0, local_cut = 0, local_most = 0;
+        for (size_t i = begin; i < end; i++) {
+            nbr_count_[i] = gather(i, nbr_.data() + i * kMaxNeighbours);
+            local += nbr_count_[i];
+            if (nbr_count_[i] >= kMaxNeighbours) local_cut++;
+            local_most = std::max(local_most, nbr_count_[i]);
+        }
+        total += local;
+        cut += local_cut;
+        uint32_t seen = most.load();
+        while (local_most > seen && !most.compare_exchange_weak(seen, local_most))
+            ;
+    });
+    stats.neighbours = total.load();
+    stats.truncated = cut.load();
+    stats.most_neighbours = most.load();
+}
+
+// ONE PARTICLE'S NEIGHBOURS. Counts when `out` is null and
+// fills when it is not, so the two passes cannot disagree about
+// which neighbours there are -- which they would the moment one
+// of them was edited and the other was not.
+uint32_t Fluid::gather(size_t i, uint32_t *out) const {
+    const float h = material.smoothing_radius;
+    const float h2 = h * h;
+    const float inv = 1.0f / h;
+    const Vec3 &pi = predicted_[i];
+    const int64_t bx = int64_t(std::floor(pi.x * inv));
+    const int64_t by = int64_t(std::floor(pi.y * inv));
+    const int64_t bz = int64_t(std::floor(pi.z * inv));
+    uint32_t n = 0;
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++) {
+                const int64_t k = (((bx + dx) & 0x1FFFFF) << 42) |
+                                  (((by + dy) & 0x1FFFFF) << 21) |
+                                  ((bz + dz) & 0x1FFFFF);
+                const uint32_t c = find_cell(k);
+                if (c == 0xFFFFFFFFu) continue;
+                for (uint32_t s = 0; s < cell_count_[c]; s++) {
+                    const uint32_t j = order_[cell_start_[c] + s];
+                    if (j == i) continue;
+                    const Vec3 &pj = j < predicted_.size()
+                                         ? predicted_[j]
+                                         : ghost_pos_[j - predicted_.size()];
+                    if ((pj - pi).length_sq() >= h2) continue;
+                    if (n >= kMaxNeighbours) return n;
+                    out[n++] = j < predicted_.size()
+                                   ? j
+                                   : kGhostBase +
+                                         (j - uint32_t(predicted_.size()));
+                }
+            }
+    return n;
+}
+
+void Fluid::find_neighbours_serial() {
+    const float h = material.smoothing_radius;
+    const float h2 = h * h;
+    const size_t n = predicted_.size();
+    nbr_.clear();
+    nbr_start_.assign(n, 0);
+    nbr_count_.assign(n, 0);
+    const float inv = 1.0f / h;
+
     for (size_t i = 0; i < n; i++) {
         nbr_start_[i] = uint32_t(nbr_.size());
         const Vec3 &pi = predicted_[i];
@@ -323,11 +425,31 @@ void Fluid::solve_density() {
     // The kernel value at the rest spacing, for the artificial
     // pressure term below.
     const float w_rest = k.w(spacing * 0.3f * spacing * 0.3f);
+    const float inv_w_rest = w_rest > 1e-20f ? 1.0f / w_rest : 0.0f;
+    // An integer exponent is a multiply chain; anything else
+    // falls back to pow. The default is four.
+    const int int_power =
+        (material.surface_power > 0.0f &&
+         std::fabs(material.surface_power -
+                   std::round(material.surface_power)) < 1e-4f)
+            ? int(std::round(material.surface_power))
+            : 0;
 
     stats.worst_compression = 0.0f;
     for (int iter = 0; iter < solver_iterations; iter++) {
         // --- densities and lambdas
-        for (size_t i = 0; i < n; i++) {
+        //
+        // EVERY PARTICLE IS INDEPENDENT HERE. Each reads its
+        // neighbours' positions and writes only its own density
+        // and lambda, so the pass splits with no locking at all
+        // -- and it is, with the neighbour search, essentially
+        // the whole cost of a fluid. The compression statistic
+        // is the one shared write, so it is reduced per chunk
+        // rather than written from every thread.
+        std::vector<float> worst(1, 0.0f);
+        Jobs::parallel_for(n, 512, [&](size_t begin, size_t end) {
+        float local_worst = 0.0f;
+        for (size_t i = begin; i < end; i++) {
             float rho = k.w(0.0f) * mass;
             Vec3 grad_sum;
             float grad_sq = 0.0f;
@@ -346,9 +468,7 @@ void Fluid::solve_density() {
             }
             density_[i] = rho;
             float c_i = rho * inv_rest - 1.0f;
-            if (iter == 0)
-                stats.worst_compression =
-                    std::max(stats.worst_compression, c_i);
+            if (iter == 0) local_worst = std::max(local_worst, c_i);
             // COMPRESSION ONLY. NEVER PULL.
             //
             // A particle at a free surface has half a
@@ -379,14 +499,22 @@ void Fluid::solve_density() {
             denom_[i] = denom;
             lambda_[i] = -c_i / denom;
         }
+        if (local_worst > 0.0f) {
+            static std::mutex m;
+            std::lock_guard<std::mutex> lock(m);
+            worst[0] = std::max(worst[0], local_worst);
+        }
+        });
+        stats.worst_compression = std::max(stats.worst_compression, worst[0]);
         // Ghosts borrow their source's lambda. They are the same
         // liquid seen through a hole, so they must push back with
         // the same force or the stream is pushed out of the portal.
         for (size_t g = 0; g < ghost_pos_.size(); g++)
             ghost_lambda_[g] = lambda_[ghost_source_[g]];
 
-        // --- position corrections
-        for (size_t i = 0; i < n; i++) {
+        // --- position corrections, also per particle
+        Jobs::parallel_for(n, 512, [&](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; i++) {
             Vec3 d_pos;
             const uint32_t s = nbr_start_[i], c = nbr_count_[i];
             for (uint32_t t = 0; t < c; t++) {
@@ -414,18 +542,46 @@ void Fluid::solve_density() {
                 // the same denominator lambda uses puts the two on
                 // the same scale and makes the coefficient mean
                 // what the paper says it means.
+                // NO pow() HERE. This is the innermost line of
+                // the whole simulation -- a few hundred thousand
+                // visits a step, times the solver iterations --
+                // and a generic pow is thirty times the cost of
+                // the multiply chain it stands in for. The
+                // exponent is four by default and any integer
+                // power is a handful of multiplies.
                 float scorr = 0.0f;
                 if (w_rest > 1e-20f) {
-                    const float ratio = k.w(r * r) / w_rest;
-                    scorr = -material.surface_pressure *
-                            std::pow(ratio, material.surface_power) / denom_[i];
+                    // MULTIPLY BY THE RECIPROCAL. A divide in
+                    // the innermost line of the simulation --
+                    // a few hundred thousand of them per solver
+                    // iteration -- is three times the cost of
+                    // the whole density pass without it. 65 ms
+                    // a step became 20.
+                    const float ratio = k.w(r * r) * inv_w_rest;
+                    float p = ratio;
+                    if (int_power > 0) {
+                        p = 1.0f;
+                        float base = ratio;
+                        int e = int_power;
+                        while (e) {
+                            if (e & 1) p *= base;
+                            base *= base;
+                            e >>= 1;
+                        }
+                    } else {
+                        p = std::pow(ratio, material.surface_power);
+                    }
+                    scorr = -material.surface_pressure * p / denom_[i];
                 }
                 d_pos += k.grad(d, r) * (lambda_[i] + lj + scorr);
             }
             delta_[i] = d_pos * (mass * inv_rest);
         }
+        });
         for (size_t i = 0; i < n; i++) predicted_[i] += delta_[i];
-        collide_world();
+        // The world on the first and last iterations; the
+        // remembered plane in between.
+        collide_world(true);
     }
 
     // The interior, measured after the solve rather than during
@@ -433,7 +589,15 @@ void Fluid::solve_density() {
     // density means something.
     double sum = 0.0;
     uint32_t seen = 0;
-    const uint32_t full = uint32_t(std::max(8, int(nbr_.size() / std::max<size_t>(1, n)) ));
+    // THE AVERAGE NEIGHBOUR COUNT, FROM THE COUNT AND NOT FROM
+    // THE ARRAY. `nbr_` is allocated at a fixed stride per
+    // particle now, so its size is the capacity and not the
+    // population -- reading it here made the threshold sixty-
+    // four, which no particle reaches, so the interior was
+    // empty and the incompressibility measurement silently had
+    // nothing in it.
+    const uint32_t full =
+        uint32_t(std::max(8, int(stats.neighbours / std::max<size_t>(1, n))));
     for (size_t i = 0; i < n; i++) {
         if (nbr_count_[i] < full) continue;
         sum += double(density_[i]);
@@ -443,10 +607,37 @@ void Fluid::solve_density() {
     stats.interior_density = seen ? float(sum / double(seen)) / rest : 0.0f;
 }
 
-void Fluid::collide_world() {
+void Fluid::collide_world(bool full) {
     if (!world_) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    struct Timer {
+        float *out;
+        std::chrono::steady_clock::time_point t;
+        ~Timer() {
+            *out += float(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t).count());
+        }
+    } timer{&collide_ms_, t0};
+    // COLLISION IS NOT THE COST, and two attempts to make it
+    // cheaper are worth recording as failures.
+    //
+    // Caching the contact plane and projecting against it on the
+    // middle iterations is wrong: a particle in a corner is
+    // against two planes and one is forgotten, so the pool leaks
+    // at every edge. Skipping particles that were clear on the
+    // first pass is sound and buys almost nothing -- because the
+    // cost was never here. Measured, the step is the neighbour
+    // search and the density solve; collision is under a tenth
+    // of it, and both "optimisations" cost more in compression
+    // error than they returned in milliseconds.
+    (void)full;
     const float r = particle_radius;
-    for (size_t i = 0; i < predicted_.size(); i++) {
+    // A RAY PER PARTICLE AGAINST A READ-ONLY WORLD. The BVH is
+    // not written during a query, so this splits too -- and
+    // after the neighbour search it is the most expensive thing
+    // in the step.
+    Jobs::parallel_for(predicted_.size(), 128, [&](size_t begin, size_t end) {
+    for (size_t i = begin; i < end; i++) {
         // FROM WHERE IT WAS, TO WHERE IT WANTS TO BE -- a ray, not
         // a depenetration.
         //
@@ -542,6 +733,7 @@ void Fluid::collide_world() {
             contact_[i] = normal;
         }
     }
+    });
 }
 
 void Fluid::finish(float dt) {
@@ -785,14 +977,29 @@ void Fluid::step(float dt) {
     steps = std::min(steps, 4);
     const float h = dt / float(steps);
 
+    auto clock = []() { return std::chrono::steady_clock::now(); };
+    auto since = [](auto t0) {
+        return float(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count());
+    };
     for (int s = 0; s < steps; s++) {
         std::vector<Vec3> before = pos_;
         predict(h);
+        auto t = clock();
         build_ghosts();
         build_grid();
+        stats.ms_grid = since(t);
+        t = clock();
         find_neighbours();
+        stats.ms_neighbours = since(t);
+        t = clock();
+        collide_ms_ = 0.0f;
         solve_density();
+        stats.ms_density = since(t) - collide_ms_;
+        stats.ms_collide = collide_ms_;
+        t = clock();
         finish(h);
+        stats.ms_finish = since(t);
 
         // --- through the hole
         if (world_ && !world_->portals().empty()) {

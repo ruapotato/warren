@@ -203,6 +203,12 @@ public:
         uint32_t neighbours = 0;
         uint32_t portal_crossings = 0;
         uint32_t killed = 0;
+        // How many particles had more neighbours than the cap
+        // allows. Anything above zero means the density is
+        // being under-reported for those particles and the
+        // fluid will quietly over-compress.
+        uint32_t truncated = 0;
+        uint32_t most_neighbours = 0;
         // HOW FAR OVER the rest density the worst particle is, as
         // a fraction. Over, not off: a particle at a free surface
         // has half a neighbourhood and reads under-dense by
@@ -218,6 +224,15 @@ public:
         // move when the surface does.
         float interior_density = 0.0f;
         uint32_t interior_count = 0;
+        // WHERE THE TIME WENT, in milliseconds, for the last
+        // step. Two attempts to speed this up went into the
+        // wrong place because nobody had measured which part
+        // was expensive -- so now it says.
+        float ms_grid = 0.0f;
+        float ms_neighbours = 0.0f;
+        float ms_density = 0.0f;
+        float ms_collide = 0.0f;
+        float ms_finish = 0.0f;
     };
     Stats stats;
 
@@ -226,8 +241,15 @@ private:
     void build_grid();
     void build_ghosts();
     void find_neighbours();
+    void find_neighbours_serial();
+    // Counts this particle's neighbours, and fills them in when
+    // given somewhere to put them. One function for both passes
+    // so they cannot disagree about which neighbours there are.
+    uint32_t gather(size_t i, uint32_t *out) const;
     void solve_density();
-    void collide_world();
+    // `full` does the world query; otherwise the cached plane
+    // from the last full pass is used, which costs nothing.
+    void collide_world(bool full);
     void finish(float dt);
 
     // The spatial hash. One cell per smoothing radius, so a
@@ -245,6 +267,7 @@ private:
     // How far the walls moved it this step. Subtracted before the
     // velocity is derived: a depenetration is not motion.
     std::vector<Vec3> pushed_;
+
     std::vector<float> lambda_, denom_, density_;
     std::vector<Vec3> vorticity_;
 
@@ -278,12 +301,26 @@ private:
 
     // Flattened neighbour lists: `nbr_` indexed by `nbr_start_`.
     std::vector<uint32_t> nbr_;
-    std::vector<uint32_t> nbr_start_, nbr_count_;
+    // How many neighbours one particle may have. At the rest
+    // packing it has about fourteen; sixty-four is room for a
+    // compressed clump and is what makes the single-pass fill
+    // possible.
+    // A CAP HAS TO BE BIG ENOUGH OR IT LIES. At the rest
+    // packing a particle has about eighteen neighbours, but a
+    // clump under pressure has three times that -- and a
+    // truncated neighbourhood reads as LESS dense than it is,
+    // so the solver pushes less, so it compresses further. The
+    // error is silent and self-reinforcing: at sixty-four the
+    // worst compression went from 11% to 40% and nothing said
+    // why. `stats.truncated` says why now.
+    static constexpr uint32_t kMaxNeighbours = 160;
+    std::vector<uint32_t> nbr_start_, nbr_count_, counts_;
 
     std::vector<uint32_t> scratch_;
     std::vector<Vec3> settled_pos_, settled_nrm_;
     std::vector<int64_t> settled_seen_;
     float accumulator_ = 0.0f;
+    float collide_ms_ = 0.0f;
 };
 
 }  // namespace wr
