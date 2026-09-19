@@ -60,6 +60,56 @@ private:
     bool dirty_ = true;
 };
 
+// SOMETHING HUNG OFF A BONE.
+//
+// A rig's bones are Node3Ds in the tree, and the obvious thing to do
+// with a prop is to parent it to one. That does not work and the
+// reason is not obvious: the AnimationPlayer poses the SKELETON --
+// the palette the skinning shader reads -- and never touches those
+// nodes, so a mesh parented to `hand_r` sits wherever the rest pose
+// put it and never moves again. The body animates, the thing in its
+// hand does not, and nothing says so.
+//
+// Which is a hole in the engine rather than a detail of one game: a
+// gun, a torch, a hat, a camera on a head, a socket for anything at
+// all -- every one of them is this. So it is a node, and it does
+// what the name says: each frame it puts itself where the named bone
+// is, times whatever offset it was given.
+//
+// THE OFFSET IS IN THE BONE'S OWN FRAME, which is the frame a rig
+// author thinks in ("a hand's width along the palm") and not the
+// frame the world thinks in. `discover` fills it in from where the
+// node currently IS, which is how a game tunes one: put the prop
+// where it looks right, call discover once, and the number is the
+// answer rather than a guess.
+class BoneAttachment3D : public Node3D {
+    WR_CLASS(BoneAttachment3D, Node3D)
+
+public:
+    // Which bone, by name. Empty follows nothing.
+    std::string bone;
+    // Where, in the bone's frame.
+    Transform3D offset = Transform3D::identity();
+    // The body to follow. Found by searching upward and then the
+    // whole tree from the parent, so the ordinary case -- a child of
+    // the node the glTF produced -- needs no wiring at all.
+    void set_target(Skinned3D *s) { target_ = s; }
+    Skinned3D *target() const { return target_; }
+
+    // TAKE THE OFFSET FROM WHERE IT IS NOW. Place the node where it
+    // should sit, call this, and the offset is whatever makes that
+    // true. Returns false if there is no body or no such bone.
+    bool discover();
+
+    void on_ready() override;
+    void on_process(float dt) override;
+
+private:
+    Skinned3D *find_body();
+    Skinned3D *target_ = nullptr;
+    int index_ = -1;
+};
+
 // WHAT IS PLAYING, AND WHAT IT IS FADING INTO.
 //
 // Two slots, not a graph. A blend tree is the right answer for a game

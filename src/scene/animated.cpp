@@ -70,6 +70,61 @@ void Skinned3D::on_process(float) {
     dirty_ = true;
 }
 
+// ------------------------------------------------------ BoneAttachment3D
+
+namespace {
+// The nearest Skinned3D at or under a node, breadth first.
+Skinned3D *skinned_under(Node *n) {
+    if (!n) return nullptr;
+    if (Skinned3D *s = dynamic_cast<Skinned3D *>(n)) return s;
+    for (const Ref<Node> &c : n->children())
+        if (Skinned3D *s = skinned_under(c.get())) return s;
+    return nullptr;
+}
+}  // namespace
+
+Skinned3D *BoneAttachment3D::find_body() {
+    // Upward first: the usual arrangement is a child of the node the
+    // importer made, with the skinned mesh a sibling or an uncle.
+    for (Node *p = parent(); p; p = p->parent())
+        if (Skinned3D *s = skinned_under(p)) return s;
+    return nullptr;
+}
+
+void BoneAttachment3D::on_ready() {
+    if (!target_) target_ = find_body();
+    index_ = (target_ && !bone.empty()) ? target_->find_bone(bone) : -1;
+    if (target_ && index_ < 0 && !bone.empty())
+        WR_WARN("%s: no bone '%s' on %s", name().c_str(), bone.c_str(),
+                target_->name().c_str());
+}
+
+bool BoneAttachment3D::discover() {
+    if (!target_) target_ = find_body();
+    if (!target_) return false;
+    if (index_ < 0 && !bone.empty()) index_ = target_->find_bone(bone);
+    if (index_ < 0) return false;
+    // Whatever makes the node's CURRENT place true: bone * offset =
+    // here, so offset = bone^-1 * here.
+    offset = target_->bone_global(index_).inverse() * global_transform();
+    return true;
+}
+
+void BoneAttachment3D::on_process(float) {
+    if (!target_) {
+        target_ = find_body();
+        index_ = (target_ && !bone.empty()) ? target_->find_bone(bone) : -1;
+    }
+    if (!target_ || index_ < 0) return;
+    // AFTER THE BODY HAS RESOLVED, or one frame behind it. Both the
+    // pose and this run in on_process, and the tree walks parents
+    // before children -- so an attachment under the figure sees the
+    // pose from this frame. One that is not is a frame late, which
+    // at sixty frames a second is sixteen milliseconds of a gun
+    // lagging a wrist and nobody has ever seen it.
+    set_global_transform(target_->bone_global(index_) * offset);
+}
+
 // -------------------------------------------------------- AnimationPlayer
 
 void AnimationPlayer::add_clip(const Ref<AnimationClip> &clip) {
@@ -285,6 +340,13 @@ void AnimationPlayer::on_process(float dt) {
 // ------------------------------------------------------------ reflection
 
 static void register_animated_classes() {
+    ClassBuilder<BoneAttachment3D>()
+        .field("bone", &BoneAttachment3D::bone)
+        .field("offset", &BoneAttachment3D::offset)
+        .method("discover", &BoneAttachment3D::discover)
+        .method("set_target", &BoneAttachment3D::set_target).args("body")
+        .method("get_target", &BoneAttachment3D::target);
+
     ClassBuilder<Skinned3D>()
         .prop("skeleton", &Skinned3D::get_skeleton, &Skinned3D::set_skeleton_ptr)
         .method("find_bone", &Skinned3D::find_bone).args("name")
