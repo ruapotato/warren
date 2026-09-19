@@ -404,6 +404,8 @@ private:
     int64_t stage(const void *data, uint64_t size, uint64_t alignment);
     // Record one staged copy straight into the open command buffer.
     void record_copy(VkCommandBuffer cb, uint64_t src_offset, const Pending &p);
+    // An upload too big for the ring, through a buffer of its own.
+    bool stage_oversize(VkCommandBuffer cb, const Pending &p);
     std::vector<Pending> pending_uploads_;
     // Textures whose chain has to be filled in once their level
     // zero has actually been copied, which on this backend is not
@@ -1140,9 +1142,18 @@ void VkDeviceImpl::write_buffer(BufferH h, const void *data, uint64_t size,
             record_copy(frames_[frame_index_].cb, uint64_t(at), p);
             return;
         }
-        WR_WARN("vk: staging ring full mid-frame; deferring an upload of %llu "
-                "bytes to the next frame",
-                (unsigned long long)size);
+        // ONCE. It is an expected, handled condition -- the copy
+        // goes out next frame -- and a game that builds meshes
+        // while it runs hits it several times a second. Printed
+        // every time it buried everything else in the log, which
+        // is how a warning stops being read at all.
+        static bool said = false;
+        if (!said) {
+            said = true;
+            WR_WARN("vk: staging ring full mid-frame; deferring an upload of "
+                    "%llu bytes to the next frame (said once)",
+                    (unsigned long long)size);
+        }
     }
     pending_uploads_.push_back(std::move(p));
 }
@@ -1919,6 +1930,35 @@ int64_t VkDeviceImpl::stage(const void *data, uint64_t size, uint64_t alignment)
     return int64_t(at);
 }
 
+bool VkDeviceImpl::stage_oversize(VkCommandBuffer cb, const Pending &p) {
+    // One buffer, this upload's size, used once.
+    BufferDesc sd;
+    sd.size = p.bytes.size();
+    sd.usage = BufferUsage::TransferSrc;
+    sd.access = MemoryAccess::CpuToGpu;
+    sd.name = "oversize staging";
+    BufferH h = create_buffer(sd, nullptr);
+    VkBufferRes *sb = buffers.get(h);
+    if (!sb || !sb->memory.mapped) {
+        if (sb) destroy(h);
+        return false;
+    }
+    std::memcpy(sb->memory.mapped, p.bytes.data(), p.bytes.size());
+
+    // The same copy record, against this buffer rather than the
+    // ring. Swapped in around the call rather than duplicated,
+    // because two copies of the buffer-vs-texture branch is two
+    // places for the next format to be forgotten.
+    Frame &f = frames_[frame_index_];
+    const BufferH ring = f.staging;
+    f.staging = h;
+    record_copy(cb, 0, p);
+    f.staging = ring;
+
+    destroy(h);
+    return true;
+}
+
 void VkDeviceImpl::record_copy(VkCommandBuffer cb, uint64_t src_offset,
                                const Pending &p) {
     Frame &f = frames_[frame_index_];
@@ -1988,16 +2028,35 @@ void VkDeviceImpl::flush_uploads(VkCommandBuffer cb) {
             deferred.push_back(std::move(p));
             continue;
         }
+        if (p.bytes.size() > ring_size) {
+            // BIGGER THAN THE WHOLE RING, so waiting will never
+            // help -- and this used to be where such an upload was
+            // dropped with an error.
+            //
+            // Dropping it is not a defensible answer. The ring is
+            // eight megabytes because that is a good size for the
+            // steady state, and a single mesh or a single 4K
+            // texture is allowed to be larger than the steady
+            // state; an engine that silently refuses to upload one
+            // has a size limit on its content that nothing
+            // documents and nothing reports at the point the
+            // content is authored.
+            //
+            // So it gets a staging buffer of its own, used once
+            // and destroyed. It is a real allocation on a frame
+            // that was already loading something enormous, which
+            // is the one frame that can afford it, and it is
+            // deferred-destroyed like everything else so the copy
+            // has landed before the memory goes.
+            if (!stage_oversize(cb, p)) {
+                WR_ERROR("vk: an upload of %zu bytes could not be staged",
+                         p.bytes.size());
+            }
+            continue;
+        }
         int64_t at = stage(p.bytes.data(), p.bytes.size(),
                            p.dst_texture.valid() ? 256 : 16);
         if (at < 0) {
-            if (p.bytes.size() > ring_size) {
-                // Bigger than the whole ring: waiting will not help.
-                WR_ERROR("vk: an upload of %zu bytes exceeds the %llu byte "
-                         "staging ring and was dropped",
-                         p.bytes.size(), (unsigned long long)ring_size);
-                continue;
-            }
             deferred.push_back(std::move(p));
             continue;
         }

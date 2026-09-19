@@ -19,6 +19,15 @@
 //
 // Every texture here is a SOLID colour, so every mip of it must be
 // that same colour. Anything else is the bug.
+//
+// AND THE SECOND CASE: one upload larger than the whole ring.
+// Deferring cannot help that -- the next frame's ring is the same
+// size -- and for a long time it was dropped with an error, which
+// puts an undocumented size limit on a single mesh or a single 4K
+// texture. It gets a staging buffer of its own now. The test is a
+// texture of sixteen megabytes against an eight megabyte ring, read
+// back and checked, because the failure it replaces was silent
+// everywhere except one line in a log.
 #include <SDL2/SDL.h>
 
 #include <array>
@@ -58,7 +67,14 @@ struct Result {
     int checked = 0;
     uint8_t worst[4] = {0, 0, 0, 0};
     uint8_t wanted[4] = {0, 0, 0, 0};
+    bool big_done = false;      // the oversize upload landed
+    bool big_right = false;     // and it landed with the right bytes
 };
+
+// Sixteen megabytes in one upload, against an eight megabyte ring.
+// No number of frames makes that fit, because every frame's ring is
+// the same size.
+constexpr uint32_t kBigSide = 2048;
 
 Result run(Backend backend, bool validation) {
     Result out;
@@ -147,6 +163,43 @@ Result run(Backend backend, bool validation) {
         if (same) out.clean++;
     }
 
+    // ---------------------------------------------- one enormous one
+    {
+        TextureDesc td;
+        td.width = td.height = kBigSide;
+        td.format = Format::RGBA8;
+        td.usage = TextureUsage::Sampled | TextureUsage::TransferSrc |
+                   TextureUsage::TransferDst;
+        td.mips = 1;                       // level zero only, for clarity
+        td.name = "oversize";
+        TextureH big = dev->create_texture(td);
+        if (big.valid()) {
+            // A PATTERN, NOT A CONSTANT. A copy that lands at the
+            // wrong offset, or lands half way, reads back correct
+            // everywhere if every byte is the same value.
+            const size_t bytes = size_t(kBigSide) * kBigSide * 4;
+            std::vector<uint8_t> src(bytes);
+            for (size_t i = 0; i < bytes; i += 4) {
+                const size_t px = i / 4;
+                src[i + 0] = uint8_t(px & 0xff);
+                src[i + 1] = uint8_t((px >> 8) & 0xff);
+                src[i + 2] = uint8_t((px >> 16) & 0xff);
+                src[i + 3] = 255;
+            }
+            dev->write_texture(big, src.data(), src.size());
+            for (int f = 0; f < 6; f++) {
+                if (dev->begin_frame()) dev->end_frame();
+            }
+            dev->wait_idle();
+
+            std::vector<uint8_t> back(bytes, 0);
+            const size_t got = dev->read_texture(big, back.data(), back.size(), 0);
+            out.big_done = got == bytes;
+            out.big_right = out.big_done && back == src;
+            dev->destroy(big);
+        }
+    }
+
     for (TextureH h : textures) dev->destroy(h);
     destroy_device(dev);
     return out;
@@ -193,6 +246,15 @@ int main(int argc, char **argv) {
                       runs[r].worst[0], runs[r].worst[1], runs[r].worst[2],
                       runs[r].wanted[0], runs[r].wanted[1], runs[r].wanted[2]);
         check(runs[r].clean == runs[r].checked && runs[r].checked > 0, what);
+        std::snprintf(what, sizeof(what),
+                      "[%s] a %u-megabyte upload landed at all "
+                      "(ring is 8 MB)",
+                      names[r],
+                      unsigned(size_t(kBigSide) * kBigSide * 4 / (1024 * 1024)));
+        check(runs[r].big_done, what);
+        std::snprintf(what, sizeof(what),
+                      "[%s] and landed byte for byte", names[r]);
+        check(runs[r].big_right, what);
     }
 
     SDL_Quit();
