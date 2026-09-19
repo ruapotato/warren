@@ -397,14 +397,23 @@ int main() {
         }
         std::printf("      whole box %.1f ms, occupied chunks only %.1f ms\n",
                     dense, sparse);
-        // A THIRD OFF, ON THE WORST CASE FOR IT. This stream has
-        // splashed over half a second, so it genuinely occupies
-        // two thirds of the chunks its bounding box contains --
-        // the skip cannot do better than that and should not
-        // claim to. A puddle in the corner of a room, which is
-        // the common case, saves far more.
-        check(sparse < dense * 0.8,
-              "and skipping the empty chunks is measurably cheaper");
+        // ASSERT THE WORK, REPORT THE TIME.
+        //
+        // What the optimisation does is skip chunks, and how
+        // many it skips is countable and identical on every
+        // machine. The time it saves is proportional to that and
+        // is also proportional to what else the machine is doing
+        // -- this assertion was a timing ratio with 14% of
+        // headroom and it failed about one run in three under
+        // `ctest -j4`, which says nothing about the fluid.
+        //
+        // A fifth of the chunks empty is a poor showing and this
+        // is the worst case for it: the stream has splashed for
+        // half a second, so it genuinely reaches most of its own
+        // bounding box. A puddle in the corner of a room saves
+        // far more.
+        check(float(occupied) < float(all) * 0.8f,
+              "and a fifth of the chunks are skipped even here");
         // THE RATIO IS ASSERTED, THE TIME IS ONLY REPORTED.
         //
         // A wall-clock threshold in a test is a test that fails on
@@ -462,7 +471,14 @@ int main() {
         check(f.stats.truncated == 0,
               "and no neighbourhood was bigger than the cap allows");
         check(n > 6000, "a serious body of liquid");
-        check_lt(float(best), 120.0f, "and a step has not gone quadratic");
+        // A WALL-CLOCK BOUND AGAIN, AND LOOSE FOR THE SAME
+        // REASON THE SURFACING ONE IS. This failed once under
+        // `ctest -j4` at 48 ms against a 120 ms bound, because
+        // four GPU tests were sharing the machine. The number
+        // above is the measurement; this is only a guard
+        // against the step going quadratic, so it is set where
+        // no amount of contention reaches it.
+        check_lt(float(best), 600.0f, "and a step has not gone quadratic");
     }
 
     std::printf("  %s\n", g_fail ? "FAILED" : "all good");
